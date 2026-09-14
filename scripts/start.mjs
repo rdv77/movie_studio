@@ -1,0 +1,10 @@
+import {spawn} from 'node:child_process';
+import {existsSync} from 'node:fs';
+if(existsSync('.env'))process.loadEnvFile('.env');
+const mode=process.argv[2]==='dev'?'dev':'start';
+for(const key of ['APP_ORIGIN','ADMIN_USERNAME','ADMIN_PASSWORD_HASH','SESSION_SECRET','VAULT_KEY'])if(!process.env[key])throw Error(`Missing ${key}. Run npm run setup first.`);
+const run=(args)=>new Promise((resolve,reject)=>{const child=spawn(process.execPath,args,{stdio:'inherit',env:process.env});child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(`Process exited: ${code}`)));});
+await run(['scripts/migrate.mjs']);
+const child=spawn(process.execPath,['node_modules/next/dist/bin/next',mode,'--hostname',process.env.HOSTNAME||'127.0.0.1','--port',process.env.PORT||'3000',...(mode==='dev'?['--webpack']:[])],{stdio:'inherit',env:process.env});
+for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>child.kill(signal));
+child.on('error',e=>{console.error(e.message);process.exitCode=1;});child.on('exit',code=>{process.exitCode=code??1;});

@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /app/data
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - studio_data:/app/data
+    stop_grace_period: 5m
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  studio_data:

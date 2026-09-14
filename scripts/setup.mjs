@@ -1,0 +1,14 @@
+import {randomBytes,scryptSync} from 'node:crypto';
+import {writeFile} from 'node:fs/promises';
+const args=Object.fromEntries(process.argv.slice(2).map(a=>{const i=a.indexOf('=');if(!a.startsWith('--')||i<0)throw Error('Use --origin=https://studio.example.com --username=director');return[a.slice(2,i),a.slice(i+1)];}));
+if(Object.keys(args).some(k=>!['origin','username'].includes(k)))throw Error('Unknown setup option');
+const origin=new URL(args.origin||'http://127.0.0.1:3000');
+if(origin.origin!==origin.href.replace(/\/$/,'')||origin.username||origin.password||origin.search||origin.hash)throw Error('Origin must have no path, credentials, query or fragment');
+if(origin.protocol!=='https:'&&!(origin.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(origin.hostname)))throw Error('Use HTTPS for a remote server');
+const username=args.username||'director';if(!/^[a-zA-Z0-9_.@-]{1,100}$/.test(username))throw Error('Use 1–100 Latin letters, digits or _.@- for username');
+const password=randomBytes(24).toString('base64url'),salt=randomBytes(16);
+const digest=scryptSync(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024});
+const hash=['scrypt',32768,8,1,salt.toString('base64url'),digest.toString('base64url')].join(':');
+const env=`# Private configuration. Back up this file with data; never commit it.\nAPP_ORIGIN=${origin.origin}\nADMIN_USERNAME=${username}\nADMIN_PASSWORD_HASH='${hash}'\nSESSION_SECRET=${randomBytes(48).toString('base64url')}\nVAULT_KEY=${randomBytes(32).toString('base64')}\nDATA_DIR=./data\nHOSTNAME=127.0.0.1\nPORT=3000\n`;
+await writeFile('.env',env,{flag:'wx',mode:0o600});
+console.log(`Configuration saved to .env. Store these login credentials in a password manager.\nUsername: ${username}\nPassword (shown once): ${password}\nAddress: ${origin.origin}\nDo not run setup again over an existing installation.`);

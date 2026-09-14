@@ -1,0 +1,33 @@
+import {build} from 'esbuild';
+import {strict as assert} from 'node:assert';
+await build({entryPoints:['lib/domain.ts'],bundle:true,platform:'node',format:'esm',outfile:'work/tests/variant-removal.mjs'});
+const D=await import('../work/tests/variant-removal.mjs');
+for(let stage=0;stage<9;stage++){
+ const p=D.newProject('Delete'),item=p.items[stage];
+ const variant=D.makeVariant(p,item,{kind:stage===6?'audio':stage>=7?'video':stage===5?'image':'text',assetId:D.id(),text:'Keep me',jobId:D.id()});
+ item.variants=[variant];item.selectedId=variant.id;item.approvedId=variant.id;
+ p.jobs=[{id:variant.jobId,itemId:item.id,status:'done',actual:'5000000000',estimate:'6000000000'}];
+ const cost=D.totals(p);D.deleteVariant(p,item.id,variant.id);
+ assert.equal(item.variants.length,0);assert.equal(item.selectedId,undefined);assert.equal(item.approvedId,undefined);assert.deepEqual(D.totals(p),cost);assert.equal(p.jobs.length,1);
+ assert.equal(p.removedVariants[0].variant.assetId,variant.assetId);
+ assert.throws(()=>D.deleteVariant(p,item.id,variant.id),/уже удалён/);
+ D.restoreVariant(p,item.id,variant.id);assert.deepEqual(item.variants,[variant]);assert.equal(item.selectedId,undefined);assert.equal(item.approvedId,undefined);assert.equal(p.removedVariants.length,0);
+ assert.throws(()=>D.restoreVariant(p,item.id,variant.id),/не найден/);
+}
+const p=D.newProject('Keep selection'),item=p.items[0];
+const keep=D.makeVariant(p,item,{text:'Selected'}),other=D.makeVariant(p,item,{text:'Other'});
+item.variants=[keep,other];item.selectedId=keep.id;item.approvedId=keep.id;
+D.deleteVariant(p,item.id,other.id);assert.equal(item.selectedId,keep.id);assert.equal(item.approvedId,keep.id);
+p.jobs=[{id:D.id(),itemId:p.items[7].id,status:'queued',lipsync:{audioVariantId:keep.id}}];
+const before=structuredClone(p);assert.throws(()=>D.deleteVariant(p,item.id,keep.id),/используется/);assert.deepEqual(p,before);
+const plugin={name:'server-mock',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'mock',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw new Error('Unauthorized');return 'owner'};export const loadProject=async()=>structuredClone(globalThis.current);export const saveProject=async(_,p)=>{p.revision++;globalThis.current=p;return p};export const asset=async()=>({});`}));}};
+await build({entryPoints:['app/api/projects/[id]/route.ts'],bundle:true,platform:'node',format:'esm',outfile:'work/tests/variant-removal-route.mjs',plugins:[plugin]});
+const {PATCH}=await import('../work/tests/variant-removal-route.mjs');
+const run=body=>PATCH(new Request('https://site.test/api',{method:'PATCH',body:JSON.stringify(body)}),{params:Promise.resolve({id:p.id})});
+globalThis.current=structuredClone(p);current.jobs=[];
+const payload={revision:current.revision,action:'deleteVariant',itemId:item.id,data:{variantId:keep.id}};
+globalThis.denied=true;await assert.rejects(()=>run(payload),/Unauthorized/);globalThis.denied=false;
+await assert.rejects(()=>run({...payload,revision:99}),/Проект изменился/);
+await run(payload);assert.equal(current.items[0].variants.length,0);
+await run({...payload,revision:current.revision,action:'restoreVariant'});assert.equal(current.items[0].variants.length,1);assert.equal(current.items[0].approvedId,undefined);
+console.log('PASS removal on all 9 stages: restore, preserved budget/assets/jobs, no automatic selection or reapproval, active input guards, owner authorization and stale revision protection.');

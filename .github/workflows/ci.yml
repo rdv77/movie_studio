@@ -1,0 +1,22 @@
+name: Verify standalone studio
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run prepare:media
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:integration
+      - run: docker build -t movie-studio:test .
+      - run: npm run test:container

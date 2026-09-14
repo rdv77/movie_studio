@@ -1,0 +1,9 @@
+This application uses unmodified ffmpeg.wasm distributions:
+@ffmpeg/core 0.12.10 — GPL-2.0-or-later.
+@ffmpeg/ffmpeg 0.12.15 — MIT.
+Project and source/build instructions: https://github.com/ffmpegwasm/ffmpeg.wasm
+Core package: https://www.npmjs.com/package/@ffmpeg/core/v/0.12.10
+Wrapper package: https://www.npmjs.com/package/@ffmpeg/ffmpeg/v/0.12.15
+FFmpeg source: https://ffmpeg.org/download.html
+The distributed WASM bytes are unchanged, only split into parts for delivery.
+GPL v2 text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
