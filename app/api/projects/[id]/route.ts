@@ -66,7 +66,8 @@ export const PATCH = api(async (req, ctx) => {
   switch (body.action) {
     case 'saveAnimaticPreview': {
       const v=variant.parse(d),basis=z.string().min(1).max(100000).parse(d?.basis);
-      if(!v.assetId||(await asset(user,v.assetId)).mime!=='video/mp4')throw new Error('Для аниматика нужен файл MP4.');
+      if(!v.assetId||(await asset(user, v.assetId, p)).mime!=='video/mp4')throw new Error('Для аниматика нужен файл MP4.');
+      for (const ref of [...v.refs,...(v.characterRefs??[]),...(v.character?.refs??[])]) await asset(user,ref,p);
       saveAnimatic(p,v,basis);break;
     }
     case 'selectAnimatic':
@@ -107,7 +108,7 @@ export const PATCH = api(async (req, ctx) => {
     case 'reapproveSpeech': {
       const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
       const source=getItem(p,body.itemId!).variants.find(v=>v.id===variantId);
-      if(!source?.assetId||!(await asset(user,source.assetId)).mime.startsWith('audio/'))throw new Error('Аудиофайл недоступен. Выберите готовую запись.');
+      if(!source?.assetId||!(await asset(user, source.assetId, p)).mime.startsWith('audio/'))throw new Error('Аудиофайл недоступен. Выберите готовую запись.');
       reapproveSpeech(p,body.itemId!,variantId);break;
     }
     case 'saveCharacter': {
@@ -115,7 +116,7 @@ export const PATCH = api(async (req, ctx) => {
       const imageId = z.string().uuid().optional().parse(d?.imageId);
       if (!c.description && !c.appearance && !c.refs.length) throw new Error('Опишите героя или добавьте исходное изображение.');
       for (const ref of [...new Set([...c.refs,...(imageId?[imageId]:[])])]) {
-        const a = await asset(user,ref);
+        const a = await asset(user, ref, p);
         if (!['image/png','image/jpeg','image/webp'].includes(a.mime) || a.size > 10*1024*1024) throw new Error('Образ героя: PNG, JPEG или WebP до 10 МБ.');
       }
       let item = body.itemId ? getItem(p,body.itemId) : p.items.find(i=>i.stage===1&&!i.removedAt&&!i.character&&!i.variants.length);
@@ -129,7 +130,7 @@ export const PATCH = api(async (req, ctx) => {
     case 'reapproveVideo': {
       const {variantId} = z.object({variantId:z.string().uuid()}).parse(d);
       const source = getItem(p, body.itemId!).variants.find(v => v.id === variantId);
-      if (!source?.assetId || !(await asset(user, source.assetId)).mime.startsWith('video/'))
+      if (!source?.assetId || !(await asset(user, source.assetId, p)).mime.startsWith('video/'))
         throw new Error('Видеофайл недоступен.');
       reapproveVideo(p, body.itemId!, variantId);
       break;
@@ -170,15 +171,15 @@ export const PATCH = api(async (req, ctx) => {
       if (v.speechType) assertSpeech(speechInfo(v),v.dialogue);
       if(v.kind==='audio'&&v.speechType==='character'&&!getItem(p,body.itemId!).sourceShot) throw new Error('Для реплик героев используйте отдельные карточки: «Подготовить озвучку по планам».');
       if (v.assetId) {
-        const a = await asset(user, v.assetId);
+        const a = await asset(user, v.assetId, p);
         if (!a.mime.startsWith(v.kind + '/'))
           throw new Error('Тип файла не соответствует варианту.');
       }
-      for (const ref of v.refs) await asset(user, ref);
-      for (const ref of v.characterRefs??[]) await asset(user,ref);
+      for (const ref of v.refs) await asset(user, ref, p);
+      for (const ref of v.characterRefs??[]) await asset(user, ref, p);
       if (v.character) {
         if (getItem(p,body.itemId!).stage!==1) throw new Error('Описание героя доступно на этапе «Герои».');
-        for (const ref of v.character.refs) {const a=await asset(user,ref);if(!a.mime.startsWith('image/'))throw new Error('Референс героя должен быть изображением.');}
+        for (const ref of v.character.refs) {const a=await asset(user, ref, p);if(!a.mime.startsWith('image/'))throw new Error('Референс героя должен быть изображением.');}
       }
       if (body.action === 'saveAnimatic') addAnimatic(p, body.itemId!, v);
       else addVariant(p, body.itemId!, v);

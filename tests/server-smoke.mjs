@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createDecipheriv, randomBytes, randomUUID, scryptSync } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -25,6 +25,7 @@ const passwordHash = `scrypt:32768:8:1:${salt.toString('base64url')}:${scryptSyn
 const sessionSecret = randomBytes(48).toString('base64url');
 const vaultKey = randomBytes(32);
 const fakeProviderKey = 'sk-smoke-never-send-' + randomBytes(32).toString('base64url');
+const foreignProjectId = randomUUID();
 const secrets = [password, passwordHash, sessionSecret, vaultKey.toString('base64'), fakeProviderKey];
 const redact = (value) => secrets.reduce((text, secret) => text.split(secret).join('[redacted]'), String(value));
 let server;
@@ -152,6 +153,11 @@ try {
     ADMIN_PASSWORD_HASH: passwordHash, SESSION_SECRET: sessionSecret, VAULT_KEY: vaultKey.toString('base64'),
   };
   migrate(dataDir);
+  const fixtureDb = new DatabaseSync(join(dataDir, 'studio.sqlite'));
+  try {
+    fixtureDb.prepare('INSERT INTO projects (id,owner,title,state,revision,updated) VALUES (?,?,?,?,?,?)')
+      .run(foreignProjectId, 'foreign-owner', 'Inaccessible project', '{}', 0, new Date().toISOString());
+  } finally { fixtureDb.close(); }
   await startServer(env);
   console.log('Production test server ready; checking authentication and isolated HTTP workflows.');
   assert.equal((await http('/api/projects', { authenticated: false })).status, 401);
@@ -191,6 +197,14 @@ try {
   let project = await json('/api/projects', { method: 'POST', body: { title: 'Production persistence smoke' } }, 201);
   const projectId = project.id;
   const projectPath = '/api/projects/' + projectId;
+  const assetsPath = '/api/assets?projectId=' + encodeURIComponent(projectId);
+  const foreignAssetsPath = '/api/assets?projectId=' + encodeURIComponent(foreignProjectId);
+  assert.equal((await http(assetsPath, { authenticated: false })).status, 401);
+  assert.equal((await http('/api/assets')).status, 400);
+  assert.equal((await http(foreignAssetsPath)).status, 404);
+  assert.deepEqual(await json(assetsPath), [], 'Previous projects must not populate a new project library.');
+  const otherProject = await json('/api/projects', { method: 'POST', body: { title: 'Separate library smoke' } }, 201);
+  const otherAssetsPath = '/api/assets?projectId=' + encodeURIComponent(otherProject.id);
   const scriptId = project.items[0].id;
   for (let index = 0; index < 8; index++) {
     project = await json(projectPath, { method: 'PATCH', body: {
@@ -208,6 +222,13 @@ try {
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR9sAAAAASUVORK5CYII=', 'base64');
   const upload = new FormData();
   upload.set('file', new File([imageBytes], 'production-smoke.png', { type: 'image/png' }));
+  assert.equal((await http('/api/assets', { method: 'POST', body: upload })).status, 400);
+  upload.set('projectId', foreignProjectId);
+  assert.equal((await http('/api/assets', { method: 'POST', body: upload })).status, 404);
+  const multipartMetadata = { name: 'not-created.mp4', mime: 'video/mp4', size: 9 * 1024 * 1024 };
+  assert.equal((await http('/api/assets/uploads', { method: 'POST', body: multipartMetadata })).status, 400);
+  assert.equal((await http('/api/assets/uploads', { method: 'POST', body: { ...multipartMetadata, projectId: foreignProjectId } })).status, 404);
+  upload.set('projectId', projectId);
   const asset = await json('/api/assets', { method: 'POST', body: upload }, 201);
   const assetPath = '/api/assets/' + asset.id;
   const downloaded = await http(assetPath);
@@ -227,7 +248,10 @@ try {
     assert.equal(response.headers.get('content-range'), `bytes */${imageBytes.length}`);
   }
   assert.equal((await http(assetPath, { authenticated: false })).status, 401);
-  const assets = await json('/api/assets');
+  const assets = await json(assetsPath);
+  assert.deepEqual(assets.map((item) => item.id), [asset.id]);
+  assert.deepEqual(await json(otherAssetsPath), [], 'Files belong only to the project that accepted the upload.');
+  assert.equal(inspectDatabase((db) => db.prepare('SELECT project_id FROM assets WHERE id=?').get(asset.id).project_id), projectId);
   assert(!assets.some((item) => item.id === pointer.key), 'Private project snapshots must not become media assets.');
 
   assert.equal((await json('/api/connections')).vaultReady, true);
@@ -255,6 +279,8 @@ try {
   assert.equal(restored.items[0].variants.length, 8);
   assert.equal(restored.items[0].variants[7].text, '7:' + 'x'.repeat(70000));
   assert.deepEqual(Buffer.from(await (await http(assetPath)).arrayBuffer()), imageBytes);
+  assert.deepEqual((await json(assetsPath)).map((item) => item.id), [asset.id]);
+  assert.deepEqual(await json(otherAssetsPath), [], 'Project library isolation survives a restart.');
   assert.equal((await json('/api/connections')).providers.find((item) => item.id === 'openai').configured, true);
   assert.deepEqual(await json('/api/connections', { method: 'DELETE', body: { provider: 'openai' } }), { removed: true });
   assert.equal((await json('/api/connections')).providers.find((item) => item.id === 'openai').configured, false);
@@ -264,7 +290,7 @@ try {
   assert(logout.headers.get('set-cookie')?.includes('Max-Age=0'));
   cookie = logout.headers.get('set-cookie').split(';')[0];
   assert.equal((await http('/api/projects')).status, 401);
-  console.log('PASS production HTTP: owner login/logout, signed sessions, legacy/spoof rejection, CSRF, domain workflows, persisted >512 KB snapshot, media and byte ranges/416, encrypted credentials, and restart persistence. No paid requests.');
+  console.log('PASS production HTTP: owner login/logout, signed sessions, legacy/spoof rejection, CSRF, domain workflows, persisted >512 KB snapshot, isolated project libraries, missing/foreign project rejection, media and byte ranges/416, encrypted credentials, and restart persistence. No paid requests.');
 } catch (error) {
   console.error(redact(error instanceof Error ? error.stack : error));
   if (output) console.error('Production server output (redacted):\n' + redact(output));

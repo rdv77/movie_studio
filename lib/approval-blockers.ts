@@ -1,4 +1,4 @@
-import { STAGES, chosen, dependencies, participates, silentFilm, type Project } from './domain';
+import { STAGES, chosen, dependencies, approvalCurrent, variantCurrent, participates, silentFilm, type Project } from './domain';
 
 export type ApprovalBlocker = { itemId?: string; stage: number; title: string; reason: string };
 
@@ -11,12 +11,12 @@ export function approvalBlockers(p: Project, stage: number): ApprovalBlocker[] {
     const approved = item.variants.find(v => v.id === item.approvedId);
     const selected = chosen(item);
     const current = dependencies(p, item.stage);
-    if (approved?.deps === current) continue;
+    if (approvalCurrent(p,item)) continue;
     let reason: string;
     if (!approved) {
       reason = !item.variants.length ? 'В карточке нет вариантов. Подготовьте материал и утвердите его.'
         : !selected ? 'Варианты есть, но ни один не выбран. Выберите нужный и нажмите «Утвердить вариант».'
-        : selected.deps !== current ? item.stage===6 ? 'Выбранная запись относится к прежней основе. Прослушайте её и нажмите «Утвердить эту запись для текущей версии», если она подходит.' : item.stage===2 ? 'Выбранный стиль относится к прежней основе. Проверьте его и нажмите «Утвердить стиль для текущей версии».' : 'Выбранный вариант относится к прежней основе. Проверьте материал; если он подходит, через «Правки» сохраните актуальную версию и утвердите её.'
+        : !variantCurrent(p,item,selected) ? item.stage===6 ? 'Выбранная запись относится к прежней основе. Прослушайте её и нажмите «Утвердить эту запись для текущей версии», если она подходит.' : item.stage===2 ? 'Выбранный стиль относится к прежней основе. Проверьте его и нажмите «Утвердить стиль для текущей версии».' : 'Выбранный вариант относится к прежней основе. Проверьте материал; если он подходит, через «Правки» сохраните актуальную версию и утвердите её.'
         : item.stage === 6 && selected.kind === 'video' ? 'Выбран аниматик. Для сборки фильма выберите и утвердите аудиозапись в этой карточке.'
         : 'Вариант выбран, но не утверждён. Нажмите «Утвердить вариант» в этой карточке.';
     } else {

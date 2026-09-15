@@ -30,7 +30,7 @@ export const POST = api(async (req, ctx) => {
   if (new Set(s.refs).size !== s.refs.length) throw new Error('Удалите повторяющиеся референсы.');
   let imageBytes=0;
   for (const ref of refs) {
-    const a = await asset(user, ref);
+    const a = await asset(user, ref, p);
     if(isOpenAIImage(m.id)&&a.size>10*1024*1024)throw new Error('GPT Image: каждый референс должен быть до 10 МБ.');
     imageBytes+=a.size;
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)) throw new Error('Референс должен быть изображением PNG, JPEG или WebP.');

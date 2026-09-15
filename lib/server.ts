@@ -1,3 +1,4 @@
+import { projectAssetIds } from './project-assets';
 import { runtime, StorageError } from './storage';
 import { authenticateRequest, assertRequestOrigin, AuthRequestError } from './auth';
 import type { Project } from './domain';
@@ -97,13 +98,15 @@ export async function mutate(
   }
   throw new Error('Не удалось сохранить результат.');
 }
-export async function asset(user: string, id: string) {
+export async function asset(user: string, id: string, project?: Project) {
   const a = await runtime.DB.prepare(
     'SELECT * FROM assets WHERE id=? AND owner=?',
   )
     .bind(id, user)
-    .first<{ id: string; name: string; mime: string; size: number }>();
+    .first<{ id: string; name: string; mime: string; size: number; project_id: string | null }>();
   if (!a) throw new HttpError('Файл не найден.', 404);
+  if (project && a.project_id !== project.id && !projectAssetIds(project).has(id))
+    throw new HttpError('Файл не принадлежит этому проекту. Для переноса используйте библиотеку утверждённых материалов.', 404);
   return a;
 }
 export async function storeAsset(
@@ -112,18 +115,19 @@ export async function storeAsset(
   name: string,
   mime: string,
   data: ArrayBuffer | Uint8Array,
+  projectId: string,
 ) {
   if (data.byteLength > 50 * 1024 * 1024) throw new Error('Файл больше 50 МБ.');
   await runtime.FILES.put(id, data, { httpMetadata: { contentType: mime } });
   await runtime.DB.prepare(
-    'INSERT OR IGNORE INTO assets (id,owner,name,mime,size,created) VALUES (?,?,?,?,?,?)',
+    'INSERT OR IGNORE INTO assets (id,owner,name,mime,size,created,project_id) VALUES (?,?,?,?,?,?,?)',
   )
-    .bind(id, user, name, mime, data.byteLength, now())
+    .bind(id, user, name, mime, data.byteLength, now(), projectId)
     .run();
   return id;
 }
-export async function imageData(user: string, id: string) {
-  const a = await asset(user, id);
+export async function imageData(user: string, id: string, project: Project) {
+  const a = await asset(user, id, project);
   if (
     !['image/png', 'image/jpeg', 'image/webp'].includes(a.mime) ||
     a.size > 10 * 1024 * 1024

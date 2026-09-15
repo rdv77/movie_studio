@@ -180,10 +180,19 @@ export function stageReady(p: Project, stage: number): boolean {
   if (stage > 6 && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items
     .filter((i) => i.stage < stage && participates(p, i))
-    .every((i) => {
-      const v = i.variants.find((v) => v.id === i.approvedId);
-      return !!v && v.deps === dependencies(p, i.stage);
-    });
+    .every((i) => approvalCurrent(p, i));
+}
+// Creative decisions survive upstream edits. Generation requests still use the
+// complete dependencies snapshot so obsolete queued work cannot be dispatched.
+export function independentApproval(stage: number) {
+  return stage >= 1 && stage <= 3;
+}
+export function variantCurrent(p: Project, item: Item, variant: Variant) {
+  return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
+}
+export function approvalCurrent(p: Project, item: Item): boolean {
+  const variant = item.variants.find(v => v.id === item.approvedId);
+  return !item.removedAt && !item.planArchive && !!variant && variantCurrent(p, item, variant);
 }
 export function participates(p: Project, i: Item): boolean {
   return !i.removedAt && !i.planArchive && (i.stage !== 6 || (p.speechMode === 'plans' ? !!i.sourceShot : !i.sourceShot && (i.variants.some(v=>v.kind==='audio')||!silentFilm(p))));
@@ -198,11 +207,7 @@ export function silentFilm(p:Project) {
   });}catch{return false;}
 }
 export function isApproved(p: Project, item: Item): boolean {
-  if(item.removedAt||item.planArchive)return false;
-  const v = item.variants.find((v) => v.id === item.approvedId);
-  return (
-    !!v && v.deps === dependencies(p, item.stage) && stageReady(p, item.stage)
-  );
+  return approvalCurrent(p, item) && (independentApproval(item.stage) || stageReady(p, item.stage));
 }
 export function itemStatus(p: Project, i: Item) {
   return isApproved(p, i)
@@ -299,7 +304,7 @@ export function approve(p: Project, itemId: string) {
     throw new Error('Аниматик — результат просмотра. Утвердите аудиозапись: она будет использована при сборке фильма.');
   if (!stageReady(p, i.stage))
     throw new Error('Сначала утвердите предыдущие этапы.');
-  if (v.deps !== dependencies(p, i.stage))
+  if (!variantCurrent(p, i, v))
     throw new Error(
       'Основа изменилась. Создайте актуальную копию и проверьте ее.',
     );

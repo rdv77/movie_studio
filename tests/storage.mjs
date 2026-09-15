@@ -20,7 +20,7 @@ try {
   migrate(dataDir); migrate(dataDir);
   db = new LocalDatabase(dataDir);
   assert.equal((await db.prepare('PRAGMA journal_mode').first()).journal_mode, 'wal');
-  assert.equal((await db.prepare('SELECT count(*) AS count FROM _local_migrations').first()).count, 2);
+  assert.equal((await db.prepare('SELECT count(*) AS count FROM _local_migrations').first()).count, 3);
   const insert = (id, revision = 0) => db.prepare('INSERT INTO projects (id,owner,title,state,revision,updated) VALUES (?,?,?,?,?,?)').bind(id, 'owner', 'Title', '{}', revision, new Date().toISOString());
   await insert('project').run();
   assert.equal((await db.prepare('SELECT id FROM projects WHERE id=?').bind('absent').first()), null);

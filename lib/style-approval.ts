@@ -11,7 +11,6 @@ export function styleReapprovalReason(p:Project,itemId:string,variantId:string) 
 export function reapproveStyle(p:Project,itemId:string,variantId:string) {
   const reason=styleReapprovalReason(p,itemId,variantId);if(reason)throw new Error(reason);
   const copy=structuredClone(p),item=getItem(copy,itemId);
-  chosen(item)!.deps=dependencies(copy,2);
   approve(copy,itemId);
   Object.assign(getItem(p,itemId),item);
 }

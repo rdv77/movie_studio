@@ -36,7 +36,7 @@ export const POST = api(async (req, ctx) => {
       revision: z.number().int(),
       batchId: z.string().uuid(),
       itemId: z.string().uuid(),
-      models: z.array(z.string()).min(1).max(3),
+      models: z.array(z.string()).min(1).max(4),
       count: z.number().int().min(1).max(4),
       prompt: z.string().trim().min(1).max(20000),
       refs: z.array(z.string().uuid()).max(8),
@@ -76,7 +76,7 @@ export const POST = api(async (req, ctx) => {
   assertCharacterRefLimit(characterRefs,7);
   let imageBytes=0;
   for (const ref of [...new Set([...refs,...characterRefs])]) {
-    const a = await asset(user, ref);
+    const a = await asset(user, ref, p);
     if(ms.some(m=>isOpenAIImage(m.id))&&(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024))throw new Error('GPT Image: каждый референс должен быть PNG, JPEG или WebP до 10 МБ.');
     if(refs.includes(ref))imageBytes+=a.size;
     if (!a.mime.startsWith('image/'))

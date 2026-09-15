@@ -39,7 +39,7 @@ export const POST = api(async (req, ctx) => {
   // write fails. Recover only that owned file; never call the provider again.
   if(j.purpose==='voice-test'&&['unknown','dispatching'].includes(j.status)&&
     ((await req.json().catch(()=>null)) as {action?:unknown}|null)?.action==='recover-voice-file') {
-    const saved=await asset(user,jobId).catch(()=>null);
+    const saved=await asset(user, jobId, p).catch(()=>null);
     if(!saved?.mime.startsWith('audio/')||!await runtime.FILES.head(jobId))throw new Error('Сохранённая проба пока не найдена. Новая генерация не запускалась. Проверьте исход запроса в кабинете провайдера.');
     p=await mutate(user,id,p=>{
       const job=p.jobs.find(j=>j.id===jobId)!,sample=p.voiceComparisons?.find(c=>c.id===job.itemId)?.samples.find(s=>s.jobId===jobId);
@@ -117,8 +117,8 @@ export const POST = api(async (req, ctx) => {
     const refs =
       polling || saving || j.lipsync
         ? []
-        : await Promise.all(j.refs.map((ref) => imageData(user, ref)));
-    const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user,ref)));
+        : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
+    const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
     const result: Result = saving
       ? j.output!
       : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
@@ -126,7 +126,7 @@ export const POST = api(async (req, ctx) => {
           let video: Blob, audio: Blob;
           try {
             const sync = j.lipsync!;
-            const va = await asset(user, sync.inputType === 'image' ? sync.imageAssetId : sync.videoAssetId), aa = await asset(user, sync.audioAssetId);
+            const va = await asset(user, sync.inputType === 'image' ? sync.imageAssetId : sync.videoAssetId, p), aa = await asset(user, sync.audioAssetId, p);
             if (va.size > SYNC_FILE_LIMIT || aa.size > SYNC_FILE_LIMIT || va.size + aa.size > SYNC_PAIR_LIMIT) throw new Error('Превышен размер файлов sync.so.');
             const v = await runtime.FILES.get(va.id), a = await runtime.FILES.get(aa.id);
             if (!v || !a) throw new Error('Исходные файлы синхронизации недоступны.');
@@ -178,6 +178,7 @@ export const POST = api(async (req, ctx) => {
         `${model(j.model).name} — ${j.kind}`,
         mime,
         bytes,
+        id,
       );
     }
     p = await mutate(user, id, (p) => {

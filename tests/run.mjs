@@ -40,10 +40,11 @@ test('selection alone does not revoke approval', () => {
   assert(D.isApproved(project, project.items[8]));
 });
 D.approve(project, first.id);
-test('new approved script invalidates downstream without losing variants', () => {
+test('new script preserves creative approvals and invalidates production without losing variants', () => {
   assert(!D.isApproved(project, project.items[8]));
   assert.equal(project.items[8].variants.length, 1);
-  assert.throws(() => D.approve(project, project.items[1].id));
+  assert(project.items.slice(1,4).every(i=>D.isApproved(project,i)));
+  assert.throws(() => D.approve(project, project.items[4].id));
 });
 test('money uses exact integer ticks', () => {
   assert.equal(D.ticks('0.0000000001'), '1');

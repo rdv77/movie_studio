@@ -32,7 +32,7 @@ export const POST = api(async (req, ctx) => {
     throw new Error('В серии один запрос на каждый план; удалите дубли.');
   const remaining = remainingVideoPlans(p);
   const characterRefs=videoCharacterRefs(p,m.provider);assertCharacterRefLimit(characterRefs,7);
-  for(const ref of characterRefs) {const a=await asset(user,ref);if(!a.mime.startsWith('image/'))throw new Error('Образ героя должен быть изображением.');}
+  for(const ref of characterRefs) {const a=await asset(user, ref, p);if(!a.mime.startsWith('image/'))throw new Error('Образ героя должен быть изображением.');}
   const jobs: Job[] = [];
   for (const row of s.plans) {
     const item = remaining.find(i => i.id === row.itemId);
@@ -42,7 +42,7 @@ export const POST = api(async (req, ctx) => {
     const prompt=videoGenerationPrompt(p,item,row.prompt);
     if(prompt.length>VIDEO_PROMPT_LIMIT)throw new Error(`${item.title}: вместе с героями промпт содержит ${prompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}.`);
     if (shot.duration > 6) throw new Error(`${item.title}: разделите план длиннее 6 секунд в сценарии.`);
-    const frame = await asset(user, row.ref);
+    const frame = await asset(user, row.ref, p);
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(frame.mime))
       throw new Error(`${item.title}: выберите первый кадр PNG, JPEG или WebP.`);
     jobs.push({ id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind: 'video',

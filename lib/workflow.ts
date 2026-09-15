@@ -1,4 +1,4 @@
-import { STAGES, chosen, isApproved, participates, stageReady, silentFilm, type Project } from './domain';
+import { STAGES, chosen, isApproved, independentApproval, participates, stageReady, silentFilm, type Project } from './domain';
 import { animaticApproved } from './animatic';
 
 // UI order is separate from persisted stage IDs: existing video dependencies
@@ -11,5 +11,5 @@ export function stageComplete(p:Project,stage:number) {
   if(stage===9)return animaticApproved(p);
   const items=p.items.filter(i=>i.stage===stage&&participates(p,i));
   if(stage===6)return stageReady(p,6)&&(!!items.length||silentFilm(p))&&items.every(i=>isApproved(p,i)&&i.selectedId===i.approvedId&&chosen(i)?.kind==='audio'&&!!chosen(i)?.assetId);
-  return !!items.length&&stageReady(p,stage)&&items.every(i=>isApproved(p,i));
+  return !!items.length&&(independentApproval(stage)||stageReady(p,stage))&&items.every(i=>isApproved(p,i));
 }

@@ -40,7 +40,7 @@ export const POST = api(async (req, ctx) => {
       throw new Error('Подготовленные файлы не соответствуют длительности плана.');
     if (row.inputType === 'image' && 'image' in source && (model.id !== 'sync-3' || row.imageVariantId !== source.image.id || row.imageItemId !== source.imageItem.id))
       throw new Error('Для генерации из утверждённого кадра выберите sync-3 и актуальную раскадровку.');
-    const va = await asset(user, row.inputType === 'image' ? row.imageAssetId : row.videoAssetId), aa = await asset(user, row.audioAssetId);
+    const va = await asset(user, row.inputType === 'image' ? row.imageAssetId : row.videoAssetId, p), aa = await asset(user, row.audioAssetId, p);
     if (va.mime !== (row.inputType === 'image' ? 'image/png' : 'video/mp4') || !['audio/wav','audio/x-wav'].includes(aa.mime) ||
       va.size > SYNC_FILE_LIMIT || aa.size > SYNC_FILE_LIMIT || va.size + aa.size > SYNC_PAIR_LIMIT)
       throw new Error(`${item.title}: нужны подготовленные ${row.inputType === 'image' ? 'PNG' : 'MP4'} и WAV допустимого размера.`);

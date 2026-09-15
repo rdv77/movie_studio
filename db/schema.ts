@@ -23,12 +23,13 @@ export const assets = sqliteTable(
   {
     id: text().primaryKey(),
     owner: text().notNull(),
+    project_id: text(),
     name: text().notNull(),
     mime: text().notNull(),
     size: integer().notNull(),
     created: text().notNull(),
   },
-  (t) => [index('assets_owner').on(t.owner)],
+  (t) => [index('assets_owner').on(t.owner), index('assets_owner_project').on(t.owner, t.project_id)],
 );
 export const credentials = sqliteTable(
   'credentials',
@@ -45,6 +46,7 @@ export const assetUploads = sqliteTable(
   {
     id: text().primaryKey(),
     owner: text().notNull(),
+    project_id: text(),
     name: text().notNull(),
     mime: text().notNull(),
     size: integer().notNull(),

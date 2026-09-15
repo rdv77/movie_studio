@@ -10,15 +10,15 @@ async function response<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(data.error || 'Не удалось сохранить файл.');
   return data;
 }
-export async function uploadAsset(file: File, progress?: (text: string) => void, signal?: AbortSignal): Promise<UploadedAsset> {
+export async function uploadAsset(file: File, projectId: string, progress?: (text: string) => void, signal?: AbortSignal): Promise<UploadedAsset> {
   if (file.size > MAX_ASSET_BYTES) throw new Error('Загрузка в студию поддерживает файлы до 1 ГБ.');
   if (file.size <= ASSET_PART_BYTES) {
-    const form = new FormData(); form.set('file', file);
+    const form = new FormData(); form.set('file', file); form.set('projectId', projectId);
     return response<UploadedAsset>(await fetch('/api/assets', { method: 'POST', body: form, signal }));
   }
   const session = await response<{id: string}>(await fetch('/api/assets/uploads', {
     method: 'POST', headers: { 'content-type': 'application/json' }, signal,
-    body: JSON.stringify({ name: file.name.slice(0, 160), mime: file.type, size: file.size }),
+    body: JSON.stringify({ name: file.name.slice(0, 160), mime: file.type, size: file.size, projectId }),
   }));
   const url = '/api/assets/uploads/' + encodeURIComponent(session.id);
   const parts: { partNumber: number; etag: string }[] = [];

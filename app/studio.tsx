@@ -81,6 +81,7 @@ import {
   STAGES,
   chosen,
   dependencies,
+  variantCurrent,
   isApproved,
   itemStatus,
   stageReady,
@@ -248,12 +249,24 @@ export default function Studio() {
 function Workspace() {
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState('');
+  const activeProject = useRef('');
+  const projectEpoch = useRef(0);
+  const uploads = useRef(new Set<AbortController>());
   const [step, setStep] = useState(0);
   const [itemId, setItemId] = useState('');
   const [panel, setPanel] = useState<
     'stage' | 'budget' | 'connections' | 'library'
   >('stage');
-  const [dialog, setDialog] = useState<string | null>(null);
+  const [dialog, setDialogState] = useState<string | null>(null);
+  const dialogEpoch = useRef(0);
+  const openedDialogEpoch = dialogEpoch.current;
+  function setDialog(value: string | null) {
+    dialogEpoch.current++;
+    setDialogState(value);
+  }
+  const closeDialog = () => {
+    if (activeProject.current === projectId && dialogEpoch.current === openedDialogEpoch) setDialog(null);
+  };
   const [voiceView,setVoiceView]=useState('plans');
   const [characterTarget,setCharacterTarget] = useState<string>();
   const [editing, setEditing] = useState<Variant | undefined>();
@@ -270,7 +283,7 @@ function Workspace() {
     queryFn: () => request('/api/projects'),
   });
   useEffect(() => {
-    if (!projectId && projects.data?.length) setProjectId(projects.data[0].id);
+    if (!projectId && projects.data?.length) switchProject(projects.data[0].id);
   }, [projects.data, projectId]);
   const pq = useQuery<Project>({
     queryKey: ['project', projectId],
@@ -279,8 +292,9 @@ function Workspace() {
   });
   const p = pq.data;
   const aq = useQuery<Asset[]>({
-    queryKey: ['assets'],
-    queryFn: () => request('/api/assets'),
+    queryKey: ['assets', projectId],
+    queryFn: () => request('/api/assets?projectId=' + encodeURIComponent(projectId)),
+    enabled: !!projectId,
   });
   const cq = useQuery<any>({
     queryKey: ['connections'],
@@ -297,7 +311,7 @@ function Workspace() {
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleVideo = !!(p && step === 7 && selected?.kind === 'video' && selected.assetId && selected.deps !== dependencies(p, 7));
   const reapprovalReason = p && item && selected && staleVideo ? videoReapprovalReason(p, item.id, selected.id) : '';
-  const staleStyle=!!(p&&step===2&&selected&&selected.deps!==dependencies(p,2));
+  const staleStyle=!!(p&&item&&step===2&&selected&&!variantCurrent(p,item,selected));
   const styleReason=p&&item&&selected&&staleStyle?styleReapprovalReason(p,item.id,selected.id):'';
   const staleSpeech=!!(p&&step===6&&selected?.kind==='audio'&&selected.assetId&&selected.deps!==dependencies(p,6));
   const speechReason=p&&item&&selected&&staleSpeech?speechReapprovalReason(p,item.id,selected.id):'';
@@ -306,10 +320,32 @@ function Workspace() {
   function replace(next: Project) {
     qc.setQueryData(['project', next.id], next);
     qc.invalidateQueries({ queryKey: ['projects'] });
-    qc.invalidateQueries({ queryKey: ['assets'] });
+    qc.invalidateQueries({ queryKey: ['assets', next.id] });
+  }
+  function switchProject(id: string) {
+    if (activeProject.current !== id) {
+      projectEpoch.current++;
+      activeProject.current = id;
+      renderAbort.current?.abort();
+      for (const controller of uploads.current) controller.abort();
+      uploads.current.clear();
+      setBusy(false);
+      setError('');
+      setRenderStatus('');
+      setEditing(undefined);
+      setCharacterTarget(undefined);
+      setDraft('');
+      setVoiceView('plans');
+    }
+    setProjectId(id);
+    setDialog(null);
+    setStep(0);
+    setPanel('stage');
+    setItemId('');
   }
   async function action(name: string, data?: unknown, target = item?.id) {
     if (!p) throw new Error('Откройте проект.');
+    const epoch = projectEpoch.current;
     const next = await request('/api/projects/' + p.id, 'PATCH', {
       revision: p.revision,
       action: name,
@@ -317,18 +353,21 @@ function Workspace() {
       data,
     });
     replace(next);
+    if (epoch !== projectEpoch.current) throw new Error('Проект сменился во время сохранения.');
     return next as Project;
   }
   async function perform(fn: () => Promise<unknown>) {
+    const epoch = projectEpoch.current;
     setBusy(true);
     setError('');
     try {
       await fn();
     } catch (e) {
+      if (epoch !== projectEpoch.current) return;
       setError(e instanceof Error ? e.message : String(e));
       if (projectId) qc.invalidateQueries({ queryKey: ['project', projectId] });
     } finally {
-      setBusy(false);
+      if (epoch === projectEpoch.current) setBusy(false);
     }
   }
   useEffect(() => {
@@ -358,9 +397,9 @@ function Workspace() {
           'POST',
         );
         qc.setQueryData(['project', projectId], next);
-        qc.invalidateQueries({ queryKey: ['assets'] });
+        qc.invalidateQueries({ queryKey: ['assets', projectId] });
       } catch (e) {
-        setError(
+        if (activeProject.current === projectId) setError(
           e instanceof Error ? e.message : 'Не удалось проверить задачу.',
         );
       } finally {
@@ -420,30 +459,41 @@ function Workspace() {
     return () => life.abort();
   }, [projectId, qc]);
   async function upload(file: File, progress?: (text: string) => void, signal?: AbortSignal) {
-    const a = await uploadAsset(file, progress, signal);
-    qc.invalidateQueries({ queryKey: ['assets'] });
-    return a as Asset;
+    if (!projectId || activeProject.current !== projectId) throw new Error('Откройте проект перед загрузкой.');
+    const epoch = projectEpoch.current;
+    const controller = new AbortController();
+    uploads.current.add(controller);
+    try {
+      const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+      const a = await uploadAsset(file, projectId, progress, combined);
+      qc.invalidateQueries({ queryKey: ['assets', projectId] });
+      if (projectEpoch.current !== epoch) throw new Error('Проект сменился во время загрузки.');
+      return a as Asset;
+    } finally { uploads.current.delete(controller); }
   }
   async function assemble(animatic: boolean) {
     if (!p) return;
-    renderAbort.current = new AbortController();
+    const controller = new AbortController(), epoch = projectEpoch.current;
+    renderAbort.current = controller;
+    const report = (text: string) => { if (projectEpoch.current === epoch && renderAbort.current === controller) setRenderStatus(text); };
     let downloaded = false;
     try {
       const basis=animatic?animaticBasis(p):undefined;
       const { blob, seconds, timing } = await renderFilm(
         p,
         animatic,
-        setRenderStatus,
-        renderAbort.current.signal,
+        report,
+        controller.signal,
       );
+      controller.signal.throwIfAborted();
       download(blob, `${p.title}${animatic ? ' — аниматик' : ''}.mp4`);
       downloaded = true;
       const a = await upload(
         new File([blob], animatic ? 'Аниматик.mp4' : 'Фильм.mp4', {
           type: 'video/mp4',
         }),
-        setRenderStatus,
-        renderAbort.current.signal,
+        report,
+        controller.signal,
       );
       const target = animatic?undefined:p.items.find((i) => i.stage === 8);
       await action(
@@ -467,8 +517,10 @@ function Workspace() {
       if (downloaded) throw new Error('Готовый MP4 передан браузеру для скачивания. Сохранить карточку в студии не удалось: ' + (e as Error).message);
       throw e;
     } finally {
-      setRenderStatus('');
-      renderAbort.current = null;
+      if (renderAbort.current === controller) {
+        report('');
+        renderAbort.current = null;
+      }
     }
   }
   const failures =
@@ -982,7 +1034,7 @@ function Workspace() {
                             {item.variants.map((v, index) => {
                               const approved =
                                 isApproved(p, item) && item.approvedId === v.id;
-                              const stale = v.deps !== dependencies(p, step);
+                              const stale = !variantCurrent(p, item, v);
                               const job = p.jobs.find((j) => j.id === v.jobId);
                               return (
                                 <article
@@ -1178,7 +1230,7 @@ function Workspace() {
                             !selected ||
                             !ready ||
                             busy ||
-                            selected.deps !== dependencies(p, step) ||
+                            !variantCurrent(p, item, selected) ||
                             (step === 6 && selected.kind === 'video') ||
                             (isApproved(p, item) &&
                               item.approvedId === selected.id)
@@ -1188,7 +1240,7 @@ function Workspace() {
                           <Check />
                           {selectedApproved ? 'Утверждено' : 'Утвердить вариант'}
                         </Button>
-                        {!selectedApproved && (!ready || (selected && selected.deps !== dependencies(p, step))) && <p className="note">
+                        {!selectedApproved && (!ready || (selected && !variantCurrent(p, item, selected))) && <p className="note">
                           {!ready ? 'Сначала устраните причины блокировки предыдущих этапов в списке выше.' : 'Основа изменилась. Проверьте материал через «Правки», сохраните актуальную версию и утвердите её.'}
                         </p>}
                         </>}
@@ -1279,11 +1331,7 @@ function Workspace() {
                 key={x.id}
                 variant={x.id === projectId ? 'secondary' : 'ghost'}
                 onClick={() => {
-                  setProjectId(x.id);
-                  setDialog(null);
-                  setStep(0);
-                  setPanel('stage');
-                  setItemId('');
+                  switchProject(x.id);
                 }}
               >
                 <Film />
@@ -1296,12 +1344,10 @@ function Workspace() {
               e.preventDefault();
               const title = String(new FormData(e.currentTarget).get('title'));
               perform(async () => {
+                const epoch = projectEpoch.current, opened = dialogEpoch.current;
                 const n = await request('/api/projects', 'POST', { title });
                 replace(n);
-                setProjectId(n.id);
-                setStep(0);
-                setPanel('stage');
-                setDialog(null);
+                if (epoch === projectEpoch.current && opened === dialogEpoch.current) switchProject(n.id);
               });
             }}
           >
@@ -1320,10 +1366,10 @@ function Workspace() {
           </form>
         </DialogContent>
       </Dialog>
-      {p && item && (
-        <VariantEditor
+      {p && item && dialog === 'variant' && (
+        <VariantEditor key={`${p.id}:${item.id}`}
           open={dialog === 'variant'}
-          close={() => setDialog(null)}
+          close={closeDialog}
           p={p}
           item={item}
           value={editing}
@@ -1334,10 +1380,10 @@ function Workspace() {
           save={(data: any) => action('addVariant', data)}
         />
       )}
-      {p && item && (
-        <GenerateDialog
+      {p && item && dialog === 'generate' && (
+        <GenerateDialog key={`${p.id}:${item.id}`}
           open={dialog === 'generate'}
-          close={() => setDialog(null)}
+          close={closeDialog}
           p={p}
           item={item}
           assets={assets}
@@ -1359,7 +1405,7 @@ function Workspace() {
       {p && (
         <SettingsDialog
           open={dialog === 'settings'}
-          close={() => setDialog(null)}
+          close={closeDialog}
           p={p}
           busy={busy}
           perform={perform}
@@ -1368,19 +1414,19 @@ function Workspace() {
       )}
       {p && item && dialog === 'remaining-video' && (
         <RemainingVideoDialog p={p} item={item} assets={assets} upload={upload} busy={busy} perform={perform}
-          close={() => setDialog(null)} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-remaining`, 'POST', data))} />
+          close={closeDialog} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-remaining`, 'POST', data))} />
       )}
       {p && dialog === 'storyboard-batch' && (
         <StoryboardBatchDialog p={p} assets={assets} connections={cq.data} busy={busy} perform={perform}
-          close={() => setDialog(null)} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-storyboard`, 'POST', data))} />
+          close={closeDialog} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-storyboard`, 'POST', data))} />
       )}
       {p && dialog === 'speech-batch' && <SpeechBatchDialog p={p} connections={cq.data} busy={busy} perform={perform}
-        close={() => setDialog(null)} submit={async (data: any) => { replace(await request(`/api/projects/${p.id}/generate-speech`, 'POST', data)); setItemId(''); }} />}
+        close={closeDialog} submit={async (data: any) => { replace(await request(`/api/projects/${p.id}/generate-speech`, 'POST', data)); setItemId(''); }} />}
       {p && dialog === 'lipsync' && <LipsyncDialog p={p} connections={cq.data} busy={busy} perform={perform} upload={upload}
         openStage={(stage:number,target?:string)=>{setDialog(null);setStep(stage);setItemId(target??'');setPanel('stage');}}
-        close={() => setDialog(null)} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-lipsync`, 'POST', data))} />}
-      {p&&dialog==='character'&&<CharacterEditor item={p.items.find(i=>i.id===characterTarget)} assets={assets} upload={upload} busy={busy} perform={perform}
-        canGenerate={stageReady(p,1)} close={()=>setDialog(null)} save={async(profile:CharacterBrief,imageId:string|undefined,generate:boolean)=>{
+        close={closeDialog} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-lipsync`, 'POST', data))} />}
+      {p&&dialog==='character'&&<CharacterEditor key={`${p.id}:${characterTarget??'new'}`} item={p.items.find(i=>i.id===characterTarget)} assets={assets} upload={upload} busy={busy} perform={perform}
+        canGenerate={stageReady(p,1)} close={closeDialog} save={async(profile:CharacterBrief,imageId:string|undefined,generate:boolean)=>{
           const next=await action('saveCharacter',{profile,imageId},characterTarget??'');
           const saved=characterTarget?next.items.find(i=>i.id===characterTarget):next.items.find(i=>i.character&&!p.items.some(old=>old.id===i.id&&old.character));
           if(saved)setItemId(saved.id);setStep(1);setDialog(generate?'generate':null);
@@ -1459,18 +1505,22 @@ function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save
     <Field label="Неизменные черты" hint="Короткое описание внешности и одежды для каждого видеоплана, до 160 символов."><Input aria-label="Неизменные черты героя" value={profile.appearance} maxLength={160} onChange={e=>set('appearance',e.target.value)} placeholder="Рыжие косы, веснушки, зелёные глаза, белая рубашка и красный галстук"/></Field>
     <Field label="Описание и характер"><Textarea aria-label="Описание и характер героя" value={profile.description} maxLength={4000} onChange={e=>set('description',e.target.value)} placeholder="Возраст, роль в истории, внешность, привычки и характер…"/></Field>
     <Field label="Что сделать с образом"><Textarea aria-label="Что сделать с образом героя" value={profile.instructions} maxLength={4000} onChange={e=>set('instructions',e.target.value)} placeholder="Например: сохранить черты лица с фотографии, превратить в рисованного героя, заменить одежду на пионерскую форму…"/></Field>
-    <Field label="Исходные изображения · необязательно" hint="PNG, JPEG или WebP до 10 МБ. До пяти изображений одного героя.">
+    <Field label="Исходные изображения · необязательно" hint="PNG, JPEG или WebP до 10 МБ. Можно выбрать сразу до пяти фотографий одного героя или добавлять их по очереди.">
       <div className="reference-grid">{profile.refs.map((ref,n)=><div className="reference active" key={ref}>
         <img src={'/api/assets/'+ref} alt={`Прообраз героя ${n+1}`}/><span>{n+1}. Исходный прообраз</span>
         <Button variant="ghost" size="sm" disabled={busy} onClick={()=>set('refs',profile.refs.filter(r=>r!==ref))}>Убрать из карточки</Button>
         <Button variant="outline" size="sm" disabled={busy||!valid||!canGenerate} onClick={()=>submit(false,ref)}>Это готовый образ</Button>
       </div>)}</div>
-      <Input aria-label="Загрузить прообраз героя" type="file" accept="image/png,image/jpeg,image/webp" disabled={busy||profile.refs.length>=5} onChange={e=>{
-        const file=e.target.files?.[0];e.target.value='';if(file)perform(async()=>{if(file.size>10*1024*1024)throw new Error('Изображение героя должно быть до 10 МБ.');const a=await upload(file);setProfile(c=>({...c,refs:[...new Set([...c.refs,a.id])]}));});
+      <Input aria-label="Загрузить прообраз героя" type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={busy||profile.refs.length>=5} onChange={e=>{
+        const files=Array.from(e.target.files??[]);e.target.value='';if(files.length)perform(async()=>{
+          if(profile.refs.length+files.length>5)throw new Error('В карточке героя можно сохранить до пяти фотографий. Уберите лишние или выберите меньше файлов.');
+          if(files.some(f=>!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>10*1024*1024))throw new Error('Каждое изображение героя должно быть PNG, JPEG или WebP до 10 МБ.');
+          for(const file of files){const a=await upload(file);setProfile(c=>({...c,refs:[...new Set([...c.refs,a.id])]}));}
+        });
       }}/>
       <details><summary>Выбрать изображение из библиотеки</summary><div className="reference-grid">{assets.filter((a:Asset)=>['image/png','image/jpeg','image/webp'].includes(a.mime)&&!profile.refs.includes(a.id)).map((a:Asset)=><button className="reference" key={a.id} disabled={busy||profile.refs.length>=5} onClick={()=>set('refs',[...profile.refs,a.id])}><img loading="lazy" src={'/api/assets/'+a.id} alt={a.name}/><span>{a.name}</span></button>)}</div></details>
     </Field>
-    <p className="muted">Исходная карточка сохраняется отдельно. Следующие этапы используют описание и изображение утверждённого варианта. После утверждения нового образа ранее созданные материалы потребуют пересмотра.</p>
+    <p className="muted">Исходная карточка сохраняется отдельно. Следующие этапы используют описание и изображение утверждённого варианта. Утверждения героев, стиля и локаций сохраняются при правках сценария. Замена образа потребует проверки подробного сценария, раскадровки, озвучки и видео.</p>
     {!canGenerate&&<p>Карточку можно заполнить сейчас. Для генерации и утверждения образа сначала утвердите общий сценарий.</p>}
     <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button><Button variant="outline" disabled={busy||!valid} onClick={()=>submit()}>Сохранить карточку</Button><Button disabled={busy||!valid||!canGenerate} onClick={()=>submit(true)}><Sparkles/>Сохранить и создать образы с ИИ</Button></DialogFooter>
   </DialogContent></Dialog>;
@@ -1809,7 +1859,7 @@ function GenerateDialog({
       setEstimates({});
       setBatch(crypto.randomUUID());
     }
-  }, [open, item.id]);
+  }, [open, p.id, item.id]);
   const source = chosen(item);
   const choices = MODELS.filter((m) => m.kind === kind);
   const selected = choices.filter((m) => models.includes(m.id));
@@ -1846,9 +1896,9 @@ function GenerateDialog({
           <DialogTitle>Серия вариантов</DialogTitle>
           <DialogDescription>
             {kind === 'video'
-              ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте до трёх моделей; число вариантов задаётся для каждой.'
-              : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте до трёх моделей; число вариантов задаётся для каждой.'
-              : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте до трех моделей; число вариантов задается для каждой.'}
+              ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте до четырёх моделей; число вариантов задаётся для каждой.'
+              : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте до четырёх моделей; число вариантов задаётся для каждой.'
+              : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте до четырёх моделей; число вариантов задается для каждой.'}
           </DialogDescription>
         </DialogHeader>
         <div className="form-grid">
@@ -1897,7 +1947,7 @@ function GenerateDialog({
                 <label className="row">
                   <Checkbox
                     checked={models.includes(m.id)}
-                    disabled={!configured || (!models.includes(m.id) && models.length >= 3)}
+                    disabled={!configured || (!models.includes(m.id) && models.length >= 4)}
                     onCheckedChange={(v) => {
                       if (kind === 'audio') {
                         setModels(v ? [m.id] : []);
@@ -3266,7 +3316,7 @@ function LibraryPanel({ projects, current, assets, action, perform }: any) {
         заменяют ее автоматически.
       </p>
       <div className="section-toolbar">
-        <h2>Файлы студии</h2>
+        <h2>Файлы текущего фильма</h2>
         <span className="muted">{assets.length} материалов</span>
       </div>
       <div className="asset-library">

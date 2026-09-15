@@ -45,6 +45,10 @@ let p = await req(
 );
 const pid = p.id;
 const path = '/api/projects/' + pid;
+const assetsPath = '/api/assets?projectId=' + encodeURIComponent(pid);
+assert.deepEqual(await req(assetsPath), [], 'A new project starts with an empty asset library.');
+await req('/api/assets', 'GET', undefined, 400);
+await req('/api/assets?projectId=' + crypto.randomUUID(), 'GET', undefined, 404);
 async function act(
   action,
   data,
@@ -90,7 +94,9 @@ await act('addVariant', {
 });
 assert.equal(p.items[0].approvedId, firstId);
 await act('approve');
-await act('approve', undefined, p.items[1].id, 400);
+const preservedHero = structuredClone(p.items[1]);
+await act('approve', undefined, p.items[1].id);
+assert.deepEqual(p.items[1],preservedHero,'A changed script preserves the same approved hero and provenance');
 await act('renameItem', { title: 'Конфликт' }, p.items[0].id, 400, before);
 const bad = await fetch(origin + path, {
   method: 'PATCH',
@@ -146,7 +152,12 @@ form.set(
     { type: 'image/png' },
   ),
 );
+await req('/api/assets', 'POST', form, 400);
+form.set('projectId', pid);
 const a = await req('/api/assets', 'POST', form, 201);
+assert.deepEqual((await req(assetsPath)).map((asset) => asset.id), [a.id]);
+const otherProject = await req('/api/projects', 'POST', { title: 'Отдельная библиотека проекта' }, 201);
+assert.deepEqual(await req('/api/assets?projectId=' + encodeURIComponent(otherProject.id)), [], 'A second project must not inherit uploaded images.');
 const response = await fetch(origin + '/api/assets/' + a.id, { headers: auth });
 assert.equal(response.status, 200);
 assert((await response.arrayBuffer()).byteLength > 30);
@@ -183,5 +194,5 @@ const logout = await fetch(origin + '/api/auth/logout', { method: 'POST', redire
 assert.equal(logout.status, 303);
 assert(logout.headers.get('set-cookie')?.includes('Max-Age=0'));
 console.log(
-  'PASS HTTP: authentication, project persistence, immutable versions, approval gates, stale dependencies, concurrent edits, CSRF, missing-key guard and private file upload.',
+  'PASS HTTP: authentication, project persistence, immutable versions, approval gates, stale dependencies, concurrent edits, CSRF, missing-key guard and private project-scoped file upload.',
 );

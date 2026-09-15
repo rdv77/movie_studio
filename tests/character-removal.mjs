@@ -10,9 +10,9 @@ const hero={id:D.id(),stage:1,title:'Петя',character:{name:'Петя',appear
 assert(!D.stageReady(p,2));assert.match(S.styleReapprovalReason(p,style.id,styleId),/все нужные карточки героев/);
 assert.throws(()=>S.reapproveStyle(p,style.id,styleId));
 D.addVariant(p,hero.id,{kind:'image',assetId:D.id(),character:hero.character});D.approve(p,hero.id);
-assert(D.stageReady(p,2));assert(!D.isApproved(p,style));assert.equal(S.styleReapprovalReason(p,style.id,styleId),'');
+assert(D.stageReady(p,2));assert(D.isApproved(p,style));assert.equal(S.styleReapprovalReason(p,style.id,styleId),'');
 const before=structuredClone(style),history={id:D.id(),itemId:style.id,status:'done',deps:style.variants[0].deps,actual:'25',refs:[],model:'old',prompt:'old'};p.jobs.push(history);
-S.reapproveStyle(p,style.id,styleId);assert.equal(style.variants.length,1);assert.equal(style.approvedId,styleId);assert.equal(D.chosen(style).text,before.variants[0].text);assert.equal(history.deps,before.variants[0].deps);assert.equal(history.actual,'25');assert(D.isApproved(p,style));assert(!D.isApproved(p,p.items[3]));
+S.reapproveStyle(p,style.id,styleId);assert.equal(style.variants.length,1);assert.equal(style.approvedId,styleId);assert.equal(D.chosen(style).text,before.variants[0].text);assert.equal(history.deps,before.variants[0].deps);assert.equal(history.actual,'25');assert(D.isApproved(p,style));assert(D.isApproved(p,p.items[3]));
 const newSelected=D.makeVariant(p,style,{text:'Другой стиль'});style.variants.push(newSelected);style.selectedId=newSelected.id;assert.throws(()=>S.reapproveStyle(p,style.id,styleId),/Выберите/);style.selectedId=styleId;
 const active=structuredClone(p);active.jobs.push({id:D.id(),itemId:hero.id,status:'queued',refs:[],actual:null});assert.throws(()=>R.removeCharacter(active,hero.id),/текущих генераций/);assert.throws(()=>S.reapproveStyle(active,style.id,styleId));
 const dependent=structuredClone(p);dependent.jobs.push({id:D.id(),itemId:p.items[5].id,status:'saving',refs:[],actual:null});assert.throws(()=>R.removeCharacter(dependent,hero.id),/текущих генераций/);
