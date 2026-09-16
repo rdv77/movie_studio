@@ -109,17 +109,21 @@ try {
   globalThis.generationState = structuredClone(ready);
   globalThis.generationKeyLookups.length = 0;
   const beforeFive = structuredClone(globalThis.generationState);
-  // The catalogue has exactly four image models. Repeating a valid fifth entry
-  // isolates the payload-count limit from unknown-model or mixed-kind checks.
-  const five = await generate(request(input([...imageModels, imageModels[0]])), context());
-  assert.equal(five.status, 400, 'Five model entries exceed the comparison limit.');
-  assert.deepEqual(globalThis.generationState, beforeFive);
-  assert.deepEqual(globalThis.generationKeyLookups, [], 'Reject the invalid comparison before looking up provider credentials.');
+  const fiveModels=[...imageModels,'zencreator:image:QWEN_IMAGE'];
+  const five = await generate(request(input(fiveModels)), context());
+  assert.equal(five.status, 200, await five.clone().text());
+  assert.equal(globalThis.generationState.jobs.length,10,'All five compatible models create two variants each.');
+  for(const id of fiveModels)assert.equal(globalThis.generationState.jobs.filter(j=>j.model===id).length,2);
+  assert.deepEqual(globalThis.generationState.items,beforeFive.items);
+  globalThis.generationState=structuredClone(beforeFive);
+  const duplicate=await generate(request(input([...imageModels,imageModels[0]])),context());
+  assert.equal(duplicate.status,200);assert.equal(globalThis.generationState.jobs.length,8,'Repeated model IDs are deduplicated before queuing.');
+  globalThis.generationState=structuredClone(beforeFive);
   const overReferenceLimit = await generate(request({ ...input(), refs: [photos[5]] }), context());
   assert.equal(overReferenceLimit.status, 400, 'Grok in a comparison still limits the merged input to five references.');
   assert.deepEqual(globalThis.generationState, beforeFive, 'A per-model limit rejects the whole comparison before any job is saved.');
   assert.equal(networkCalls, 0);
-  console.log('PASS generation models: five-model payload and six merged references are rejected atomically. No external or paid requests.');
+  console.log('PASS generation models: five compatible models accepted, duplicates removed, six merged references still rejected atomically. No external or paid requests.');
 } finally {
   globalThis.fetch = previousFetch;
   delete globalThis.generationState;
