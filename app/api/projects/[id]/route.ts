@@ -22,6 +22,7 @@ import {
 import { z } from 'zod';
 import { speechInfo, assertSpeech } from '@/lib/speech-mode';
 import { saveAnimatic, approveAnimatic } from '@/lib/animatic';
+import { archiveJournal } from '@/lib/journal';
 const character = z.object({name:z.string().trim().min(1).max(100),appearance:z.string().trim().max(160).default(''),
   description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),refs:z.array(z.string().uuid()).max(5).default([])});
 const variant = z.object({
@@ -64,6 +65,8 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'archiveJournal': archiveJournal(p); break;
+    case 'restoreJournal': archiveJournal(p,true); break;
     case 'saveAnimaticPreview': {
       const v=variant.parse(d),basis=z.string().min(1).max(100000).parse(d?.basis);
       if(!v.assetId||(await asset(user, v.assetId, p)).mime!=='video/mp4')throw new Error('Для аниматика нужен файл MP4.');

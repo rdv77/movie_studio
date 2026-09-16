@@ -1,0 +1,23 @@
+import {build} from 'esbuild';
+import {strict as assert} from 'node:assert';
+await build({entryPoints:['lib/domain.ts','lib/journal.ts','app/api/projects/[id]/route.ts'],bundle:true,format:'esm',platform:'node',outdir:'work/tests/journal',outbase:'.',outExtension:{'.js':'.mjs'},plugins:[{name:'memory',setup(b){
+ b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'memory'}));
+ b.onLoad({filter:/.*/,namespace:'memory'},()=>({contents:`export const api=fn=>fn;export const owner=async req=>{if(req.headers.get('test-owner')!=='owner')throw Error('Unauthorized');return 'owner'};export const loadProject=async()=>structuredClone(globalThis.journalProject);export const saveProject=async(_,p)=>{p.revision++;globalThis.journalProject=structuredClone(p);return p};export const asset=async()=>{throw Error('No asset access expected')};`}));
+}}]});
+const D=await import('../work/tests/journal/lib/domain.mjs'),J=await import('../work/tests/journal/lib/journal.mjs'),R=await import('../work/tests/journal/app/api/projects/[id]/route.mjs');
+const p=D.newProject('Журнал');
+p.jobs=['done','failed','cancelled','queued','dispatching','pending','saving','unknown'].map((status,n)=>({id:D.id(),batchId:'same-batch',itemId:p.items[0].id,status,created:new Date(100000+n*1000).toISOString(),actual:n%2?'0':null,estimate:'4800000000',prompt:'Reviewed prompt',requestId:'receipt-'+n}));
+const original=structuredClone(p),totals=D.totals(p),deps=D.dependencies(p,7);
+assert.deepEqual(J.newestJobs(p.jobs).map(j=>j.id),p.jobs.map(j=>j.id).toReversed());assert.deepEqual(p,original,'Sort never changes dispatch order');
+assert.deepEqual(J.newestJobs([{id:'a',created:'bad'},{id:'b',created:'bad'}]).map(j=>j.id),['b','a']);
+const request=(action,revision=journalProject.revision,owner='owner')=>R.PATCH(new Request('http://test',{method:'PATCH',headers:{'test-owner':owner},body:JSON.stringify({action,revision})}),{params:Promise.resolve({id:p.id})});
+globalThis.journalProject=structuredClone(p);
+await request('archiveJournal');assert.equal(journalProject.jobs.filter(J.journalArchived).length,3);
+assert.deepEqual(D.totals(journalProject),totals);assert.equal(D.dependencies(journalProject,7),deps);assert.deepEqual(journalProject.items,original.items);
+assert.deepEqual(journalProject.jobs.map(({journalArchivedAt,...j})=>j),original.jobs,'Receipts, costs, prompts and queue retained');
+const after=structuredClone(journalProject);await request('archiveJournal');assert.deepEqual(journalProject.jobs,after.jobs,'Idempotent archival');
+await assert.rejects(()=>request('restoreJournal',0),/изменился/);await assert.rejects(()=>request('restoreJournal',journalProject.revision,'intruder'),/Unauthorized/);
+assert.deepEqual(journalProject.jobs,after.jobs);
+assert(!J.journalArchived({...journalProject.jobs[0],status:'pending'}),'Recovering jobs become visible even when previously archived');
+await request('restoreJournal');assert.deepEqual(journalProject.jobs,original.jobs);assert.deepEqual(D.totals(journalProject),totals);
+console.log('PASS journal: newest-first immutable sort, reversible project-scoped cleanup, active/unknown retained, receipts/costs/approvals unchanged, owner and revision enforcement.');

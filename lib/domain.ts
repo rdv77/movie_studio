@@ -63,6 +63,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  journalArchivedAt?: string;
   purpose?: 'voice-test';
   voiceName?: string;
   speechType?: SpeechType;

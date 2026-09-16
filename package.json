@@ -21,6 +21,7 @@
     "test:plan-sync": "node tests/plan-sync.mjs",
     "test:storyboard-prompt": "node tests/storyboard-image-prompt.mjs",
     "test:minimax-image": "node tests/minimax-image.mjs && node tests/storyboard-image-prompt.mjs",
+    "test:h3-journal": "node tests/minimax-h3.mjs && node tests/journal.mjs && node tests/video.mjs",
     "test:voice-workflow": "node tests/voice-workflow.mjs",
     "test:speech-approval": "node tests/speech-approval.mjs",
     "test:character-removal": "node tests/character-removal.mjs",

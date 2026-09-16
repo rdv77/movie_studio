@@ -77,6 +77,11 @@ export const MODELS: {
     note: '768p, 6 сек; команды движения камеры',
   },
   {
+    id: 'MiniMax-H3', name: 'MiniMax H3 (Hailuo)', provider: 'minimax', kind: 'video',
+    estimate: '4800000000',
+    note: '768p, 6 сек; выбранный первый кадр и движение камеры; ориентир $0.48; нужен ключ Pay-as-you-go',
+  },
+  {
     id: 'eleven_v3',
     name: 'ElevenLabs v3',
     provider: 'elevenlabs',

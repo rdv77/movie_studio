@@ -275,6 +275,19 @@ export async function generate(
     };
   }
   if (j.kind === 'video') {
+    if (j.model === 'MiniMax-H3') {
+      const frame=/^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(refs[0]??'');
+      if(refs.length!==1||!frame||frame[1].length%4||frame[1].length>Math.ceil(10*1024*1024/3)*4||characterRefs.length)
+        throw new ProviderError('MiniMax H3: выберите один первый кадр PNG/JPEG/WebP до 10 МБ. Отдельные референсы нельзя смешивать с первым кадром. Запрос не отправлен.',true,true);
+      if(!j.prompt.trim())throw new ProviderError('MiniMax H3: добавьте описание действия. Запрос не отправлен.',true,true);
+      d=await json(await call('https://api.minimax.io/v2/video_generation',h,{
+        model:'MiniMax-H3',content:[{type:'text',text:j.prompt},{type:'image_url',image_url:{url:refs[0]},role:'first_frame'}],
+        resolution:'768P',duration:6,ratio:'adaptive',
+      }));
+      if(typeof d.task_id!=='string'||!d.task_id)
+        throw new ProviderError('MiniMax H3 не вернул номер задачи. Проверьте исход запроса в кабинете; автоматического повтора не будет.');
+      return {pending:true,requestId:d.task_id,actual:null};
+    }
     if (m.provider === 'xai') {
       d = await json(
         await call('https://api.x.ai/v1/videos/generations', h, {
@@ -349,6 +362,18 @@ export async function poll(j: Job, key: string): Promise<Result> {
   const m = model(j.model),
     h = headers(m.provider, key);
   let d: any;
+  if(j.model==='MiniMax-H3') {
+    if(!j.requestId)throw new ProviderError('MiniMax H3: нет номера ранее отправленной задачи.',true,true);
+    d=await json(await call('https://api.minimax.io/v2/query/video_generation/'+encodeURIComponent(j.requestId),h));
+    const task=d.task;
+    if(!task||task.id!==j.requestId)throw new ProviderError('MiniMax H3 вернул ответ для неизвестной задачи. Новая генерация не запускается.');
+    if(['queued','running'].includes(task.status))return {pending:true,actual:null};
+    const receipt={requestId:task.id,usage:task.usage,actual:null};
+    if(['failed','cancelled'].includes(task.status))return {...receipt,error:`MiniMax H3: ${task.status==='cancelled'?'задача отменена':'генерация не выполнена'}. Проверьте задачу ${task.id} в кабинете провайдера.`};
+    if(task.status!=='succeeded')throw new ProviderError('MiniMax H3 вернул неизвестный статус. Проверьте задачу в кабинете; новая генерация не запускается.');
+    const url=task.content?.url;
+    return {...receipt,...(typeof url==='string'&&url?{url,mime:'video/mp4'}:{error:'MiniMax H3 завершил задачу без ссылки на видео. Проверьте результат в кабинете.'})};
+  }
   if (m.provider === 'xai') {
     d = await json(
       await call(

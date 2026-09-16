@@ -107,6 +107,7 @@ import { speechReapprovalReason } from '@/lib/speech-approval';
 import { planCardsNeedSync } from '@/lib/plan-sync';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
 import { isMiniMaxImage, miniMaxImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
+import { canArchiveJob, journalArchived, newestJobs } from '@/lib/journal';
 import { isOpenAIImage, openAIImageTariff } from '@/lib/openai-image';
 import { readableText } from '@/lib/shots';
 import { initialSpeech, scriptSpeech, speechCharacters, speechPlans } from '@/lib/speech';
@@ -525,7 +526,7 @@ function Workspace() {
     }
   }
   const failures =
-    p?.jobs.filter((j) => ['unknown', 'failed'].includes(j.status)) ?? [];
+    p?.jobs.filter((j) => ['unknown', 'failed'].includes(j.status)&&!journalArchived(j)) ?? [];
   const active =
     p?.jobs.filter((j) =>
       ['queued', 'dispatching', 'pending', 'saving'].includes(j.status),
@@ -2151,6 +2152,7 @@ function GenerateDialog({
         </div>}
         {kind === 'video' && (
           <div className="note">
+            {selected.some(m=>m.id==='MiniMax-H3')&&<p>MiniMax H3 использует выбранный первый кадр; пропорции видео определяются этим изображением. Сохранённый ключ MiniMax должен иметь доступ Pay-as-you-go. Образы героев учитываются в первом кадре и тексте, отдельные изображения героев не добавляются к этому запросу.</p>}
             <p>Один запрос создаст 6 секунд видео. В монтаж войдут первые {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
@@ -2813,6 +2815,11 @@ function Budget({ p, action, perform, replace }: any) {
   const t = totals(p);
   const [job, setJob] = useState<any>(null);
   const [recovering,setRecovering] = useState('');
+  const [showArchive,setShowArchive] = useState(false);
+  const [archiving,setArchiving] = useState(false);
+  const sorted=newestJobs(p.jobs),archived=sorted.filter(journalArchived);
+  const visible=sorted.filter(j=>showArchive?journalArchived(j):!journalArchived(j));
+  const clearable=sorted.filter(j=>canArchiveJob(j)&&!journalArchived(j)).length;
   return (
     <>
       <div className="page-heading">
@@ -2836,7 +2843,7 @@ function Budget({ p, action, perform, replace }: any) {
                 'Источник',
                 'Запрос',
               ],
-              ...p.jobs.map((j: any) => [
+              ...sorted.map((j: any) => [
                 j.created,
                 j.model,
                 statuses[j.status],
@@ -2883,6 +2890,12 @@ function Budget({ p, action, perform, replace }: any) {
           <strong>{p.limit === null ? 'Без лимита' : money(p.limit)}</strong>
         </div>
       </div>
+      <div className="row wrap">
+        <Button variant="outline" disabled={archiving||!clearable} onClick={()=>perform(async()=>{setArchiving(true);try{await action('archiveJournal');}finally{setArchiving(false);}})}>Очистить журнал{clearable?` · ${clearable}`:''}</Button>
+        <Button variant="ghost" onClick={()=>setShowArchive(v=>!v)}>{showArchive?'Вернуться в журнал':`Показать архив · ${archived.length}`}</Button>
+        {showArchive&&<Button variant="outline" disabled={archiving||!archived.length} onClick={()=>perform(async()=>{setArchiving(true);try{await action('restoreJournal');setShowArchive(false);}finally{setArchiving(false);}})}>Вернуть записи из архива</Button>}
+      </div>
+      <p className="muted">{showArchive?'Архив':'Журнал'} · {visible.length} записей · сначала новые. Очистка переносит завершённые попытки в архив без удаления файлов и расходов. Активные запросы и неизвестные исходы остаются в журнале. CSV содержит все записи, включая архив.</p>
       <div className="table-surface">
         <Table>
           <TableHeader>
@@ -2895,7 +2908,7 @@ function Budget({ p, action, perform, replace }: any) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {p.jobs.map((j: any) => (
+            {visible.map((j: any) => (
               <TableRow key={j.id}>
                 <TableCell>
                   <strong>
@@ -2945,10 +2958,10 @@ function Budget({ p, action, perform, replace }: any) {
             ))}
           </TableBody>
         </Table>
-        {!p.jobs.length && (
+        {!visible.length && (
           <div className="empty-table">
             <Wallet />
-            <h2>Генераций пока нет</h2>
+            <h2>{showArchive?'Архив пуст':p.jobs.length?'Журнал очищен':'Генераций пока нет'}</h2>
             <p>
               После запуска серии здесь появятся оценки, статусы и фактические
               списания.
