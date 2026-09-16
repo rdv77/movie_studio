@@ -1,3 +1,4 @@
+import { generateFal, pollFal } from './fal-provider';
 import { call, json, ProviderError } from './provider-http';
 export { ProviderError } from './provider-http';
 import { generateZen, pollZen } from './zencreator-provider';
@@ -47,6 +48,7 @@ export async function generate(
   const m = model(j.model),
     h = headers(m.provider, key);
   if (m.provider === 'sync') throw new ProviderError('Используйте отдельное окно синхронизации губ.', true, true);
+  if(m.provider==='fal')return generateFal(j,key,refs,format);
   if(m.provider==='zencreator')return generateZen(j,key,refs,format);
   let d: any;
   if (j.kind === 'image' && isMiniMaxImage(j.model)) {
@@ -280,6 +282,7 @@ export async function generate(
   throw new Error('Неизвестный тип генерации.');
 }
 export async function poll(j: Job, key: string): Promise<Result> {
+  if(model(j.model).provider==='fal')return pollFal(j,key);
   if(model(j.model).provider==='zencreator')return pollZen(j,key);
   const m = model(j.model),
     h = headers(m.provider, key);

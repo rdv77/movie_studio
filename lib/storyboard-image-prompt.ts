@@ -1,3 +1,4 @@
+import { isFalImage, FAL_PROMPT_BUDGET } from './fal-models';
 import { chosen, isApproved, type Item, type Project } from './domain';
 import { characterReferenceNote } from './characters';
 import { planFields, storyboardPrompt } from './storyboard';
@@ -10,6 +11,7 @@ import { isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from './zencreator-models';
 // Image models need the current shot and approved visual decisions, not the
 // whole screenplay or serialized Variant/Job/dependency histories.
 export function storyboardImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,modelId='') {
+  if(isFalImage(modelId))return compactImageRequest(p,item,instruction,refs,index,count,FAL_PROMPT_BUDGET);
   if(isMiniMaxImage(modelId))return miniMaxImageRequest(p,item,instruction,refs,index,count);
   if(isZenCreatorImage(modelId))return compactImageRequest(p,item,instruction,refs,index,count,ZEN_IMAGE_PROMPT_LIMIT);
   const sections:{label:string;text:string}[]=[];
@@ -43,6 +45,7 @@ export function storyboardImageRequest(p:Project,item:Item,instruction:string,re
 }
 
 export function storyboardImagePromptIssue(request:ReturnType<typeof storyboardImageRequest>,modelId:string,title:string) {
+  if(isFalImage(modelId)&&request.length>FAL_PROMPT_BUDGET)return `Qwen Image Edit: сократите описание «${title}» до бюджета студии — 5000 символов. Запрос не отправлен.`;
   if(isZenCreatorImage(modelId)&&request.length>ZEN_IMAGE_PROMPT_LIMIT)return `ZenCreator: промпт «${title}» превышает 5000 символов даже после сокращения. Сократите задачу и описания в карточках. Запрос не отправлен.`;
   if(isMiniMaxImage(modelId)&&request.length>MINIMAX_IMAGE_PROMPT_LIMIT)return `MiniMax image-01: описание плана «${title}» превышает 1500 символов. Сократите имена героев и описания либо выберите другую модель. Запрос не отправлен.`;
   if(!isOpenAIImage(modelId)||request.length<=OPENAI_IMAGE_PROMPT_LIMIT)return '';

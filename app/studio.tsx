@@ -1,4 +1,5 @@
 'use client';
+import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -1873,9 +1874,10 @@ function GenerateDialog({
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
+  const falRequest=kind==='image'&&selected.some(m=>isFalImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,FAL_PROMPT_BUDGET):undefined;
   const zenRequest=kind==='image'&&selected.some(m=>isZenCreatorImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,ZEN_IMAGE_PROMPT_LIMIT):undefined;
-  const imagePromptError=zenRequest&&zenRequest.length>ZEN_IMAGE_PROMPT_LIMIT?'ZenCreator: сократите задачу, имена и описания до общего лимита 5000 символов.':miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
-  const miniRefError=miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
+  const imagePromptError=falRequest&&falRequest.length>FAL_PROMPT_BUDGET?'Qwen Image Edit: сократите задачу и описания до бюджета студии — 5000 символов.':zenRequest&&zenRequest.length>ZEN_IMAGE_PROMPT_LIMIT?'ZenCreator: сократите задачу, имена и описания до общего лимита 5000 символов.':miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
+  const miniRefError=falRequest&&falRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a))|| (miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'');
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
     ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
@@ -2152,12 +2154,13 @@ function GenerateDialog({
         )}
         {item.stage>1&&['image','video'].includes(kind)&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
         {referenceError&&<p role="alert">{referenceError}</p>}
+        {falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
         {zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
           <details><summary>Промпт для ZenCreator{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{zenRequest.prompt}</p></details>
           {imagePromptError&&<p role="alert">{imagePromptError}</p>}
         </div>}
         {miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
-        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id))&&<div className="note">
+        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id))&&<div className="note">
           <p>Полный промпт кадра: {imageRequest.length}{selected.some(m=>isOpenAIImage(m.id))?' / 32000':''} символов. Учтены стиль, герои, референсы и правило речи.</p>
           <details><summary>Промпт для модели{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{imageRequest.prompt}</p></details>
           {imagePromptError&&<p role="alert">{imagePromptError}</p>}
@@ -2640,7 +2643,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Серия превысит лимит проекта.';
   }
   const refLimit = m?.provider === 'xai' ? 5 : 8;
-  const miniRefError=isMiniMaxImage(modelId)?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
+  const miniRefError=isFalImage(modelId)?falRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):isMiniMaxImage(modelId)?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
   const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,effectiveRefs,1,1,modelId)]));
   const promptErrors=new Map(rows.map(r=>[r.itemId,storyboardImagePromptIssue(compiled.get(r.itemId)!,modelId,r.title)]));
   return <Dialog open onOpenChange={v => !v && close()}>
@@ -2651,6 +2654,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
+      {isFalImage(modelId)&&<p className="note">Qwen Image Edit: кадры создаются с выбранными референсами и утверждёнными образами героев. Промпт сокращён до бюджета студии в 5000 символов; проверьте его перед запуском.</p>}
       {isZenCreatorImage(modelId)&&<p className="note">ZenCreator: промпт каждого кадра подготовлен в пределах 5000 символов. Проверьте действие, героев и стиль в разделе «Промпт для модели»; исходные описания остаются целиком.</p>}
       {isMiniMaxImage(modelId)&&<p className="note">MiniMax image-01: описание каждого кадра сокращается до 1500 символов. Перед запуском проверьте «Промпт для модели» в отмеченных планах. Референсы PNG/JPEG меньше 10 МБ; общий размер до 20 МБ. Используется сохранённый ключ MiniMax.</p>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
@@ -2664,7 +2668,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
           {(!r.prompt.trim() || r.prompt.trim().length > 20000) && <p role="alert">Введите задачу длиной от 1 до 20000 символов.</p>}
-          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':isZenCreatorImage(modelId)?' / 5000':''} символов.</p>
+          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':isZenCreatorImage(modelId)||isFalImage(modelId)?' / 5000':''} символов.</p>
           <details><summary>Промпт для модели</summary><p className="whitespace-pre-wrap">{compiled.get(r.itemId)!.prompt}</p></details>
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
@@ -2798,6 +2802,7 @@ function Connections({ data, refresh, perform, busy }: any) {
                   )}
                 </div>
               </form>
+              {provider.id==='fal'&&<p className="note">Создайте ключ со scope API в кабинете fal.ai и вставьте его целиком. Qwen Image Edit работает с фото и образами героев. В студии — одно изображение на попытку, ориентировочно $0.03; фактическое списание проверяйте в fal.ai. Сохранение ключа бесплатно.</p>}
               {provider.id==='zencreator'&&<div className="note">
                 <p>Создайте ключ с правами read и generate. Оплата — кредитами ZenCreator; отдельная проверка читает каталог и баланс, без генерации.</p>
                 <Button variant="outline" disabled={busy||!configured} onClick={()=>perform(async()=>{setZenCheck(null);setZenCheck(await request('/api/connections/zencreator'));})}>Проверить ключ и баланс</Button>

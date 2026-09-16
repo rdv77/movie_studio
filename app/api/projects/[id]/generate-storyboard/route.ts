@@ -1,3 +1,4 @@
+import { prepareFalJobs } from '@/lib/fal-models';
 import { prepareZenJobs } from '@/lib/zencreator-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
@@ -54,6 +55,7 @@ export const POST = api(async (req, ctx) => {
       status: 'queued', transportVersion: 2, estimate: s.estimate, actual: null };
   });
   await getKey(user, m.provider);
+  prepareFalJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
   p.jobs.push(...jobs);

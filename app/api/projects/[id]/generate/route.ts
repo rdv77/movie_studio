@@ -1,3 +1,4 @@
+import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { prepareZenJobs, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import {
   api,
@@ -119,7 +120,7 @@ export const POST = api(async (req, ctx) => {
   const basis =
     chosen(item) ?? linked?.variants.find((v) => v.id === linked.approvedId);
   const imageRequests=kind==='image'&&item.stage===5?Array.from({length:s.count},(_,n)=>storyboardImageRequest(p,item,s.prompt,refs,n+1,s.count)):[];
-  for(const request of imageRequests)for(const m of ms.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id))){const issue=storyboardImagePromptIssue(request,m.id,item.title);if(issue)throw new Error(issue);}
+  for(const request of imageRequests)for(const m of ms.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id))){const issue=storyboardImagePromptIssue(request,m.id,item.title);if(issue)throw new Error(issue);}
   const jobs: Job[] = ms.flatMap((m) =>
     Array.from({ length: s.count }, (_, n) => ({
       id: id(),
@@ -136,7 +137,7 @@ export const POST = api(async (req, ctx) => {
       volume: basis?.volume ?? 1,
       character: item.stage===1 ? item.character : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
-      prompt: isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
+      prompt: isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
         p,
         item,
         (item.character ? characterPrompt(item.character)+'\n\nПравки к этой попытке: ' : '')+s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`,
@@ -159,6 +160,7 @@ export const POST = api(async (req, ctx) => {
   );
   if(jobs.some(j=>isOpenAIImage(j.model)&&j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT))throw new Error('GPT Image: полный промпт с утверждённой основой длиннее 32 000 символов. Сократите задачу или описания. Запрос не отправлен.');
   if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
+  prepareFalJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
   p.jobs.push(...jobs);

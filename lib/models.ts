@@ -9,6 +9,8 @@ export const MODELS: {
   note: string;
 }[] = [
   ...ZEN_MODELS,
+  {id:'fal-qwen-image-edit-2511',name:'fal.ai · Qwen Image Edit 2511',provider:'fal',kind:'image',estimate:'300000000',
+    note:'Образы и кадры по фото · нужен референс · 1024×576 / 576×1024 · ориентир $0.03, списание уточняйте в fal.ai'},
   {
     id: 'gpt-6-astra',
     name: 'GPT-6 Astra',
@@ -110,6 +112,7 @@ export const SYNC_MODELS = [
     note: 'Больше деталей лица; рот в исходном видео уже должен двигаться', rate: '0.08325' },
 ];
 export const PROVIDERS = [
+  {id:'fal',name:'fal.ai · Qwen Image Edit',url:'https://fal.ai/dashboard/keys'},
   {id:'zencreator',name:'ZenCreator · агрегатор',url:'https://app.zencreator.pro/api-keys'},
   { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys' },
   { id: 'xai', name: 'xAI / Grok', url: 'https://console.x.ai/' },

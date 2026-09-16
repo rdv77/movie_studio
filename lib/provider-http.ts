@@ -53,7 +53,7 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
         if (typeof message === 'string') detail = message;
       }
       for (const value of Object.values(h)) {
-        const key = value.replace(/^Bearer /i, '');
+        const key = value.replace(/^(?:Bearer|Key) /i, '');
         if (key.length >= 8) detail = detail.split(key).join('[скрыто]');
       }
       detail = detail.replace(/Bearer\s+\S+/gi, 'Bearer [скрыто]')
