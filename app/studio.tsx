@@ -106,6 +106,7 @@ import { styleReapprovalReason } from '@/lib/style-approval';
 import { speechReapprovalReason } from '@/lib/speech-approval';
 import { planCardsNeedSync } from '@/lib/plan-sync';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
+import { isMiniMaxImage, miniMaxImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
 import { isOpenAIImage, openAIImageTariff } from '@/lib/openai-image';
 import { readableText } from '@/lib/shots';
 import { initialSpeech, scriptSpeech, speechCharacters, speechPlans } from '@/lib/speech';
@@ -1867,7 +1868,9 @@ function GenerateDialog({
   const effectiveRefs=kind==='image'?characterImageRefs(p,item,refs):refs;
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
-  const imagePromptError=imageRequest?selected.map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
+  const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
+  const imagePromptError=miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
+  const miniRefError=miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
     ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
@@ -2140,7 +2143,8 @@ function GenerateDialog({
         )}
         {item.stage>1&&['image','video'].includes(kind)&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
         {referenceError&&<p role="alert">{referenceError}</p>}
-        {imageRequest&&<div className="note">
+        {miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
+        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id))&&<div className="note">
           <p>Полный промпт кадра: {imageRequest.length}{selected.some(m=>isOpenAIImage(m.id))?' / 32000':''} символов. Учтены стиль, герои, референсы и правило речи.</p>
           <details><summary>Промпт для модели{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{imageRequest.prompt}</p></details>
           {imagePromptError&&<p role="alert">{imagePromptError}</p>}
@@ -2183,7 +2187,7 @@ function GenerateDialog({
               prompt.trim().length>20000 || !!imagePromptError ||
               count < 1 ||
               count > 4 ||
-              !!referenceError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT || !shot || shot.duration > 6)) ||
+              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT || !shot || shot.duration > 6)) ||
               (kind === 'audio' && (!voice.trim() || !spoken || speech.length > 9500 || models.length > 1))
             }
             onClick={() =>
@@ -2620,7 +2624,8 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Серия превысит лимит проекта.';
   }
   const refLimit = m?.provider === 'xai' ? 5 : 8;
-  const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,effectiveRefs)]));
+  const miniRefError=isMiniMaxImage(modelId)?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
+  const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,effectiveRefs,1,1,modelId)]));
   const promptErrors=new Map(rows.map(r=>[r.itemId,storyboardImagePromptIssue(compiled.get(r.itemId)!,modelId,r.title)]));
   return <Dialog open onOpenChange={v => !v && close()}>
     <DialogContent className="sm:max-w-3xl modal-scroll">
@@ -2630,6 +2635,8 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
+      {isMiniMaxImage(modelId)&&<p className="note">MiniMax image-01: описание каждого кадра сокращается до 1500 символов. Перед запуском проверьте «Промпт для модели» в отмеченных планах. Референсы PNG/JPEG меньше 10 МБ; общий размер до 20 МБ. Используется сохранённый ключ MiniMax.</p>}
+      {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
       <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({ ...r, include: !r.blocked })))}>Выбрать все планы</Button>
         <Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({ ...r, include: !r.hasImage && !r.blocked })))}>Только без картинок</Button></div>
@@ -2640,7 +2647,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
           {(!r.prompt.trim() || r.prompt.trim().length > 20000) && <p role="alert">Введите задачу длиной от 1 до 20000 символов.</p>}
-          <p>Полный промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':''} символов.</p>
+          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':''} символов.</p>
           <details><summary>Промпт для модели</summary><p className="whitespace-pre-wrap">{compiled.get(r.itemId)!.prompt}</p></details>
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
@@ -2663,7 +2670,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       {costError && <p role="alert">{costError}</p>}
       <p className="muted">Генерация идёт по очереди. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
-        <Button disabled={busy || !m || !included.length || !!costError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
+        <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
           await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:effectiveRefs, estimate,
             plans: included.map(({ itemId, prompt }) => ({ itemId, prompt })) }); close();
         })}><Sparkles />Сгенерировать {included.length} картинок</Button></DialogFooter>

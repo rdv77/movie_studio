@@ -52,7 +52,7 @@ docker compose -f compose.yaml -f compose.https.yaml up -d --build
 | Назначение | Адаптеры в этой версии |
 | --- | --- |
 | Сценарии | OpenAI GPT-6 Astra, Grok 4.6, MiniMax M2.7 |
-| Изображения | GPT Image 2.5 Sunburst/Flare, Grok Imagine Image 2.0, FLUX.2 Pro |
+| Изображения | GPT Image 2.5 Sunburst/Flare, Grok Imagine Image 2.0, FLUX.2 Pro, MiniMax image-01 |
 | Видео | Grok Imagine Video 1.5, MiniMax Hailuo 2.3 |
 | Голоса | MiniMax Speech 2.8 HD, ElevenLabs v3 |
 | Синхронизация | sync-3, lipsync-2, lipsync-2-pro |

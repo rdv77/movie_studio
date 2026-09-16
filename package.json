@@ -20,6 +20,7 @@
     "test:characters": "node tests/characters.mjs",
     "test:plan-sync": "node tests/plan-sync.mjs",
     "test:storyboard-prompt": "node tests/storyboard-image-prompt.mjs",
+    "test:minimax-image": "node tests/minimax-image.mjs && node tests/storyboard-image-prompt.mjs",
     "test:voice-workflow": "node tests/voice-workflow.mjs",
     "test:speech-approval": "node tests/speech-approval.mjs",
     "test:character-removal": "node tests/character-removal.mjs",

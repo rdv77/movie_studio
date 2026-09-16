@@ -34,6 +34,17 @@ globalThis.state=structuredClone(copied);let editedResponse=await G.POST(req({..
 globalThis.state=structuredClone(copied);editedResponse=await B.POST(req({...batch,plans:[{itemId:copyFrame.id,prompt:editedTask}]}),ctx);assert.equal(editedResponse.status,200);assert.equal(state.jobs.at(-1).prompt,editedRequest.prompt);
 globalThis.state=structuredClone(p);let response=await G.POST(req(single),ctx);assert.equal(response.status,200,await response.clone().text());assert.equal(state.jobs.at(-1).prompt,request.prompt);
 globalThis.state=structuredClone(p);response=await B.POST(req(batch),ctx);assert.equal(response.status,200,await response.clone().text());assert.equal(state.jobs.length,p.jobs.length+11);assert.equal(state.jobs[p.jobs.length].prompt,request.prompt);assert(state.jobs.slice(p.jobs.length).every(j=>j.prompt.length<10000));assert.deepEqual(state.items,p.items,'Queued generation leaves all cards/approvals intact');
+// MiniMax has its own compact, visible request; other model prompts remain intact.
+const mini=P.storyboardImageRequest(p,frame,task,refs,1,1,'image-01');
+assert(mini.length<=1500);assert(mini.prompt.includes('ДЕЙСТВИЕ_0'));assert(mini.prompt.includes('Крупный план'));assert(mini.prompt.includes('УТВЕРЖДЁННЫЙ_СТИЛЬ'));assert(mini.prompt.includes('Референс 1'));assert(mini.prompt.includes('Говорит Петя'));assert(!mini.prompt.includes('ДЕЙСТВИЕ_10'));
+assert.equal(P.storyboardImagePromptIssue(mini,'image-01',frame.title),'');
+globalThis.state=structuredClone(p);response=await G.POST(req({...single,models:['image-01','gpt-image-2.5-sunburst']}),ctx);
+assert.equal(response.status,200,await response.clone().text());assert.equal(state.jobs.at(-2).prompt,mini.prompt);assert.equal(state.jobs.at(-1).prompt,request.prompt);
+assert.deepEqual(state.jobs.at(-2).refs,refs);assert.deepEqual(state.items,p.items);
+globalThis.state=structuredClone(p);response=await B.POST(req({...batch,model:'image-01',estimate:'35000000'}),ctx);
+assert.equal(response.status,200,await response.clone().text());assert.equal(state.jobs.length,p.jobs.length+11);assert.equal(state.jobs[p.jobs.length].prompt,mini.prompt);
+assert(state.jobs.slice(p.jobs.length).every(j=>j.prompt.length<=1500&&j.estimate==='35000000'&&j.actual===null));
+assert(state.jobs[p.jobs.length+1].prompt.includes('закрыты рты'));
 // Exact final limits, after adding all context, reference notes and speech rules.
 const boundary=structuredClone(p),boundaryStyle=D.chosen(boundary.items.find(i=>i.id===style.id));boundaryStyle.text='';
 const base=P.storyboardImageRequest(boundary,boundary.items.find(i=>i.id===frame.id),task,refs).length;

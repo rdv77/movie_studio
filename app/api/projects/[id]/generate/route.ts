@@ -28,6 +28,7 @@ import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, assertSpeech, withSpeechDirection } from '@/lib/speech-mode';
 import { isOpenAIImage, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from '@/lib/openai-image';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
+import { isMiniMaxImage, miniMaxImageRequest, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from '@/lib/minimax-image';
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
   const p = await loadProject(user, (await ctx.params).id);
@@ -75,14 +76,17 @@ export const POST = api(async (req, ctx) => {
   if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   assertCharacterRefLimit(characterRefs,7);
   let imageBytes=0;
+  const imageAssets:{mime:string;size:number}[]=[];
   for (const ref of [...new Set([...refs,...characterRefs])]) {
     const a = await asset(user, ref, p);
+    if(refs.includes(ref))imageAssets.push(a);
     if(ms.some(m=>isOpenAIImage(m.id))&&(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024))throw new Error('GPT Image: каждый референс должен быть PNG, JPEG или WebP до 10 МБ.');
     if(refs.includes(ref))imageBytes+=a.size;
     if (!a.mime.startsWith('image/'))
       throw new Error('Референс должен быть изображением.');
   }
   if(ms.some(m=>isOpenAIImage(m.id))&&imageBytes>OPENAI_IMAGE_REFS_BYTES)throw new Error('GPT Image: выберите референсы суммарно до 20 МБ. Запрос не отправлен.');
+  if(ms.some(m=>isMiniMaxImage(m.id))){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw new Error(issue);}
   const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt) : '';
   const shot = ['image', 'video'].includes(kind) && [5, 7].includes(item.stage) ? videoShot(p, item) : undefined;
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
@@ -114,7 +118,7 @@ export const POST = api(async (req, ctx) => {
   const basis =
     chosen(item) ?? linked?.variants.find((v) => v.id === linked.approvedId);
   const imageRequests=kind==='image'&&item.stage===5?Array.from({length:s.count},(_,n)=>storyboardImageRequest(p,item,s.prompt,refs,n+1,s.count)):[];
-  for(const request of imageRequests)for(const m of ms){const issue=storyboardImagePromptIssue(request,m.id,item.title);if(issue)throw new Error(issue);}
+  for(const request of imageRequests)for(const m of ms.filter(m=>!isMiniMaxImage(m.id))){const issue=storyboardImagePromptIssue(request,m.id,item.title);if(issue)throw new Error(issue);}
   const jobs: Job[] = ms.flatMap((m) =>
     Array.from({ length: s.count }, (_, n) => ({
       id: id(),
@@ -131,7 +135,7 @@ export const POST = api(async (req, ctx) => {
       volume: basis?.volume ?? 1,
       character: item.stage===1 ? item.character : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
-      prompt: kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
+      prompt: isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
         p,
         item,
         (item.character ? characterPrompt(item.character)+'\n\nПравки к этой попытке: ' : '')+s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`,
@@ -153,6 +157,7 @@ export const POST = api(async (req, ctx) => {
     })),
   );
   if(jobs.some(j=>isOpenAIImage(j.model)&&j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT))throw new Error('GPT Image: полный промпт с утверждённой основой длиннее 32 000 символов. Сократите задачу или описания. Запрос не отправлен.');
+  if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
   assertBudget(p, jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));

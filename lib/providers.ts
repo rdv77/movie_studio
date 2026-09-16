@@ -1,6 +1,7 @@
 import type { Job } from './domain';
 import { model } from './models';
 import { VIDEO_PROMPT_LIMIT } from './video';
+import { isMiniMaxImage, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from './minimax-image';
 import { isOpenAIImage, openAIImageSize, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from './openai-image';
 export type Result = {
   error?: string;
@@ -127,6 +128,25 @@ export async function generate(
     h = headers(m.provider, key);
   if (m.provider === 'sync') throw new ProviderError('Используйте отдельное окно синхронизации губ.', true, true);
   let d: any;
+  if (j.kind === 'image' && isMiniMaxImage(j.model)) {
+    if (!j.prompt.trim() || j.prompt.length > MINIMAX_IMAGE_PROMPT_LIMIT)
+      throw new ProviderError('MiniMax image-01: промпт должен содержать от 1 до 1500 символов. Запрос не отправлен.',true,true);
+    const inputs=refs.map(ref=>{
+      const match=/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/]+={0,2})$/.exec(ref);
+      if(!match||match[2].length%4)throw new ProviderError('MiniMax image-01: нужен референс PNG/JPEG в формате Data URL. Запрос не отправлен.',true,true);
+      return {mime:match[1],size:match[2].length*3/4-(match[2].endsWith('==')?2:match[2].endsWith('=')?1:0)};
+    });
+    const issue=miniMaxImageRefIssue(inputs);if(issue)throw new ProviderError(issue,true,true);
+    if(!['1:1','16:9','9:16','4:3','3:4','3:2','2:3','21:9'].includes(format))
+      throw new ProviderError('MiniMax image-01: неподдерживаемый формат кадра.',true,true);
+    d=await json(await call('https://api.minimax.io/v1/image_generation',h,{
+      model:'image-01',prompt:j.prompt,aspect_ratio:format,n:1,response_format:'url',prompt_optimizer:false,
+      ...(refs.length?{subject_reference:refs.map(image_file=>({type:'character',image_file}))}:{}),
+    }));
+    const url=d.data?.image_urls?.[0];
+    return {requestId:d.id,actual:null,usage:d.metadata,
+      ...(typeof url==='string'&&url?{url}:{error:'MiniMax не вернул картинку. Проверьте расход в кабинете; повтор запускается вручную.'})};
+  }
   if(j.kind==='image'&&isOpenAIImage(j.model)) {
     if(j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT||refs.length>8)throw new ProviderError('GPT Image: до 32 000 символов полного промпта и до 8 референсов в студии. Запрос не отправлен.',true,true);
     const settings={model:j.model,prompt:j.prompt,n:1,size:openAIImageSize(format),quality:'high',output_format:'png'};

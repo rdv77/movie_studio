@@ -56,6 +56,11 @@ export const MODELS: {
     note: 'До 8 референсов; общий лимит входных и выходного изображений — 9 МП',
   },
   {
+    id: 'image-01', name: 'MiniMax image-01', provider: 'minimax', kind: 'image',
+    estimate: '35000000',
+    note: 'Одна картинка · $0.0035; компактный промпт до 1500 символов; референсы PNG/JPEG меньше 10 МБ',
+  },
+  {
     id: 'grok-imagine-video-1.5',
     name: 'Grok Imagine Video 1.5',
     provider: 'xai',
