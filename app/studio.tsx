@@ -1,4 +1,5 @@
 'use client';
+import { zenCredits, generationSeconds } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
   QueryClient,
@@ -1790,6 +1791,7 @@ function GenerateDialog({
 }: any) {
   const [kind, setKind] = useState<Kind>('text');
   const [models, setModels] = useState<string[]>([]);
+  const [modelSearch,setModelSearch]=useState('');
   const [count, setCount] = useState(3);
   const [prompt, setPrompt] = useState('');
   const [refs, setRefs] = useState<string[]>([]);
@@ -1816,6 +1818,7 @@ function GenerateDialog({
             ? 'video'
             : 'text';
       setKind(k);
+      setModelSearch('');
       const preferred=k==='audio'&&MODELS.some(m=>m.id===p.preferredVoice?.model&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))?p.preferredVoice:undefined;
       setModels(preferred?[preferred.model]:[]);
       setCount(k === 'audio'?1:k === 'video' ? 2 : 3);
@@ -1936,8 +1939,11 @@ function GenerateDialog({
             />
           </Field>
         </div>
+        <Field label="Найти модель" hint="Выберите до четырёх моделей одного типа для сравнения. Выбранные модели остаются видны при поиске.">
+          <Input aria-label="Найти модель" placeholder="ZenCreator, Seedance, Qwen…" value={modelSearch} onChange={e=>setModelSearch(e.target.value)}/>
+        </Field>
         <div className="model-options">
-          {choices.map((m) => {
+          {choices.filter(m=>models.includes(m.id)||m.name.toLowerCase().includes(modelSearch.trim().toLowerCase())).map((m) => {
             const configured = connections?.providers?.find(
               (x: any) => x.id === m.provider,
             )?.configured;
@@ -1970,6 +1976,7 @@ function GenerateDialog({
                     </small>
                   </span>
                 </label>
+                {models.includes(m.id) && <ZenCost modelId={m.id} refs={effectiveRefs.length} count={count}/>}
                 {models.includes(m.id) && (
                   <Field
                     label="Оценка одной попытки, USD"
@@ -2153,7 +2160,7 @@ function GenerateDialog({
         {kind === 'video' && (
           <div className="note">
             {selected.some(m=>m.id==='MiniMax-H3')&&<p>MiniMax H3 использует выбранный первый кадр; пропорции видео определяются этим изображением. Сохранённый ключ MiniMax должен иметь доступ Pay-as-you-go. Образы героев учитываются в первом кадре и тексте, отдельные изображения героев не добавляются к этому запросу.</p>}
-            <p>Один запрос создаст 6 секунд видео. В монтаж войдут первые {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
+            <p>{selected.length ? selected.map(m=>`${m.name}: ${generationSeconds(m.id)} сек`).join(' · ') : 'Выберите модель, чтобы увидеть длительность'}.  В монтаж войдут первые {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
             <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {VIDEO_PROMPT_LIMIT} символов.</p>
@@ -2258,6 +2265,8 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <Field label="Оценка одной попытки, USD" hint="Оценка не равна списанию. Если стоимость неизвестна, поле можно оставить пустым только при отсутствии лимита проекта.">
           <Input aria-label="Оценка одной попытки, USD" value={estimate} inputMode="decimal" onChange={e => setEstimate(e.target.value)} />
         </Field>
+        <ZenCost modelId={m.id} refs={1} count={included.length}/>
+        <p className="muted">Каждый исходный ролик: {generationSeconds(m.id)} сек. В монтаж войдёт длительность соответствующего плана.</p>
         <CharacterReferences p={snapshot} mode="video"/>
         {videoCharacterRefs(snapshot,m.provider).length>7&&<p role="alert">Grok Video принимает до 7 отдельных образов героев.</p>}
         {rows.map((r, index) => (
@@ -2664,6 +2673,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
         </label>)}</div>
       </Field>
       {effectiveRefs.length > refLimit && <p role="alert">С учётом героев выбрано {effectiveRefs.length} референсов. Уберите дополнительные изображения или выберите модель с большим лимитом (до {refLimit} у текущей модели).</p>}
+      <ZenCost modelId={modelId} refs={effectiveRefs.length} count={included.length}/>
       <Field label="Оценка одной картинки, USD" hint="Оценка не равна списанию. Неизвестную стоимость можно оставить пустой при отсутствии лимита проекта.">
         <Input aria-label="Оценка одной картинки, USD" inputMode="decimal" value={override ?? (base === null ? '' : String(Number(BigInt(base)) / 1e10))} onChange={e => setOverride(e.target.value)} />
       </Field>
@@ -2679,7 +2689,13 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     </DialogContent>
   </Dialog>;
 }
+function ZenCost({modelId,refs=0,count=1}: {modelId:string;refs?:number;count?:number}) {
+  const cost=zenCredits(modelId,refs);
+  if(cost===undefined)return null;
+  return <p className="note">ZenCreator: ориентир {cost} кредитов за попытку · {cost*count} за серию ({count}). Это оценка по каталогу, а не подтверждённое списание. Кредиты не переводятся в USD автоматически; для лимита проекта укажите собственную оценку в USD.</p>;
+}
 function Connections({ data, refresh, perform, busy }: any) {
+  const [zenCheck,setZenCheck]=useState<any>(null);
   return (
     <>
       <div className="page-heading">
@@ -2726,6 +2742,7 @@ function Connections({ data, refresh, perform, busy }: any) {
                       provider: provider.id,
                       key,
                     });
+                    if(provider.id==='zencreator')setZenCheck(null);
                     form.reset();
                     refresh();
                   });
@@ -2765,6 +2782,7 @@ function Connections({ data, refresh, perform, busy }: any) {
                           await request('/api/connections', 'DELETE', {
                             provider: provider.id,
                           });
+                          if(provider.id==='zencreator')setZenCheck(null);
                           refresh();
                         })
                       }
@@ -2774,6 +2792,14 @@ function Connections({ data, refresh, perform, busy }: any) {
                   )}
                 </div>
               </form>
+              {provider.id==='zencreator'&&<div className="note">
+                <p>Создайте ключ с правами read и generate. Оплата — кредитами ZenCreator; отдельная проверка читает каталог и баланс, без генерации.</p>
+                <Button variant="outline" disabled={busy||!configured} onClick={()=>perform(async()=>{setZenCheck(null);setZenCheck(await request('/api/connections/zencreator'));})}>Проверить ключ и баланс</Button>
+                {zenCheck&&<div role="status"><p>Ключ работает · баланс: {zenCheck.credits} кредитов · {new Date(zenCheck.checkedAt).toLocaleString('ru-RU')}</p>
+                  <p>Проверено право чтения. Право генерации проверится при запуске выбранной модели.</p>
+                  <details><summary>Доступ к моделям</summary>{zenCheck.models.map((m:any)=><p key={m.id}>{m.name}: {m.available?'доступна':'недоступна'}{m.kind==='image'?(m.references?' · с референсами':' · референсы недоступны'):''}</p>)}</details>
+                </div>}
+              </div>}
               <small className="muted">
                 Доступ к модели проверяется при генерации; сохранение ключа не
                 выполняет платных запросов.
@@ -2838,6 +2864,7 @@ function Budget({ p, action, perform, replace }: any) {
                 'Дата',
                 'Модель',
                 'Статус',
+                'Оценка кредитов ZenCreator',
                 'Оценка USD',
                 'Факт USD',
                 'Источник',
@@ -2847,6 +2874,7 @@ function Budget({ p, action, perform, replace }: any) {
                 j.created,
                 j.model,
                 statuses[j.status],
+                String(j.zenCreditsEstimate ?? ''),
                 j.estimate === null ? '' : String(Number(j.estimate) / 1e10),
                 j.actual === null ? '' : String(Number(j.actual) / 1e10),
                 j.actualSource ?? '',
@@ -2922,10 +2950,11 @@ function Budget({ p, action, perform, replace }: any) {
                   {statuses[j.status]}
                   {j.error && <small className="warning-text">{j.error}</small>}
                 </TableCell>
-                <TableCell>{money(j.estimate)}</TableCell>
+                <TableCell>{money(j.estimate)}{j.zenCreditsEstimate!==undefined&&<small>≈ {j.zenCreditsEstimate} кредитов ZenCreator</small>}</TableCell>
                 <TableCell>
                   {money(j.actual)}
                   <small>{j.actualSource ?? 'Списание не подтверждено'}</small>
+                  {j.zenCreditsEstimate!==undefined&&<small>Фактические кредиты: сверьте в кабинете ZenCreator. Оценка не считается списанием.</small>}
                   {isOpenAIImage(j.model)&&openAIImageTariff(j.usage)!==null&&<small>Расчёт по токенам без скидки за кэш: {money(openAIImageTariff(j.usage))}</small>}
                 </TableCell>
                 <TableCell>

@@ -191,6 +191,11 @@ const h3Batch=await(await runBulk({...bulkPayload,estimate:'4800000000'})).json(
 assert.equal(h3Batch.jobs.length,bulk.jobs.length+8);
 assert(h3Batch.jobs.slice(bulk.jobs.length).every(j=>j.model==='MiniMax-H3'&&j.estimate==='4800000000'&&j.refs.length===1&&!j.characterRefs));
 const gallery = structuredClone(p);
+globalThis.videoProject=structuredClone(bulk);
+D.chosen(videoProject.items.find(i=>i.id===source.id)).model='zencreator:video:kling@2.6';
+const zenBatch=await(await runBulk({...bulkPayload,estimate:null})).json();
+assert.equal(zenBatch.jobs.length,bulk.jobs.length+8);
+assert(zenBatch.jobs.slice(bulk.jobs.length).every(j=>j.model==='zencreator:video:kling@2.6'&&j.zenCreditsEstimate===10&&j.actual===null&&j.estimate===null&&j.refs.length===1&&!j.characterRefs));
 const target = gallery.items.find(i => i.stage === 7);
 const board = gallery.items.find(i => i.stage === 5);
 board.sourceShot = {...target.sourceShot};

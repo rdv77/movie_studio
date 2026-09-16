@@ -30,6 +30,10 @@ assert(editedTask.includes('НОВАЯ_КАМЕРА'));assert(editedTask.include
 const ctx={params:Promise.resolve({id:p.id})},req=b=>new Request('http://localhost',{method:'POST',body:JSON.stringify(b)});
 const single={revision:p.revision,batchId:D.id(),itemId:frame.id,models:['gpt-image-2.5-sunburst'],count:1,prompt:task,refs,dialogue:'',voiceId:'',estimates:{}};
 const batch={revision:p.revision,batchId:D.id(),model:'gpt-image-2.5-sunburst',refs,estimate:null,plans:frames.map(i=>({itemId:i.id,prompt:S.storyboardPrompt(p,i)}))};
+globalThis.state=structuredClone(p);const zenBatchResponse=await B.POST(req({...batch,model:'zencreator:image:SEEDREAM_5_PRO'}),ctx);
+assert.equal(zenBatchResponse.status,200,await zenBatchResponse.clone().text());assert.equal(state.jobs.length,p.jobs.length+11);
+assert(state.jobs.slice(p.jobs.length).every(j=>j.zenCreditsEstimate===3&&j.actual===null&&j.estimate===null));
+assert.deepEqual(state.jobs[p.jobs.length].refs,refs);assert.equal(state.jobs[p.jobs.length].prompt,request.prompt);assert.deepEqual(state.items,p.items);
 globalThis.state=structuredClone(copied);let editedResponse=await G.POST(req({...single,prompt:editedTask}),ctx);assert.equal(editedResponse.status,200);assert.equal(state.jobs.at(-1).prompt,editedRequest.prompt);
 globalThis.state=structuredClone(copied);editedResponse=await B.POST(req({...batch,plans:[{itemId:copyFrame.id,prompt:editedTask}]}),ctx);assert.equal(editedResponse.status,200);assert.equal(state.jobs.at(-1).prompt,editedRequest.prompt);
 globalThis.state=structuredClone(p);let response=await G.POST(req(single),ctx);assert.equal(response.status,200,await response.clone().text());assert.equal(state.jobs.at(-1).prompt,request.prompt);

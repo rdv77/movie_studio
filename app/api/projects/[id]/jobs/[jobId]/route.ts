@@ -76,7 +76,8 @@ export const POST = api(async (req, ctx) => {
     return Response.json(p);
   }
   const saving = j.status === 'saving';
-  const key = saving ? '' : await getKey(user, model(j.model).provider);
+  const refreshZen = saving && model(j.model).provider === 'zencreator';
+  const key = saving && !refreshZen ? '' : await getKey(user, model(j.model).provider);
   const polling = j.status === 'pending';
   if (!polling && !saving) {
     p = await mutate(user, id, (p) => {
@@ -119,7 +120,7 @@ export const POST = api(async (req, ctx) => {
         ? []
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
-    const result: Result = saving
+    const result: Result = refreshZen ? await poll(j, key) : saving
       ? j.output!
       : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
           // Transfer private files directly; never grant public access to the asset library.

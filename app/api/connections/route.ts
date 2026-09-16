@@ -20,7 +20,7 @@ export const POST = api(async (req) => {
   const user = await owner(req, true);
   const { provider, key } = z
     .object({
-      provider: z.enum(['openai', 'xai', 'minimax', 'bfl', 'elevenlabs', 'sync']),
+      provider: z.enum(['openai', 'xai', 'minimax', 'bfl', 'elevenlabs', 'sync', 'zencreator']),
       key: z.string().trim().min(10).max(500),
     })
     .parse(await req.json());

@@ -63,6 +63,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  zenCreditsEstimate?: number;
   journalArchivedAt?: string;
   purpose?: 'voice-test';
   voiceName?: string;

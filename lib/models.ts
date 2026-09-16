@@ -1,3 +1,4 @@
+import { ZEN_MODELS } from './zencreator-models';
 import type { Kind } from './domain';
 export const MODELS: {
   id: string;
@@ -7,6 +8,7 @@ export const MODELS: {
   estimate: string | null;
   note: string;
 }[] = [
+  ...ZEN_MODELS,
   {
     id: 'gpt-6-astra',
     name: 'GPT-6 Astra',
@@ -108,6 +110,7 @@ export const SYNC_MODELS = [
     note: 'Больше деталей лица; рот в исходном видео уже должен двигаться', rate: '0.08325' },
 ];
 export const PROVIDERS = [
+  {id:'zencreator',name:'ZenCreator · агрегатор',url:'https://app.zencreator.pro/api-keys'},
   { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys' },
   { id: 'xai', name: 'xAI / Grok', url: 'https://console.x.ai/' },
   { id: 'minimax', name: 'MiniMax', url: 'https://platform.minimax.io/' },

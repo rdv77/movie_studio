@@ -1,3 +1,4 @@
+import { prepareZenJobs } from '@/lib/zencreator-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
 import { chosen, stageReady, dependencies, assertBudget, id, now, type Job } from '@/lib/domain';
@@ -53,6 +54,7 @@ export const POST = api(async (req, ctx) => {
       status: 'queued', transportVersion: 2, estimate: s.estimate, actual: null };
   });
   await getKey(user, m.provider);
+  prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));

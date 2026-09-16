@@ -36,7 +36,8 @@
     "test:storage": "node tests/storage.mjs",
     "test:auth": "node tests/auth.mjs",
     "test:integration": "node tests/server-smoke.mjs",
-    "test:container": "node tests/container-smoke.mjs"
+    "test:container": "node tests/container-smoke.mjs",
+    "test:zencreator": "node tests/zencreator.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

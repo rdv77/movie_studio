@@ -1,3 +1,4 @@
+import { prepareZenJobs } from '@/lib/zencreator-models';
 import {
   api,
   owner,
@@ -158,6 +159,7 @@ export const POST = api(async (req, ctx) => {
   );
   if(jobs.some(j=>isOpenAIImage(j.model)&&j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT))throw new Error('GPT Image: полный промпт с утверждённой основой длиннее 32 000 символов. Сократите задачу или описания. Запрос не отправлен.');
   if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
+  prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
