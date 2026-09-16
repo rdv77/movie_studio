@@ -1,5 +1,5 @@
 'use client';
-import { zenCredits, generationSeconds } from '@/lib/zencreator-models';
+import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
   QueryClient,
@@ -107,7 +107,7 @@ import { styleReapprovalReason } from '@/lib/style-approval';
 import { speechReapprovalReason } from '@/lib/speech-approval';
 import { planCardsNeedSync } from '@/lib/plan-sync';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
-import { isMiniMaxImage, miniMaxImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
+import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
 import { canArchiveJob, journalArchived, newestJobs } from '@/lib/journal';
 import { isOpenAIImage, openAIImageTariff } from '@/lib/openai-image';
 import { readableText } from '@/lib/shots';
@@ -1873,7 +1873,8 @@ function GenerateDialog({
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
-  const imagePromptError=miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
+  const zenRequest=kind==='image'&&selected.some(m=>isZenCreatorImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,ZEN_IMAGE_PROMPT_LIMIT):undefined;
+  const imagePromptError=zenRequest&&zenRequest.length>ZEN_IMAGE_PROMPT_LIMIT?'ZenCreator: сократите задачу, имена и описания до общего лимита 5000 символов.':miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
   const miniRefError=miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
@@ -1903,9 +1904,9 @@ function GenerateDialog({
           <DialogTitle>Серия вариантов</DialogTitle>
           <DialogDescription>
             {kind === 'video'
-              ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте до четырёх моделей; число вариантов задаётся для каждой.'
-              : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте до четырёх моделей; число вариантов задаётся для каждой.'
-              : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте до четырёх моделей; число вариантов задается для каждой.'}
+              ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
+              : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
+              : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте доступные модели одного типа; число вариантов задается для каждой.'}
           </DialogDescription>
         </DialogHeader>
         <div className="form-grid">
@@ -1939,7 +1940,7 @@ function GenerateDialog({
             />
           </Field>
         </div>
-        <Field label="Найти модель" hint="Выберите до четырёх моделей одного типа для сравнения. Выбранные модели остаются видны при поиске.">
+        <Field label="Найти модель" hint="Выберите любое число доступных моделей одного типа для сравнения. Выбранные модели остаются видны при поиске.">
           <Input aria-label="Найти модель" placeholder="ZenCreator, Seedance, Qwen…" value={modelSearch} onChange={e=>setModelSearch(e.target.value)}/>
         </Field>
         <div className="model-options">
@@ -1957,7 +1958,7 @@ function GenerateDialog({
                 <label className="row">
                   <Checkbox
                     checked={models.includes(m.id)}
-                    disabled={!configured || (!models.includes(m.id) && models.length >= 4)}
+                    disabled={!configured}
                     onCheckedChange={(v) => {
                       if (kind === 'audio') {
                         setModels(v ? [m.id] : []);
@@ -2151,8 +2152,12 @@ function GenerateDialog({
         )}
         {item.stage>1&&['image','video'].includes(kind)&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
         {referenceError&&<p role="alert">{referenceError}</p>}
+        {zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
+          <details><summary>Промпт для ZenCreator{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{zenRequest.prompt}</p></details>
+          {imagePromptError&&<p role="alert">{imagePromptError}</p>}
+        </div>}
         {miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
-        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id))&&<div className="note">
+        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id))&&<div className="note">
           <p>Полный промпт кадра: {imageRequest.length}{selected.some(m=>isOpenAIImage(m.id))?' / 32000':''} символов. Учтены стиль, герои, референсы и правило речи.</p>
           <details><summary>Промпт для модели{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{imageRequest.prompt}</p></details>
           {imagePromptError&&<p role="alert">{imagePromptError}</p>}
@@ -2181,7 +2186,7 @@ function GenerateDialog({
           </div>
         </div>
         <p className="muted small">
-          Оценка не равна списанию. Неудачные и невыбранные попытки также
+          Запросы выбранных моделей выполняются по очереди. Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
         </p>
         <DialogFooter>
@@ -2646,6 +2651,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
+      {isZenCreatorImage(modelId)&&<p className="note">ZenCreator: промпт каждого кадра подготовлен в пределах 5000 символов. Проверьте действие, героев и стиль в разделе «Промпт для модели»; исходные описания остаются целиком.</p>}
       {isMiniMaxImage(modelId)&&<p className="note">MiniMax image-01: описание каждого кадра сокращается до 1500 символов. Перед запуском проверьте «Промпт для модели» в отмеченных планах. Референсы PNG/JPEG меньше 10 МБ; общий размер до 20 МБ. Используется сохранённый ключ MiniMax.</p>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
@@ -2658,7 +2664,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
           {(!r.prompt.trim() || r.prompt.trim().length > 20000) && <p role="alert">Введите задачу длиной от 1 до 20000 символов.</p>}
-          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':''} символов.</p>
+          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':isZenCreatorImage(modelId)?' / 5000':''} символов.</p>
           <details><summary>Промпт для модели</summary><p className="whitespace-pre-wrap">{compiled.get(r.itemId)!.prompt}</p></details>
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}

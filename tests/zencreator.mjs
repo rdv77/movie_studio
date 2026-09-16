@@ -42,6 +42,7 @@ try{
  uploads=0;await P.generate({...job,kind:'video',model:'zencreator:video:kling@2.6',refs:[a],prompt:'Рты закрыты до конца 6-секундного клипа'},key,[image],'16:9');
  await P.generate({...job,kind:'text',model:'zencreator:text:grok',refs:[]},key,[],'16:9');
  let count=requests.length;await assert.rejects(()=>P.generate({...job,kind:'text',model:'zencreator:text:grok',refs:[],prompt:'a'.repeat(32001)},key,[],'16:9'),e=>e.notSent);assert.equal(requests.length,count);
+ await assert.rejects(()=>P.generate({...job,prompt:'a'.repeat(5001)},key,[image,image],'16:9'),e=>e.notSent&&e.definite&&e.message.includes('5000'));assert.equal(requests.length,count,'Oversized old jobs are stopped even when the catalog omits maxLength');
  await assert.rejects(()=>P.generate(job,key,[image],'16:9'),e=>e.notSent);assert.equal(requests.length,count);
  for(const fail of ['auth','no-model','upload-failure']){
   mode=fail;count=requests.filter(r=>r.url===root+'/generations').length;

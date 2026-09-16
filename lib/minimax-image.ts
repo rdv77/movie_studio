@@ -25,11 +25,17 @@ const shorten = (s: string, n: number) => {
 // A separate, visible compact prompt. Never trim a serialized screenplay or
 // mutate the director's source cards. Preview and queued jobs use this function.
 export function miniMaxImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1) {
+  return compactImageRequest(p,item,instruction,refs,index,count,MINIMAX_IMAGE_PROMPT_LIMIT);
+}
+export function compactImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,limit=MINIMAX_IMAGE_PROMPT_LIMIT) {
   const fields=planFields(p,item,chosen(item)),shot=videoShot(p,item);
   const speech=fields.speechType==='character'
     ? `Говорит ${fields.speaker}; лицо этого героя видно, остальные молчат.`
     : 'У всех героев закрыты рты; речь только за кадром или отсутствует.';
-  const fixed=`Анимация, ${p.format}. Одно цельное изображение, без текста, коллажа и пузырей речи. Сохрани лица, одежду и стиль референсов. Только участники описанного действия. ${speech} Вариант ${index}/${count}.`;
+  const character=item.stage===1?(item.character??chosen(item)?.character):undefined;
+  const fixed=character
+    ? `Образ одного героя анимационного фильма, ${p.format}. Покажи только этого героя в полный рост, с хорошо различимым лицом, на простом фоне. Без текста, коллажа и других персонажей. Прикреплённые изображения — прообразы; сохрани узнаваемые черты, меняй только указанное в задаче. Вариант ${index}/${count}.`
+    : `Анимация, ${p.format}. Одно цельное изображение, без текста, коллажа и пузырей речи. Сохрани лица, одежду и стиль референсов. Только участники описанного действия. ${speech} Вариант ${index}/${count}.`;
   const sections:{label:string;text:string;weight:number}[]=[];
   const add=(label:string,text:string,weight:number)=>{if(clean(text))sections.push({label,text:clean(text),weight});};
   const defaultTask=item.stage===5?storyboardPrompt(p,item).trim():'';
@@ -49,11 +55,12 @@ export function miniMaxImageRequest(p:Project,item:Item,instruction:string,refs:
     add('Стыковка',fields.continuity,1);
   }
   if(task!==defaultTask) add('Задача режиссёра',task,5);
-  if(item.stage===1&&item.character) {
-    const c=item.character;
-    add('Герой',`${c.name}: ${c.appearance}. ${c.description}. ${c.instructions}`,3);
+  if(character) {
+    add('Герой',`${character.name}: ${character.appearance}`,5);
+    add('Характер',character.description,2);
+    add('Работа с исходными изображениями',character.instructions,5);
   }
-  for(const c of approvedCharacters(p))
+  for(const c of item.stage===1?[]:approvedCharacters(p))
     add(`Герой ${c.profile.name}`,`${refs.includes(c.assetId)?`Референс ${refs.indexOf(c.assetId)+1}. `:''}${c.profile.appearance||c.profile.description}`,2);
   for(const card of p.items.filter(i=>[2,3].includes(i.stage)&&isApproved(p,i))) {
     const v=card.variants.find(v=>v.id===card.approvedId)!;
@@ -63,9 +70,9 @@ export function miniMaxImageRequest(p:Project,item:Item,instruction:string,refs:
   const render=(texts:string[])=>[fixed,...sections.map((s,i)=>`${s.label}: ${texts[i]}`)].join('\n');
   const original=render(sections.map(s=>s.text));
   let prompt=original;
-  if(prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT) {
+  if(prompt.length>limit) {
     // Labels also consume the cap; unusually many/long names require explicit editing.
-    const budget=MINIMAX_IMAGE_PROMPT_LIMIT-render(sections.map(()=>'' )).length;
+    const budget=limit-render(sections.map(()=>'' )).length;
     if(budget<sections.length*12) return {prompt:original,length:original.length,shortened:false,sections:sections.map(s=>({label:s.label,length:s.text.length}))};
     const lengths=sections.map(()=>0);let remaining=budget;
     while(remaining>0) {
