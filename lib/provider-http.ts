@@ -49,7 +49,7 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
         }
         await reader.cancel();
         const data = JSON.parse(await new Blob(chunks as BlobPart[]).text());
-        const message = data.error?.message ?? data.error ?? data.message ?? data.detail;
+        const message = [data.error?.message,data.error,data.message,data.detail].find(value=>typeof value==='string');
         if (typeof message === 'string') detail = message;
       }
       for (const value of Object.values(h)) {
@@ -59,9 +59,13 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
       detail = detail.replace(/Bearer\s+\S+/gi, 'Bearer [скрыто]')
         .replace(/data:[^\s]+/gi, '[изображение]').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
     } catch { /* A malformed error must not obscure the HTTP status. */ }
-    if (r.status !== 400 && r.status !== 422) detail = '';
+    if (![400,403,422].includes(r.status)) detail = '';
+    const xai=new URL(url).hostname==='api.x.ai';
     const advice = r.status === 400 || r.status === 422 ? 'Проверьте параметры запроса.'
-      : r.status === 401 || r.status === 403 ? 'Проверьте API-ключ и доступ к модели.'
+      : r.status === 403 ? detail ? 'Провайдер запретил запрос; ориентируйтесь на его пояснение выше.'
+        : xai ? 'xAI запретил запрос без пояснения. Проверьте права API-ключа на изображения и выбранную модель в console.x.ai. Причину отказа по содержимому этот ответ не подтверждает.'
+        : 'Доступ запрещён провайдером без пояснения. Проверьте разрешения ключа и модели в его кабинете.'
+      : r.status === 401 ? 'Проверьте API-ключ и доступ к модели.'
       : r.status === 402 ? 'Проверьте баланс провайдера.'
       : r.status === 429 ? 'Достигнут лимит провайдера. Повторите позднее вручную.'
       : 'Проверьте запрос в кабинете провайдера.';
