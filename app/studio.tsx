@@ -2,6 +2,7 @@
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason } from '@/lib/storyboard-approval';
+import { runnableJobs, newestProject, storyboardAdmissionIssue } from '@/lib/generation-queue';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -281,7 +282,8 @@ function Workspace() {
   const [draft, setDraft] = useState('');
   const [renderStatus, setRenderStatus] = useState('');
   const renderAbort = useRef<AbortController | null>(null);
-  const jobBusy = useRef(false);
+  const jobFlights = useRef(new Map<string,Set<string>>());
+  const jobAttempts = useRef(new Map<string,Map<string,number>>());
   const videoSyncAttempt = useRef('');
   const storyboardSyncAttempt = useRef('');
   const projects = useQuery<Summary[]>({
@@ -328,7 +330,7 @@ function Workspace() {
   const videoScript = p ? scriptVideo(p) : undefined;
   const currentShot = p && item && [5, 7].includes(step) ? videoShot(p, item) : undefined;
   function replace(next: Project) {
-    qc.setQueryData(['project', next.id], next);
+    qc.setQueryData<Project>(['project', next.id],previous=>newestProject(previous,next));
     qc.invalidateQueries({ queryKey: ['projects'] });
     qc.invalidateQueries({ queryKey: ['assets', next.id] });
   }
@@ -392,28 +394,23 @@ function Workspace() {
   }, [p, step, busy]);
   useEffect(() => {
     if (!projectId) return;
-    const timer = setInterval(async () => {
-      if (jobBusy.current) return;
+    const flights=jobFlights.current.get(projectId)??new Set<string>();
+    const attempts=jobAttempts.current.get(projectId)??new Map<string,number>();
+    jobFlights.current.set(projectId,flights);jobAttempts.current.set(projectId,attempts);
+    const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
-      const job =
-        current?.jobs.find((j) =>
-          ['pending', 'dispatching', 'saving'].includes(j.status),
-        ) ?? current?.jobs.find((j) => j.status === 'queued');
-      if (!job) return;
-      jobBusy.current = true;
-      try {
-        const next = await request(
-          `/api/projects/${projectId}/jobs/${job.id}`,
-          'POST',
-        );
-        qc.setQueryData(['project', projectId], next);
-        qc.invalidateQueries({ queryKey: ['assets', projectId] });
-      } catch (e) {
-        if (activeProject.current === projectId) setError(
-          e instanceof Error ? e.message : 'Не удалось проверить задачу.',
-        );
-      } finally {
-        jobBusy.current = false;
+      if(!current)return;
+      for(const job of runnableJobs(current,flights,attempts)) {
+        flights.add(job.id);attempts.set(job.id,Date.now());
+        void (async()=>{
+          try {
+            const next=await request(`/api/projects/${projectId}/jobs/${job.id}`,'POST');
+            qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next));
+            qc.invalidateQueries({queryKey:['assets',projectId]});
+          } catch(e) {
+            if(activeProject.current===projectId)setError(e instanceof Error?e.message:'Не удалось проверить задачу.');
+          } finally {flights.delete(job.id);}
+        })();
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -787,6 +784,7 @@ function Workspace() {
                     В серии осталось {active.length} попыток. Обработка
                     продолжается, пока студия открыта; при возвращении очередь
                     возобновится.
+                    {step===5&&' Можно открыть другой план и запустить «Создать с ИИ», не дожидаясь текущего кадра.'}
                   </span>
                   <Button variant="ghost" onClick={() => setPanel('budget')}>
                     Посмотреть
@@ -1818,6 +1816,7 @@ function GenerateDialog({
   const [voice, setVoice] = useState('');
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState('');
+  const queueIssue=item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):'';
   const allScriptAudio = scriptSpeech(p);
   const scriptAudio = {...allScriptAudio,sources:item.sourceShot?allScriptAudio.sources:allScriptAudio.sources.filter(s=>s.speechType==='voiceover')};
   const characters = speechCharacters(p);
@@ -2204,8 +2203,9 @@ function GenerateDialog({
             <strong>{money(total)}</strong>
           </div>
         </div>
+        {queueIssue&&<p role="status">{queueIssue}</p>}
         <p className="muted small">
-          Запросы выбранных моделей выполняются по очереди. Оценка не равна списанию. Неудачные и невыбранные попытки также
+          {item.stage===5&&kind==='image'?'Изображения раскадровки обрабатываются параллельно. Пока идёт генерация, можно запустить другой план.':'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
         </p>
         <DialogFooter>
@@ -2215,7 +2215,7 @@ function GenerateDialog({
           <Button
             disabled={
               busy ||
-              !models.length ||
+              !models.length || !!queueIssue ||
               !prompt.trim() ||
               prompt.trim().length>20000 || !!imagePromptError ||
               count < 1 ||
@@ -2706,7 +2706,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <div className="generation-total"><div><span>Будет создано</span><strong>{included.length} картинок</strong></div>
         <div><span>Оценка всей серии</span><strong>{money(total)}</strong></div></div>
       {costError && <p role="alert">{costError}</p>}
-      <p className="muted">Генерация идёт по очереди. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
+      <p className="muted">Кадры обрабатываются параллельно. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
           await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:effectiveRefs, estimate,

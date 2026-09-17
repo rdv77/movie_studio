@@ -1,4 +1,5 @@
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
+import { enqueueStoryboard, storyboardAdmissionIssue } from '@/lib/generation-queue';
 import { prepareZenJobs, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import {
   api,
@@ -59,7 +60,11 @@ export const POST = api(async (req, ctx) => {
   if(item.removedAt)throw new Error('Сначала восстановите удалённую карточку героя.');
   if (!stageReady(p, item.stage))
     throw new Error('Утвердите предыдущие этапы.');
-  if (
+  const ms = [...new Set(s.models)].map(model);
+  const parallelStoryboard=item.stage===5&&ms.every(m=>m.kind==='image');
+  const queueIssue=parallelStoryboard?storyboardAdmissionIssue(p,item.id):'';
+  if(queueIssue)throw new Error(queueIssue);
+  if (!parallelStoryboard &&
     p.jobs.some((j) =>
       ['queued', 'dispatching', 'pending', 'saving'].includes(j.status),
     )
@@ -67,7 +72,6 @@ export const POST = api(async (req, ctx) => {
     throw new Error(
       'Дождитесь текущей серии или отмените неотправленные попытки.',
     );
-  const ms = [...new Set(s.models)].map(model);
   if (ms.some((m) => m.kind !== ms[0].kind))
     throw new Error('Сравнивайте модели одного типа.');
   if (ms.some(m => m.provider === 'sync')) throw new Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
@@ -162,6 +166,7 @@ export const POST = api(async (req, ctx) => {
   if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
   prepareFalJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
+  if(parallelStoryboard)return Response.json(await enqueueStoryboard(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
   assertBudget(p, jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
