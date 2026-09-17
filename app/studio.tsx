@@ -1,5 +1,6 @@
 'use client';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
+import { scriptReapprovalReason } from '@/lib/script-approval';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -313,6 +314,8 @@ function Workspace() {
   const blockers = p && !ready ? approvalBlockers(p, step===9?6:step) : [];
   const showCards=step!==9&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
+  const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
+  const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
   const staleVideo = !!(p && step === 7 && selected?.kind === 'video' && selected.assetId && selected.deps !== dependencies(p, 7));
   const reapprovalReason = p && item && selected && staleVideo ? videoReapprovalReason(p, item.id, selected.id) : '';
   const staleStyle=!!(p&&item&&step===2&&selected&&!variantCurrent(p,item,selected));
@@ -1210,7 +1213,12 @@ function Workspace() {
                           )}
                           {selectedApproved ? 'Этот вариант утверждён' : isApproved(p, item) ? 'Утверждён другой вариант' : item.approvedId ? 'Утверждение требует пересмотра' : 'Вариант ещё не утверждён'}
                         </div>
-                        {staleSpeech ? <div className="note">
+                        {staleScript ? <div className="note">
+                          <p>Этот сценарий создан для прежней основы фильма. Проверьте его текст: если он по-прежнему подходит, утвердите его для текущей версии.</p>
+                          {scriptReason&&<p role="status">{scriptReason}</p>}
+                          <Button className="approve-button h-auto whitespace-normal" disabled={busy||!!scriptReason} onClick={()=>perform(()=>action('reapproveScript',{variantId:selected!.id}))}><Check/>Утвердить сценарий для текущей версии</Button>
+                          <p className="muted small">Сохранится эта же карточка и её текст. Раскадровку и другие материалы, зависящие от изменённой основы, нужно проверить отдельно.</p>
+                        </div> : staleSpeech ? <div className="note">
                           <p>После создания записи изменились сценарий или раскадровка. Прослушайте выбранную запись. Если она подходит этому плану, подтвердите её для текущей версии фильма.</p>
                           <p className="muted small">Записанные слова, голос и вид речи сохранятся. Если нужно изменить саму реплику, создайте новую озвучку.</p>
                           {speechReason&&<p role="status">{speechReason}</p>}
