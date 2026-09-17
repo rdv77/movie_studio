@@ -1,6 +1,7 @@
 'use client';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
+import { storyboardReapprovalReason } from '@/lib/storyboard-approval';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -316,6 +317,8 @@ function Workspace() {
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
+  const staleStoryboard=!!(p&&item&&step===5&&selected&&!variantCurrent(p,item,selected));
+  const storyboardReason=p&&item&&selected&&staleStoryboard?storyboardReapprovalReason(p,item.id,selected.id):'';
   const staleVideo = !!(p && step === 7 && selected?.kind === 'video' && selected.assetId && selected.deps !== dependencies(p, 7));
   const reapprovalReason = p && item && selected && staleVideo ? videoReapprovalReason(p, item.id, selected.id) : '';
   const staleStyle=!!(p&&item&&step===2&&selected&&!variantCurrent(p,item,selected));
@@ -1213,7 +1216,12 @@ function Workspace() {
                           )}
                           {selectedApproved ? 'Этот вариант утверждён' : isApproved(p, item) ? 'Утверждён другой вариант' : item.approvedId ? 'Утверждение требует пересмотра' : 'Вариант ещё не утверждён'}
                         </div>
-                        {staleScript ? <div className="note">
+                        {staleStoryboard ? <div className="note">
+                          <p>Этот вариант раскадровки создан для прежней основы фильма. Сравните его с текущим планом: если он подходит, подтвердите его повторно.</p>
+                          {storyboardReason&&<p role="status">{storyboardReason}</p>}
+                          <Button className="approve-button h-auto whitespace-normal" disabled={busy||!!storyboardReason} onClick={()=>perform(()=>action('reapproveStoryboard',{variantId:selected!.id}))}><Check/>Утвердить раскадровку для текущей версии</Button>
+                          <p className="muted small">Изображение и описание сохранятся в этой же карточке. Повторная генерация не запускается. Зависимые озвучку, аниматик и видеопланы проверяйте отдельно.</p>
+                        </div> : staleScript ? <div className="note">
                           <p>Этот сценарий создан для прежней основы фильма. Проверьте его текст: если он по-прежнему подходит, утвердите его для текущей версии.</p>
                           {scriptReason&&<p role="status">{scriptReason}</p>}
                           <Button className="approve-button h-auto whitespace-normal" disabled={busy||!!scriptReason} onClick={()=>perform(()=>action('reapproveScript',{variantId:selected!.id}))}><Check/>Утвердить сценарий для текущей версии</Button>

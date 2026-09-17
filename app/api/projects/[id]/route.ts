@@ -3,6 +3,7 @@ import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
 import { reapproveVideo } from '@/lib/video-approval';
 import { reapproveStyle } from '@/lib/style-approval';
 import { reapproveScript } from '@/lib/script-approval';
+import { reapproveStoryboard } from '@/lib/storyboard-approval';
 import { reapproveSpeech } from '@/lib/speech-approval';
 import { removeCharacter, restoreCharacter } from '@/lib/character-removal';
 import { preparePlanCards } from '@/lib/storyboard';
@@ -112,6 +113,13 @@ export const PATCH = api(async (req, ctx) => {
     case 'reapproveScript': {
       const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
       reapproveScript(p,body.itemId!,variantId);break;
+    }
+    case 'reapproveStoryboard': {
+      const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
+      const source=getItem(p,body.itemId!).variants.find(v=>v.id===variantId);
+      if(source?.kind==='image'&&(!source.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('image/')))
+        throw new Error('Изображение недоступно. Выберите готовый кадр.');
+      reapproveStoryboard(p,body.itemId!,variantId);break;
     }
     case 'reapproveSpeech': {
       const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
