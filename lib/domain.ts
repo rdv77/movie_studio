@@ -111,6 +111,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  hiddenReferenceIds?: string[];
   voiceComparisons?: { id: string; phrase: string; created: string; removedAt?: string; samples: { jobId: string; model: string; voiceId: string; name: string; assetId?: string }[] }[];
   preferredVoice?: { model: string; voiceId: string; name: string };
   animatic?: { variants: Variant[]; selectedId?: string; approvedId?: string; removedVariants?: Variant[] };

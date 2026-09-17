@@ -1,4 +1,5 @@
 import { assertBudget, dependencies, getItem, stageReady, type Job, type Project } from './domain';
+import { selectedReferences } from './reference-selection';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
@@ -34,6 +35,8 @@ export async function enqueueStoryboard(snapshot:Project,jobs:Job[],load:()=>Pro
     if(dependencies(p,5)!==basis||JSON.stringify(getItem(p,itemId))!==original||!stageReady(p,5))
       throw new Error('Основа или выбранный план изменились. Проверьте задачу заново.');
     const issue=storyboardAdmissionIssue(p,itemId);if(issue)throw new Error(issue);
+    if(JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
+      throw new Error('Список референсов изменился. Проверьте галочки заново.');
     assertBudget(p,jobs);
     const revision=p.revision;
     p.jobs.push(...jobs);

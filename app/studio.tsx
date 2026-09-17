@@ -3,6 +3,7 @@ import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason } from '@/lib/storyboard-approval';
 import { runnableJobs, newestProject, storyboardAdmissionIssue } from '@/lib/generation-queue';
+import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -1400,6 +1401,7 @@ function Workspace() {
       )}
       {p && item && dialog === 'generate' && (
         <GenerateDialog key={`${p.id}:${item.id}`}
+          referenceAction={(assetId:string,restore=false)=>action(restore?'restoreReference':'hideReference',{assetId})}
           open={dialog === 'generate'}
           close={closeDialog}
           p={p}
@@ -1793,6 +1795,7 @@ function VariantEditor({
   );
 }
 function GenerateDialog({
+  referenceAction,
   open,
   close,
   p,
@@ -1850,7 +1853,7 @@ function GenerateDialog({
             ? storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.',
       );
       setRefs(
-        k === 'video'
+        k==='image'&&item.stage===5 ? selectedReferences(p,characterImageRefs(p,item,v?.refs??[])) : k === 'video'
           ? (videoFrame(p, item) ? [videoFrame(p, item)!] : v?.refs?.slice(0, 1) ?? [])
           : item.character ? item.character.refs
           : approvedCharacters(p).length && item.stage>1 && k==='image' ? []
@@ -1884,8 +1887,10 @@ function GenerateDialog({
   const source = chosen(item);
   const choices = MODELS.filter((m) => m.kind === kind);
   const selected = choices.filter((m) => models.includes(m.id));
-  const fixedRefs=kind==='image'?characterImageRefs(p,item,[]):[];
-  const effectiveRefs=kind==='image'?characterImageRefs(p,item,refs):refs;
+  const selectableRefs=kind==='image'&&item.stage===5;
+  const excludedRefs=hiddenReferences(p);
+  const fixedRefs=kind==='image'&&!selectableRefs?characterImageRefs(p,item,[]):[];
+  const effectiveRefs=selectableRefs?selectedReferences(p,refs):kind==='image'?characterImageRefs(p,item,refs):refs;
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
@@ -2125,15 +2130,15 @@ function GenerateDialog({
             >
               <div className="reference-grid">
                 {assets
-                  .filter((a: Asset) => a.mime.startsWith('image/'))
+                  .filter((a: Asset) => a.mime.startsWith('image/')&&(!selectableRefs||!excludedRefs.has(a.id)))
                   .map((a: Asset) => (
-                    <label
+                    <div
                       className={
                         'reference ' + (effectiveRefs.includes(a.id) ? 'active' : '')
                       }
                       key={a.id}
                     >
-                      <img src={'/api/assets/' + a.id} alt={a.name} />
+                      <label><img src={'/api/assets/' + a.id} alt={a.name} />
                       <Checkbox
                         checked={effectiveRefs.includes(a.id)}
                         disabled={fixedRefs.includes(a.id)}
@@ -2147,10 +2152,13 @@ function GenerateDialog({
                           )
                         }
                       />
-                      <span>{a.name}</span>
-                    </label>
+                      <span>{a.name}</span></label>
+                      {selectableRefs&&<Button type="button" size="sm" variant="ghost" disabled={busy} aria-label={`Убрать из референсов: ${a.name}`} onClick={()=>perform(async()=>{await referenceAction(a.id);setRefs(current=>current.filter(id=>id!==a.id));})}><Trash2 size={14}/>Убрать из списка</Button>}
+                    </div>
                   ))}
               </div>
+              {selectableRefs&&<><p className="muted small">В запрос уйдут только отмеченные изображения. Можно снять любую галочку, включая образы героев. «Убрать из списка» скрывает изображение из референсов проекта; готовые варианты сохраняются.</p>
+                {!!p.hiddenReferenceIds?.length&&<details><summary>Убранные референсы</summary>{assets.filter((a:Asset)=>p.hiddenReferenceIds.includes(a.id)).map((a:Asset)=><div className="row" key={a.id}><span>{a.name}</span><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={()=>perform(()=>referenceAction(a.id,true))}>Вернуть в список</Button></div>)}</details>}</>}
               <Input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
@@ -2167,7 +2175,7 @@ function GenerateDialog({
             </Field>
           )
         )}
-        {item.stage>1&&['image','video'].includes(kind)&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
+        {item.stage>1&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
         {referenceError&&<p role="alert">{referenceError}</p>}
         {falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
         {zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
@@ -2236,6 +2244,7 @@ function GenerateDialog({
                   count,
                   prompt,
                   refs:effectiveRefs,
+                  ...(selectableRefs?{referenceMode:'selected'}:{}),
                   dialogue: kind === 'audio' ? spoken : speech,
                   ...(kind==='audio'?speechMeta:{}),
                   voiceId: voice,
@@ -2641,12 +2650,12 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     itemId: item.id, title: item.title, hasImage, blocked, include: !hasImage && !blocked,
     prompt: storyboardPrompt(snapshot, item),
   })));
-  const [refs, setRefs] = useState<string[]>(() => approvedCharacters(snapshot).length?[]:[...new Set(snapshot.items.filter(i => i.stage === 3 && isApproved(snapshot, i))
-    .flatMap(i => i.variants.filter(v => v.id === i.approvedId && v.kind === 'image' && v.assetId).map(v => v.assetId!)))].slice(0, 5));
+  const [refs, setRefs] = useState<string[]>(() => selectedReferences(snapshot,characterImageRefs(snapshot,{stage:5} as Item,approvedCharacters(snapshot).length?[]:[...new Set(snapshot.items.filter(i => i.stage === 3 && isApproved(snapshot, i))
+    .flatMap(i => i.variants.filter(v => v.id === i.approvedId && v.kind === 'image' && v.assetId).map(v => v.assetId!)))].slice(0, 5))));
   const [override, setOverride] = useState<string | undefined>();
-  const fixedRefs=characterImageRefs(snapshot,{stage:5} as Item,[]);
-  const effectiveRefs=characterImageRefs(snapshot,{stage:5} as Item,refs);
-  const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime));
+  const effectiveRefs=selectedReferences(snapshot,refs);
+  const excludedRefs=hiddenReferences(snapshot);
+  const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id));
   const included = rows.filter(r => r.include && !r.blocked);
   const base = m?.id === 'grok-imagine-image-2.0' ? (400000000n + BigInt(effectiveRefs.length) * 100000000n).toString() : m?.estimate ?? null;
   let estimate = base, costError = '';
@@ -2689,11 +2698,10 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
       </section>)}
-      <CharacterReferences p={snapshot}/>
-      <Field label="Общие референсы героев и стиля" hint={`Эти изображения отправятся с каждым планом. Утверждённые герои уже отмечены и подставляются автоматически. Всего до ${refLimit} референсов.`}>
+      <Field label="Общие референсы героев и стиля" hint={`Только отмеченные изображения отправятся с каждым планом. Можно снять любую галочку, включая образы героев. Всего до ${refLimit} референсов.`}>
         <div className="reference-grid">{images.map((a, index) => <label className={'reference ' + (effectiveRefs.includes(a.id) ? 'active' : '')} key={a.id}>
           <img src={'/api/assets/' + a.id} alt={a.name} />
-          <Checkbox checked={effectiveRefs.includes(a.id)} disabled={fixedRefs.includes(a.id)||(!effectiveRefs.includes(a.id) && effectiveRefs.length >= refLimit)}
+          <Checkbox checked={effectiveRefs.includes(a.id)} disabled={!effectiveRefs.includes(a.id) && effectiveRefs.length >= refLimit}
             onCheckedChange={v => setRefs(current => v ? [...current, a.id] : current.filter(x => x !== a.id))} />
           <span>{index + 1}. {a.name}</span>
         </label>)}</div>
@@ -2709,7 +2717,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <p className="muted">Кадры обрабатываются параллельно. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
-          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:effectiveRefs, estimate,
+          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:effectiveRefs, referenceMode:'selected', estimate,
             plans: included.map(({ itemId, prompt }) => ({ itemId, prompt })) }); close();
         })}><Sparkles />Сгенерировать {included.length} картинок</Button></DialogFooter>
     </DialogContent>

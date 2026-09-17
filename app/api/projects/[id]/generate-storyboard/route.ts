@@ -1,4 +1,5 @@
 import { prepareFalJobs } from '@/lib/fal-models';
+import { assertSelectedReferences } from '@/lib/reference-selection';
 import { prepareZenJobs } from '@/lib/zencreator-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
@@ -13,6 +14,7 @@ import { isMiniMaxImage, miniMaxImageRefIssue } from '@/lib/minimax-image';
 const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(8), estimate: z.string().regex(/^\d+$/).nullable(),
+  referenceMode: z.enum(['auto','selected']).default('auto'),
   plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000) })).min(1).max(20),
 });
 export const POST = api(async (req, ctx) => {
@@ -25,7 +27,7 @@ export const POST = api(async (req, ctx) => {
   if (p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
     throw new Error('Дождитесь текущей серии или отмените неотправленные попытки.');
   const m = model(s.model);
-  const refs = characterImageRefs(p,{stage:5} as any,s.refs);
+  const refs = s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,{stage:5} as any,s.refs);
   assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   if (m.kind !== 'image') throw new Error('Выберите одну модель изображений.');
   if (m.provider === 'xai' && s.refs.length > 5) throw new Error('Grok принимает до пяти референсов.');

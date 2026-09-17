@@ -1,5 +1,6 @@
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { enqueueStoryboard, storyboardAdmissionIssue } from '@/lib/generation-queue';
+import { assertSelectedReferences } from '@/lib/reference-selection';
 import { prepareZenJobs, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import {
   api,
@@ -44,6 +45,7 @@ export const POST = api(async (req, ctx) => {
       count: z.number().int().min(1).max(4),
       prompt: z.string().trim().min(1).max(20000),
       refs: z.array(z.string().uuid()).max(8),
+      referenceMode: z.enum(['auto','selected']).default('auto'),
       dialogue: z.string().max(9500),
       voiceId: z.string().max(150),
       speechSource: z.string().max(200).optional(),
@@ -77,7 +79,7 @@ export const POST = api(async (req, ctx) => {
   if (ms.some(m => m.provider === 'sync')) throw new Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   for (const m of ms) await getKey(user, m.provider);
   const kind = ms[0].kind;
-  const refs = kind === 'image' ? characterImageRefs(p,item,s.refs) : s.refs;
+  const refs = kind === 'image' ? item.stage===5&&s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs) : s.refs;
   const characterRefs = kind === 'video' && ms.some(m=>m.provider==='xai') ? videoCharacterRefs(p,'xai') : [];
   if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   assertCharacterRefLimit(characterRefs,7);

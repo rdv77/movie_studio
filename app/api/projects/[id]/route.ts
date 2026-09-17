@@ -67,6 +67,13 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'hideReference':
+    case 'restoreReference': {
+      const {assetId}=z.object({assetId:z.string().uuid()}).parse(d);
+      if(!(await asset(user,assetId,p)).mime.startsWith('image/'))throw new Error('Выберите изображение этого проекта.');
+      p.hiddenReferenceIds=body.action==='hideReference'?[...new Set([...(p.hiddenReferenceIds??[]),assetId])]:(p.hiddenReferenceIds??[]).filter(id=>id!==assetId);
+      break;
+    }
     case 'archiveJournal': archiveJournal(p); break;
     case 'restoreJournal': archiveJournal(p,true); break;
     case 'saveAnimaticPreview': {
