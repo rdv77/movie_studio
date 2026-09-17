@@ -1,4 +1,5 @@
 import { prepareZenJobs } from '@/lib/zencreator-models';
+import { prepareFalJobs } from '@/lib/fal-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
 import { getItem, chosen, stageReady, dependencies, assertBudget, id, now, type Job } from '@/lib/domain';
@@ -47,6 +48,7 @@ export const POST = api(async (req, ctx) => {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(frame.mime))
       throw new Error(`${item.title}: выберите первый кадр PNG, JPEG или WebP.`);
     prepareZenJobs([{model:m.id,kind:'video',prompt,refs:[row.ref],duration:shot.duration} as Job],[frame]);
+    prepareFalJobs([{model:m.id,kind:'video',prompt,refs:[row.ref],duration:shot.duration} as Job],[frame]);
     jobs.push({ id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind: 'video',
       prompt, brief: row.prompt, refs: [row.ref], characterRefs:characterRefs.length?characterRefs:undefined, camera: shot.camera,
       ...info,

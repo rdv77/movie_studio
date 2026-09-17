@@ -2802,7 +2802,7 @@ function Connections({ data, refresh, perform, busy }: any) {
                   )}
                 </div>
               </form>
-              {provider.id==='fal'&&<p className="note">Создайте ключ со scope API в кабинете fal.ai и вставьте его целиком. Qwen Image Edit работает с фото и образами героев. В студии — одно изображение на попытку, ориентировочно $0.03; фактическое списание проверяйте в fal.ai. Сохранение ключа бесплатно.</p>}
+              {provider.id==='fal'&&<p className="note">Создайте ключ со scope API в кабинете fal.ai и вставьте его целиком. Один ключ подключает Qwen Image Edit для образов и раскадровки, MiniMax H3 Max и Wan 2.2 A14B для видеопланов. Оценка расходов показана перед запуском; фактическое списание проверяйте в fal.ai. Сохранение ключа бесплатно.</p>}
               {provider.id==='zencreator'&&<div className="note">
                 <p>Создайте ключ с правами read и generate. Оплата — кредитами ZenCreator; отдельная проверка читает каталог и баланс, без генерации.</p>
                 <Button variant="outline" disabled={busy||!configured} onClick={()=>perform(async()=>{setZenCheck(null);setZenCheck(await request('/api/connections/zencreator'));})}>Проверить ключ и баланс</Button>

@@ -9,6 +9,10 @@ export const MODELS: {
   note: string;
 }[] = [
   ...ZEN_MODELS,
+  {id:'fal-minimax-h3-max',name:'fal.ai · MiniMax H3 Max',provider:'fal',kind:'video',estimate:'4800000000',
+    note:'Видео из первого кадра · 6 сек · 768P · оценка $0.48 без учёта акций; списание уточняйте в fal.ai'},
+  {id:'fal-wan-2.2-a14b',name:'fal.ai · Wan 2.2 A14B',provider:'fal',kind:'video',estimate:'4900000000',
+    note:'Видео из первого кадра · около 6 сек · 720p · ориентир $0.49 · генерация может занять длительное время'},
   {id:'fal-qwen-image-edit-2511',name:'fal.ai · Qwen Image Edit 2511',provider:'fal',kind:'image',estimate:'300000000',
     note:'Образы и кадры по фото · нужен референс · 1024×576 / 576×1024 · ориентир $0.03, списание уточняйте в fal.ai'},
   {
@@ -112,7 +116,7 @@ export const SYNC_MODELS = [
     note: 'Больше деталей лица; рот в исходном видео уже должен двигаться', rate: '0.08325' },
 ];
 export const PROVIDERS = [
-  {id:'fal',name:'fal.ai · Qwen Image Edit',url:'https://fal.ai/dashboard/keys'},
+  {id:'fal',name:'fal.ai · изображения и видео',url:'https://fal.ai/dashboard/keys'},
   {id:'zencreator',name:'ZenCreator · агрегатор',url:'https://app.zencreator.pro/api-keys'},
   { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys' },
   { id: 'xai', name: 'xAI / Grok', url: 'https://console.x.ai/' },

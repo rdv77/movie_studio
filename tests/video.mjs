@@ -57,7 +57,7 @@ const plugin = { name: 'video-memory', setup(b) {
     export const loadProject = async () => globalThis.videoProject;
     export const saveProject = async (_, p) => { p.revision++; return p; };
     export const getKey = async () => 'test-secret-key';
-    export const asset = async () => { if (globalThis.videoAssetDenied) throw new Error('Asset denied'); return { mime: 'image/png' }; };
+    export const asset = async () => { if (globalThis.videoAssetDenied) throw new Error('Asset denied'); return { mime: 'image/png', size: 1024 }; };
   ` }));
 } };
 await build({ entryPoints: ['app/api/projects/[id]/generate/route.ts'], bundle: true, format: 'esm',
@@ -191,6 +191,19 @@ const h3Batch=await(await runBulk({...bulkPayload,estimate:'4800000000'})).json(
 assert.equal(h3Batch.jobs.length,bulk.jobs.length+8);
 assert(h3Batch.jobs.slice(bulk.jobs.length).every(j=>j.model==='MiniMax-H3'&&j.estimate==='4800000000'&&j.refs.length===1&&!j.characterRefs));
 const gallery = structuredClone(p);
+for(const [model,estimate] of [['fal-minimax-h3-max','4800000000'],['fal-wan-2.2-a14b','4900000000']]) {
+  globalThis.videoProject=structuredClone(p);
+  const single=await(await run({...payload,models:[model],count:1,estimates:{[model]:estimate}})).json();
+  assert.equal(single.jobs.at(-1).model,model);assert.equal(single.jobs.at(-1).estimate,estimate);
+  globalThis.videoProject=structuredClone(bulk);
+  D.chosen(videoProject.items.find(i=>i.id===source.id)).model=model;
+  const result=await(await runBulk({...bulkPayload,estimate})).json();
+  assert.equal(result.jobs.length,bulk.jobs.length+8);
+  assert(result.jobs.slice(bulk.jobs.length).every(j=>j.model===model&&j.estimate===estimate&&j.actual===null&&j.refs.length===1));
+  const again=await(await runBulk({...bulkPayload,estimate})).json();
+  assert.equal(again.jobs.length,result.jobs.length);
+}
+console.log('PASS fal video: single and remaining batch use selected model, frame, budget estimate; batch retries are idempotent.');
 globalThis.videoProject=structuredClone(bulk);
 D.chosen(videoProject.items.find(i=>i.id===source.id)).model='zencreator:video:kling@2.6';
 const zenBatch=await(await runBulk({...bulkPayload,estimate:null})).json();
