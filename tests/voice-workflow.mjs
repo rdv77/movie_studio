@@ -86,7 +86,11 @@ await tick(req({}),{params:Promise.resolve({id:state.id,jobId:recoveryJob.id})})
 r=await tick(req({action:'recover-voice-file'}),{params:Promise.resolve({id:state.id,jobId:recoveryJob.id})});assert.equal(r.status,200);assert.equal(state.jobs.at(-1).status,'done');assert.equal(state.voiceComparisons.at(-1).samples[0].assetId,recoveryJob.id);assert.equal(providerCalls.length,beforeRecovery,'Recovery attaches the stored paid file without TTS');
 r=await tick(req({action:'recover-voice-file'}),{params:Promise.resolve({id:state.id,jobId:job.id})});assert.equal(r.status,400);assert.equal(providerCalls.length,beforeRecovery,'Missing saved file does not cause a new generation');
 globalThis.state=structuredClone(approved);const videoId=D.id();assets.set(videoId,{id:videoId,mime:'video/mp4'});
-r=await patchAction('saveAnimaticPreview',{title:'Новый просмотр',text:'',kind:'video',assetId:videoId,duration:50,basis:A.animaticBasis(state)});assert.equal(r.status,200,await r.clone().text());
+r=await patchAction('saveAnimaticPreview',{title:'Новый просмотр',text:'',kind:'video',assetId:videoId,duration:64.17,basis:A.animaticBasis(state)});assert.equal(r.status,200,await r.clone().text());
+assert.equal(state.animatic.variants.at(-1).duration,64.17);
 const newId=state.animatic.selectedId;assert.equal((await patchAction('approveAnimatic',{variantId:newId})).status,200);assert(A.animaticApproved(state));
 assert.equal((await patchAction('deleteAnimatic',{variantId:newId})).status,200);assert(!A.animaticApproved(state));assert.equal((await patchAction('restoreAnimatic',{variantId:newId})).status,200);assert(!A.animaticApproved(state),'Restore does not silently approve');
+const finalItem=state.items.find(i=>i.stage===8);
+r=await patch(req({revision:state.revision,action:'addVariant',itemId:finalItem.id,data:{title:'Фильм',text:'',kind:'video',assetId:videoId,duration:64.17}}),ctx());
+assert.equal(r.status,200,await r.clone().text());assert.equal(state.items.find(i=>i.id===finalItem.id).variants.at(-1).duration,64.17);
 console.log('PASS voice workflow: active speech completion, separate animatic approval/source snapshots, legacy MP4 preservation, new selected voices, stale render protection, 2-provider voice comparison, immutable phrase, no film mutations, budget and auth validation, deduplication, uncertain-request safety, preferences and reversible deletion. No paid calls.');

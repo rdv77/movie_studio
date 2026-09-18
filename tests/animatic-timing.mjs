@@ -18,7 +18,7 @@ assert.equal(r.audio[0].offset,10.125);assert.equal(r.audio[1].offset,0);assert.
 assert.throws(()=>R.fitAnimaticToSpeech(base,[NaN,3]),/звучащий участок/);
 assert.throws(()=>R.fitAnimaticToSpeech(base,[5,0.5]),/звучащий участок/);
 assert.throws(()=>R.fitAnimaticToSpeech(base,[5]),/всех реплик/);
-assert.throws(()=>R.fitAnimaticToSpeech(base,[17,3]),/45–60/);
+assert.equal(R.fitAnimaticToSpeech(base,[17,3]).seconds,61);
 assert.throws(()=>R.fitAnimaticToSpeech({...base,audioClipIndexes:[-1,2]},[5,3]),/Не найден кадр/);
 // Exactly 60 seconds must not become 60.25 solely from per-clip ceil rounding.
 const exactMinute={...base,clips:[...Array.from({length:10},()=>({duration:5.6})),{duration:4}],audio:Array.from({length:11},(_,n)=>voice('short-'+n)),audioClipIndexes:Array.from({length:11},(_,n)=>n),seconds:60};
@@ -26,8 +26,8 @@ const roundedMinute=R.fitAnimaticToSpeech(exactMinute,Array(11).fill(1));
 assert.equal(roundedMinute.seconds,60);assert.equal(roundedMinute.clips.reduce((s,v)=>s+Math.round(v.duration*24),0),1440);
 assert(roundedMinute.clips.every((v,n)=>Math.abs(v.duration-exactMinute.clips[n].duration)<1/24+1e-8));
 assert(roundedMinute.audio.every((v,n)=>v.duration<=roundedMinute.clips[n].duration));
-assert.throws(()=>R.fitAnimaticToSpeech(exactMinute,[...Array(10).fill(5.6),4]),/45–60/,'Do not remove frames needed by full speech even at the runtime boundary');
-assert.throws(()=>R.fitAnimaticToSpeech(exactMinute,[6,...Array(10).fill(1)]),/45–60/,'Real extra speech is not dismissed as rounding');
+assert.equal(R.fitAnimaticToSpeech(exactMinute,[...Array(10).fill(5.6),4]).seconds,60.25,'Keep all frames needed by speech');
+assert(R.fitAnimaticToSpeech(exactMinute,[6,...Array(10).fill(1)]).seconds>60,'Extra speech extends runtime');
 // Exercise the full preflight path, including its early runtime validation.
 function project(durations){
  const D=R.D,p=D.newProject('Проверка длительности');p.speechMode='plans';
@@ -39,13 +39,20 @@ function project(durations){
 }
 const shortProject=project([4,10,10,10,10]);
 assert.equal(R.fitPlanToSpeech(R.editPlan(shortProject,true),[10,1,1,1,1]).seconds,50,'Actual speech can make a 44-second storyboard valid');
-assert.throws(()=>R.fitPlanToSpeech(R.editPlan(shortProject,true),[1,1,1,1,1]),/45–60/,'The measured final runtime still has a lower bound');
-shortProject.speechMode='track';assert.throws(()=>R.editPlan(shortProject,true),/Хронометраж/,'Track mode retains its early lower bound');
+assert.equal(R.fitPlanToSpeech(R.editPlan(shortProject,true),[1,1,1,1,1]).seconds,44);
+shortProject.speechMode='track';
+const track=shortProject.items.find(i=>i.stage===6&&!i.sourceShot);
+R.D.addVariant(shortProject,track.id,{kind:'audio',assetId:R.D.id(),duration:44});R.D.approve(shortProject,track.id);
+assert.equal(R.editPlan(shortProject,true).seconds,44);
 const minuteProject=project([...Array(10).fill(5.6),4]);
 assert.equal(R.fitPlanToSpeech(R.editPlan(minuteProject,true),Array(11).fill(1)).seconds,60,'Floating-point addition must reach the measured timing check');
-assert.throws(()=>R.editPlan(project([15,15,15,15.01]),true),/Хронометраж/,'Real duration overflow still fails');
+assert.equal(R.editPlan(project([15,15,15,15.01]),true).seconds,60.01);
 const tight={...base,clips:[{duration:40.51},{duration:19.49}],audio:[voice('tight-a'),voice('tight-b')],audioClipIndexes:[0,1]};
-assert.throws(()=>R.fitPlanToSpeech(tight,[40.51,19.49]),/45–60/,'When all 1441 frames are needed for speech, no frame may be removed');
+assert.equal(R.fitPlanToSpeech(tight,[40.51,19.49]).seconds,1441/24);
+const longer=R.fitPlanToSpeech({...base,clips:[{duration:4},{duration:46}],audio:[voice('long')],audioClipIndexes:[0],seconds:50},[18.16]);
+assert.equal(longer.seconds.toFixed(2),'64.17');
+assert.equal(longer.audio[0].duration,18.16);
+assert.throws(()=>R.fitPlanToSpeech({...base,clips:[{duration:NaN}]},[1,1]),/положительную/);
 assert.throws(()=>R.fittedSpeechDuration(voice('video'),5.11),/Увеличьте/); // Video clips are not silently stretched.
 assert.match(R.audioArgs(fitted.audio,fitted.seconds).join(' '),/adelay=25125/);
 
@@ -56,7 +63,7 @@ const core=await createCore({wasmBinary:new Uint8Array(await readFile('node_modu
 let log=[];core.setLogger(({message})=>log.push(message));
 const exec=args=>{core.reset();if(core.exec(...args)!==0)throw new Error(log.slice(-15).join('\n'));};
 const probe=(file,entries)=>{core.reset();core.ffprobe('-v','error','-show_entries',entries,'-of','json','-o','probe.json',file);return JSON.parse(new TextDecoder().decode(core.FS.readFile('probe.json')));};
-const p=R.fitAnimaticToSpeech({clips:[{duration:5},{duration:44}],audio:[voice('one'),voice('two')],audioClipIndexes:[0,1],seconds:49,width:160,height:90},[5.11,2]);
+const p=R.fitAnimaticToSpeech({clips:[{duration:5},{duration:59}],audio:[voice('one'),voice('two')],audioClipIndexes:[0,1],seconds:64,width:160,height:90},[5.11,2]);
 for(let n=0;n<2;n++){
  exec(['-f','lavfi','-i',`color=c=${n?'blue':'red'}:s=160x90`,'-frames:v','1','-threads','1',`frame${n}.png`]);
  core.FS.writeFile('in'+n,core.FS.readFile(`frame${n}.png`));
@@ -68,9 +75,9 @@ core.FS.writeFile('list.txt',new TextEncoder().encode("file 'clip0.mp4'\nfile 'c
 exec(['-f','concat','-safe','0','-i','list.txt','-c','copy','silent.mp4']);
 exec(R.audioArgs(p.audio,p.seconds));
 const info=probe('film.mp4','format=duration:stream=codec_type');
-assert(Math.abs(Number(info.format.duration)-49.125)<0.05);assert(info.streams.some(s=>s.codec_type==='audio'));
+assert(Math.abs(Number(info.format.duration)-64.125)<0.05);assert(info.streams.some(s=>s.codec_type==='audio'));
 // The later voice remains audible after the newly extended first scene.
 log=[];exec(['-v','info','-ss','5.2','-i','film.mp4','-t','1','-af','volumedetect','-vn','-f','null','-']);
 assert(log.some(s=>/max_volume: -?\d+(\.\d+)? dB/.test(s)));
 await writeFile('work/tests/animatic-timing.mp4',core.FS.readFile('film.mp4'));
-console.log('PASS automatic speech timing: complete speech, shifted cuts and voices, 24fps rounding, trim, silent scenes, immutable approvals, runtime cap, real 49.125-second MP4 with audible second voice.');
+console.log('PASS automatic speech timing: complete speech, shifted cuts and voices, 24fps rounding, trim, silent scenes, immutable approvals, no runtime cap, real 64.125-second MP4 with audible second voice.');

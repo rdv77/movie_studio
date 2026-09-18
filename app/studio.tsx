@@ -1707,7 +1707,6 @@ function VariantEditor({
                 <Input
                   type="number"
                   min="0.2"
-                  max="60"
                   step="0.1"
                   value={data.duration ?? 5}
                   onChange={(e) => set('duration', Number(e.target.value))}
@@ -1730,7 +1729,6 @@ function VariantEditor({
                   <Input
                     type="number"
                     min="0"
-                    max="60"
                     step="0.1"
                     value={data.offset ?? 0}
                     onChange={(e) => set('offset', Number(e.target.value))}
@@ -2619,7 +2617,7 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
     </section>)}
     <Field label="Оценка одной записи, USD" hint="Оценка для контроля бюджета; фактическое списание учитывается отдельно. Без лимита можно оставить пустым."><Input aria-label="Оценка одной записи, USD" value={estimate} onChange={e => setEstimate(e.target.value)} /></Field>
     <div className="generation-total"><div><span>Будет создано</span><strong>{included.length} записей</strong></div><div><span>Оценка серии</span><strong>{money(total)}</strong></div></div>
-    <p>После запуска включится режим «По планам». Общая запись сохранится в истории и не будет накладываться поверх реплик. Начало каждой реплики пересчитывается при монтаже по порядку и длительности кадров. Слишком длинная речь не обрезается: увеличьте план или сократите текст. Общий фильм должен остаться в пределах 45–60 секунд.</p>
+    <p>После запуска включится режим «По планам». Общая запись сохранится в истории и не будет накладываться поверх реплик. Аниматик подстроит длительность кадров под полные реплики без ограничения в 60 секунд. Если речь не поместится в готовый видеоролик, переозвучьте этот план с более короткой репликой.</p>
     <p className="muted">Держите приложение открытым для обработки очереди. Повторная генерация платная; сохранённые файлы не удаляются.</p>
     {error && <p role="alert">{error}</p>}
     <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button><Button disabled={busy || !modelId || !voice.trim() || !included.length || !!error || included.some(r => !r.dialogue.trim() || r.dialogue.length > 9500 || (r.speechType==='character'&&!r.speaker.trim()))}
@@ -3116,12 +3114,11 @@ function SettingsDialog({ open, close, p, busy, perform, save }: any) {
               maxLength={100}
             />
           </Field>
-          <Field label="Хронометраж, секунд">
+          <Field label="Целевой хронометраж, секунд" hint="Ориентир для сценария. Сборка использует фактическую длительность кадров и реплик.">
             <Input
               type="number"
               name="seconds"
-              min="45"
-              max="60"
+              min="1"
               defaultValue={p.seconds}
               required
             />
@@ -3248,7 +3245,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
           </span>
           <small>{total.toFixed(2)} сек{autoTiming && timing.data && !reason ? ' · с учётом реплик' : ''} · 1080p · 24 кадра/с</small>
         </div>
-        <Button disabled={busy || !!reason} aria-describedby={reason?'assembly-blocker':undefined} onClick={onRender}>
+        <Button disabled={busy || !!reason || (autoTiming && timing.isFetching)} aria-describedby={reason?'assembly-blocker':undefined} onClick={onRender}>
           <Clapperboard />
           {animatic ? 'Собрать аниматик' : 'Собрать MP4'}
         </Button>
@@ -3266,6 +3263,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
                 <span>{fitted?.clips[n]?.duration.toFixed(2) ?? v?.duration ?? '—'} сек</span>
               </div>
               <strong>{i.title}</strong>
+              {autoTiming && base && timing.data && <small>Кадр: {v?.duration.toFixed(2)} сек · Речь: {Math.max(0,...base.audioClipIndexes.flatMap((index, j)=>index===n?[timing.data[j]-base!.audio[j].trim]:[])).toFixed(2)} сек · В сборке: {fitted?.clips[n]?.duration.toFixed(2)} сек</small>}
               <small>
                 {isApproved(p, i) ? 'Утвержден' : 'Требует утверждения'}
               </small>
@@ -3303,8 +3301,8 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
             <div
               key={v.id}
               style={{
-                marginLeft: `${(v.offset / 60) * 100}%`,
-                width: `${Math.max(8, (v.duration / 60) * 100)}%`,
+                marginLeft: `${(v.offset / Math.max(total,1)) * 100}%`,
+                width: `${Math.max(0, Math.min(100-v.offset/Math.max(total,1)*100, Math.max(8, v.duration/Math.max(total,1)*100)))}%`,
               }}
             >
               <Mic size={13} />

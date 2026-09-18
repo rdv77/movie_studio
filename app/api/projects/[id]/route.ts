@@ -38,9 +38,9 @@ const variant = z.object({
   kind: z.enum(['text', 'image', 'audio', 'video']),
   assetId: z.string().uuid().optional(),
   refs: z.array(z.string().uuid()).max(8).default([]),
-  duration: z.number().min(0.2).max(60).default(5),
+  duration: z.number().min(0.2).default(5),
   trim: z.number().min(0).max(600).default(0),
-  offset: z.number().min(0).max(60).default(0),
+  offset: z.number().min(0).default(0),
   volume: z.number().min(0).max(2).default(1),
   camera: z.string().max(2000).default(''),
   dialogue: z.string().max(10000).default(''),
@@ -274,7 +274,7 @@ export const PATCH = api(async (req, ctx) => {
         .object({
           title: z.string().trim().min(1).max(100),
           format: z.enum(['16:9', '9:16']),
-          seconds: z.number().int().min(45).max(60),
+          seconds: z.number().int().min(1),
           limit: z.string().regex(/^\d+$/).nullable(),
         })
         .parse(d);

@@ -19,12 +19,8 @@ export function editPlan(p: Project, animatic = false) {
         : 'В каждом видеоплане нужен видеофайл.',
     );
   const seconds = clips.reduce((sum, v) => sum + v.duration, 0);
-  // In per-plan mode the actual speech may extend a shorter storyboard into
-  // the required runtime. Validate its lower bound after reading the audio.
-  if (!Number.isFinite(seconds) || seconds <= 0 || seconds * 24 > 1440 + 1e-8 || (seconds * 24 < 1080 - 1e-8 && p.speechMode !== 'plans'))
-    throw new Error(
-      `Хронометраж ${seconds.toFixed(1)} сек. Установите длительности планов так, чтобы получилось 45–60 секунд.`,
-    );
+  if (clips.some(v => !Number.isFinite(v.duration) || v.duration <= 0) || !Number.isFinite(seconds) || seconds <= 0)
+    throw new Error('Укажите положительную длительность каждого плана.');
   const soundItems = p.items.filter((i) => i.stage === 6 && participates(p, i));
   if (p.speechMode === 'plans') {
     const rows = speechPlans(p);
@@ -77,6 +73,7 @@ export function editPlan(p: Project, animatic = false) {
 // The same frame-aligned schedule is used by the preview and the actual render.
 export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds: number[]) {
   if (sourceSeconds.length !== plan.audio.length) throw new Error('Не удалось проверить длительность всех реплик.');
+  if (!plan.clips.length || plan.clips.some(v => !Number.isFinite(v.duration) || v.duration <= 0)) throw new Error('Укажите положительную длительность каждого плана.');
   const clips = plan.clips.map(v => ({ ...v }));
   const audio = plan.audio.map((v, n) => {
     const duration = sourceSeconds[n] - v.trim;
@@ -91,11 +88,10 @@ export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds
   const minSpeechFrames=clips.map(()=>1);
   audio.forEach((v,n)=>{const index=plan.audioClipIndexes[n];minSpeechFrames[index]=Math.max(minSpeechFrames[index],Math.ceil(v.duration*24-1e-8));});
   const continuousFrames=rawFrames.reduce((s,n)=>s+n,0);
-  let roundingExtra=counts.reduce((s,n)=>s+n,0)-1440;
-  // A valid 60s sequence can exceed 60s solely because every fractional clip
-  // was rounded up. Remove only rounding padding, at most one frame per clip,
-  // and never a frame needed by the complete spoken audio.
-  if(roundingExtra>0&&continuousFrames<=1440+1e-8){
+  let roundingExtra=counts.reduce((s,n)=>s+n,0)-Math.ceil(continuousFrames-1e-8);
+  // Avoid accumulating fractional-frame padding at any runtime, without
+  // removing a frame needed by the complete spoken audio.
+  if(roundingExtra>0){
     const candidates=counts.map((n,i)=>({i,padding:n-rawFrames[i]})).filter(({i,padding})=>padding>1e-8&&counts[i]-1>=minSpeechFrames[i]).sort((a,b)=>b.padding-a.padding);
     for(const {i} of candidates){if(roundingExtra<=0)break;counts[i]--;roundingExtra--;}
   }
@@ -109,8 +105,7 @@ export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds
   });
   audio.forEach((v, n) => { v.offset = offsets[plan.audioClipIndexes[n]]; });
   const seconds = frames / 24;
-  if (seconds > 60 || seconds < 45)
-    throw new Error(`С учётом полных реплик фильм длится ${seconds.toFixed(2)} сек (допустимо 45–60). Сократите длинные реплики или длительность других планов. Озвучка не ускорена и не обрезана.`);
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Не удалось рассчитать длительность сборки.');
   return { ...plan, clips, audio, seconds };
 }
 export const fitAnimaticToSpeech = fitPlanToSpeech;
@@ -120,7 +115,7 @@ export function validateVideoDuration(v: Variant, sourceDuration: number, title:
   const available = sourceDuration - v.trim;
   const tolerance = (v.lipsync ? 1 / 24 : 0) + 0.001;
   if (available + tolerance < v.duration)
-    throw new Error(`Для плана «${title}» с полной репликой нужно ${v.duration.toFixed(2)} сек видео, а после начала выбранного участка доступно ${Math.max(0, available).toFixed(2)} сек. Выберите более длинный ролик или уменьшите «Начало в исходном файле» через «Правки». Если запаса нет, создайте более длинное видео либо сократите реплику. Речь не обрезана.`);
+    throw new Error(`Для плана «${title}» с полной репликой нужно ${v.duration.toFixed(2)} сек видео, а после начала выбранного участка доступно ${Math.max(0, available).toFixed(2)} сек. Переозвучьте этот план с более короткой репликой и утвердите новую запись в разделе «Голоса». Также можно выбрать более длинный ролик или уменьшить «Начало в исходном файле» через «Правки». Речь не обрезана.`);
 }
 export function fittedSpeechDuration(v: Variant, sourceSeconds: number) {
   if (!Number.isFinite(sourceSeconds) || sourceSeconds <= v.trim)
