@@ -27,6 +27,15 @@ for(const [route,input] of [[G,single],[B,bulk]]) {
  state=structuredClone(p);state.hiddenReferenceIds=[hero];await assert.rejects(()=>route.POST(req({...input,refs:[hero]}),ctx),/референсов/);assert.equal(state.jobs.length,0);
 }
 state=structuredClone(p);const snapshots=structuredClone(p.items),jobs=structuredClone(p.jobs);
+for(const stage of [1,2,3]) {
+ const item=p.items.find(i=>i.stage===stage);
+ for(const refs of [[],[extra]]) {
+  state=structuredClone(p);state.hiddenReferenceIds=[hero];
+  await G.POST(req({...single,itemId:item.id,refs}),ctx);
+  assert.deepEqual(state.jobs.at(-1).refs,refs,'Hidden references must stay removed in hero, style and location generation');
+ }
+}
+state=structuredClone(p);
 await A.PATCH(req({revision:state.revision,action:'hideReference',data:{assetId:hero}}),ctx);
 assert.deepEqual(state.hiddenReferenceIds,[hero]);assert.deepEqual(state.items,snapshots);assert.deepEqual(state.jobs,jobs);
 assert.deepEqual(R.selectedReferences(state,[hero,extra,deleted]),[extra]);

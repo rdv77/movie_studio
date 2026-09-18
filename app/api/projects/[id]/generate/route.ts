@@ -79,7 +79,7 @@ export const POST = api(async (req, ctx) => {
   if (ms.some(m => m.provider === 'sync')) throw new Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   for (const m of ms) await getKey(user, m.provider);
   const kind = ms[0].kind;
-  const refs = kind === 'image' ? item.stage===5&&s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs) : s.refs;
+  const refs = kind === 'image' ? s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs) : s.refs;
   const characterRefs = kind === 'video' && ms.some(m=>m.provider==='xai') ? videoCharacterRefs(p,'xai') : [];
   if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   assertCharacterRefLimit(characterRefs,7);
