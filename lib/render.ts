@@ -1,4 +1,5 @@
 import { wasmUrl } from './wasm';
+import { captionForPlan, captionPng } from './captions';
 import type { Project, Variant } from './domain';
 import { chosen, dependencies, stageReady, isApproved, participates } from './domain';
 import { scriptSpeech, speechPlans } from './speech';
@@ -131,17 +132,19 @@ export function clipArgs(
   width: number,
   height: number,
   animatic: boolean,
+  captionFile?: string,
 ) {
+  const base=`scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24${!animatic && v.lipsync ? ',tpad=stop_mode=clone:stop=1' : ''}`;
   return [
     '-y',
     ...(animatic ? ['-loop', '1'] : ['-ss', String(v.trim)]),
     '-i',
     `in${index}`,
+    ...(captionFile?['-loop','1','-i',captionFile]:[]),
     '-t',
     String(v.duration),
     '-an',
-    '-vf',
-    `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24${!animatic && v.lipsync ? ',tpad=stop_mode=clone:stop=1' : ''},format=yuv420p`,
+    ...(captionFile?['-filter_complex',`[0:v]${base}[base];[base][1:v]overlay=0:0:format=auto,format=yuv420p[out]`,'-map','[out]']:['-vf',`${base},format=yuv420p`]),
     '-c:v',
     'libx264',
     '-preset',
@@ -232,6 +235,9 @@ export async function renderFilm(
     for (let i = 0; i < plan.clips.length; i++) {
       progress(`Подготовка плана ${i + 1} из ${plan.clips.length}…`);
       await input('in' + i, plan.clips[i]);
+      const item=p.items.filter(item=>item.stage===(animatic?5:7)&&participates(p,item))[i];
+      const caption=captionForPlan(p,item),captionFile=caption?`caption${i}.png`:undefined;
+      if(caption&&captionFile)await ff.writeFile(captionFile,await captionPng(caption,plan.width,plan.height));
       if (!animatic) {
         if (
           (await ff.ffprobe([
@@ -259,13 +265,14 @@ export async function renderFilm(
       }
       if (
         (await ff.exec(
-          clipArgs(plan.clips[i], i, plan.width, plan.height, animatic),
+          clipArgs(plan.clips[i], i, plan.width, plan.height, animatic, captionFile),
         )) !== 0
       )
         throw new Error(
           `Не удалось обработать план ${i + 1}. Проверьте длительность и формат исходного файла.`,
         );
       await ff.deleteFile('in' + i);
+      if(captionFile)await ff.deleteFile(captionFile);
     }
     await ff.writeFile(
       'list.txt',

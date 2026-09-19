@@ -1,4 +1,5 @@
 import type { SpeechType } from './speech-mode';
+import type { PlanCaption } from './captions';
 import { speechInfo } from './speech-mode';
 import { parseShots } from './shots';
 export const STAGES = [
@@ -111,6 +112,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  captions?: PlanCaption[];
   hiddenReferenceIds?: string[];
   voiceComparisons?: { id: string; phrase: string; created: string; removedAt?: string; samples: { jobId: string; model: string; voiceId: string; name: string; assetId?: string }[] }[];
   preferredVoice?: { model: string; voiceId: string; name: string };
@@ -177,6 +179,7 @@ export function dependencies(p: Project, stage: number): string {
     ...p.items
       .filter((i) => i.stage < stage && participates(p, i))
       .map((i) => [i.id, i.approvedId ?? null]),
+    ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
   ]);
 }
 export function stageReady(p: Project, stage: number): boolean {

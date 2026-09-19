@@ -1,4 +1,5 @@
 'use client';
+import { CaptionEditor } from './caption-editor';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason } from '@/lib/storyboard-approval';
@@ -315,8 +316,8 @@ function Workspace() {
   const selected = item && chosen(item);
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
-  const blockers = p && !ready ? approvalBlockers(p, step===9?6:step) : [];
-  const showCards=step!==9&&(step!==6||voiceView==='plans');
+  const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
+  const showCards=step!==9&&step!==10&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
@@ -444,10 +445,10 @@ function Workspace() {
       name: 'open_film_stage',
       title: 'Открыть этап фильма',
       description:
-        'Открыть этап 1–10 в режиссерской студии; ничего не утверждает и не генерирует.',
+        'Открыть этап 1–11 в режиссерской студии; ничего не утверждает и не генерирует.',
       inputSchema: {
         type: 'object',
-        properties: { stage: { type: 'integer', minimum: 1, maximum: 10 } },
+        properties: { stage: { type: 'integer', minimum: 1, maximum: WORKFLOW.length } },
         required: ['stage'],
         additionalProperties: false,
       },
@@ -456,9 +457,9 @@ function Workspace() {
         if (
           !Number.isInteger(input?.stage) ||
           input.stage < 1 ||
-          input.stage > 10
+          input.stage > WORKFLOW.length
         )
-          throw new Error('Этап должен быть от 1 до 10.');
+          throw new Error(`Этап должен быть от 1 до ${WORKFLOW.length}.`);
         setStep(WORKFLOW[input.stage-1].id);
         setPanel('stage');
         return { stage: input.stage, title: WORKFLOW[input.stage - 1].title };
@@ -722,11 +723,11 @@ function Workspace() {
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">
-                    ЭТАП {String(WORKFLOW.findIndex(s=>s.id===step) + 1).padStart(2, '0')} / 10
+                    ЭТАП {String(WORKFLOW.findIndex(s=>s.id===step) + 1).padStart(2, '0')} / {WORKFLOW.length}
                   </div>
                   <h1>{stageTitle(step)}</h1>
                   <p className="muted">
-                    {step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
+                    {step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
@@ -923,6 +924,7 @@ function Workspace() {
                 </details>)}
               </details>}
               {[5, 6, 7].includes(step) && showCards && <BulkApproval p={p} stage={step} busy={busy} action={action} perform={perform} />}
+              {step===10&&<CaptionEditor p={p} busy={busy} save={async c=>{let result:Project|undefined;await perform(async()=>{result=await action('saveCaption',c);});if(!result)throw new Error('Титр не сохранён.');return result;}} onContinue={()=>{setStep(8);setItemId('');}}/>}
               {(step === 8 || step === 9) && (
                 <Timeline
                   p={p}

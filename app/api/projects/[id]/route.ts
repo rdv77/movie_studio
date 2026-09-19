@@ -67,6 +67,12 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'saveCaption': {
+      const c=z.object({planId:z.string().uuid(),text:z.string().trim().max(300),enabled:z.boolean(),font:z.enum(['Arial','Times New Roman','Courier New']),size:z.number().int().min(16).max(160),x:z.number().min(0).max(100),y:z.number().min(0).max(100),color:z.enum(['white','black']),background:z.boolean()}).parse(d);
+      if(!p.items.some(i=>i.id===c.planId&&i.stage===5&&!i.removedAt&&!i.planArchive))throw new Error('Выберите актуальный план раскадровки этого проекта.');
+      p.captions=[...(p.captions??[]).filter(old=>old.planId!==c.planId),c].sort((a,b)=>a.planId.localeCompare(b.planId));
+      break;
+    }
     case 'hideReference':
     case 'restoreReference': {
       const {assetId}=z.object({assetId:z.string().uuid()}).parse(d);
