@@ -1,11 +1,11 @@
 import { isApproved, participates, type Item, type Project } from './domain';
-import { googleSeconds } from './google-models';
+import { generationSeconds } from './zencreator-models';
 
-// Current generation workflow limit, independent of the provider clip length.
+// Fallback for legacy callers without a model selection.
 export const VIDEO_PLAN_SECONDS = 6;
 export const secondsLabel = (n:number) => new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n);
 export function videoDurationIssue(title:string,seconds:number,modelIds:string[]=[] ) {
-  const max=modelIds.length?Math.min(...modelIds.map(id=>googleSeconds(id)??VIDEO_PLAN_SECONDS)):VIDEO_PLAN_SECONDS;
+  const max=modelIds.length?Math.min(...modelIds.map(generationSeconds)):VIDEO_PLAN_SECONDS;
   return seconds>max
     ? `«${title}»: план ${secondsLabel(seconds)} сек, допустимо ${max} сек для выбранных моделей — превышение ${secondsLabel(seconds-max)} сек. Снимите галочку с этого плана, чтобы запустить остальные, выберите модель с большей длительностью или разделите план в подробном сценарии. Не сокращайте план, пока не проверите длину речи.` : '';
 }

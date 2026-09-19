@@ -5,6 +5,12 @@ await build({entryPoints:['lib/video-readiness.ts','lib/domain.ts','app/api/proj
 }}]});
 const root='../work/tests/video-readiness/',R=await import(root+'lib/video-readiness.mjs'),D=await import(root+'lib/domain.mjs');
 assert.equal(R.videoDurationIssue('План 1',6),'');
+for(const model of ['zencreator:video:kling@2.6','zencreator:video:wan@2.7']) {
+  assert.equal(R.videoDurationIssue('План 14',6.5,[model]),'');
+  assert.equal(R.videoDurationIssue('План 14',10,[model]),'');
+  assert.match(R.videoDurationIssue('План 14',10.1,[model]),/допустимо 10 сек/);
+  assert.match(R.videoDurationIssue('План 14',6.5,[model,'grok-imagine-video-1.5']),/допустимо 6 сек/);
+}
 const message=R.videoDurationIssue('План 14 — Война приходит в Польшу',6.5);
 for(const text of ['План 14','6,5 сек','допустимо 6 сек','0,5 сек','Снимите галочку'])assert(message.includes(text));
 assert.equal(R.videoPlanIssues('План',5,1,'Камера',2000).length,0);
@@ -29,4 +35,13 @@ globalThis.state=structuredClone(p);
 await assert.rejects(()=>single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:['grok-imagine-video-1.5'],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
 const example={id:D.id(),stage:7,title:'Пример',variants:[]};state.items.push(example);D.addVariant(state,example.id,{kind:'video',assetId:D.id(),model:'grok-imagine-video-1.5'});
 await assert.rejects(()=>batch(req({revision:state.revision,batchId:D.id(),sourceItemId:example.id,sourceVariantId:example.selectedId,estimate:'100',plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
-console.log('PASS video readiness: specific per-plan blockers, measured trimmed speech vs plan and clip, unknown/no-audio states, approved source linkage, identical single/batch API duration errors.');
+for(const model of ['zencreator:video:kling@2.6','zencreator:video:wan@2.7']) {
+  globalThis.state=structuredClone(p);
+  await single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:[model],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx);
+  assert.equal(state.jobs.length,1);assert.equal(state.jobs[0].duration,6.5);
+  globalThis.state=structuredClone(p);
+  const source={id:D.id(),stage:7,title:'Пример',variants:[]};state.items.push(source);D.addVariant(state,source.id,{kind:'video',assetId:D.id(),model});
+  await batch(req({revision:state.revision,batchId:D.id(),sourceItemId:source.id,sourceVariantId:source.selectedId,estimate:null,plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx);
+  assert.equal(state.jobs.length,1);assert.equal(state.jobs[0].duration,6.5);
+}
+console.log('PASS video readiness: specific blockers, measured speech timing, approved source linkage; 6.5s plan allowed on single/batch Kling and Wan 10s, still blocked on 6s and mixed selections.');

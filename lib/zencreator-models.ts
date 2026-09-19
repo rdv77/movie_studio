@@ -47,7 +47,7 @@ export function prepareZenJobs(jobs: Job[], assets: {mime:string;size:number}[] 
     if(!j.prompt.trim()||(p.kind==='text'&&j.prompt.length>32000))throw new Error('ZenCreator: текстовый промпт должен содержать от 1 до 32 000 символов. Запрос не отправлен.');
     if(p.kind==='image'&&j.prompt.length>ZEN_IMAGE_PROMPT_LIMIT)throw new Error('ZenCreator: полный промпт изображения длиннее 5000 символов. Откройте новое окно генерации для подготовки компактного запроса. Запрос не отправлен.');
     if(p.kind==='text'&&j.refs.length)throw new Error('ZenCreator: текстовые модели в студии принимают только текст; уберите референсы.');
-    if(p.kind==='video'&&(j.refs.length!==1||j.duration>6))throw new Error('ZenCreator: выберите один первый кадр и план до 6 секунд.');
+    if(p.kind==='video'&&(j.refs.length!==1||!Number.isFinite(j.duration)||j.duration<=0||j.duration>generationSeconds(j.model)))throw new Error(`ZenCreator: выберите один первый кадр и план до ${generationSeconds(j.model)} секунд.`);
     if(j.refs.length>8||assets.some(a=>!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)||assets.reduce((s,a)=>s+a.size,0)>20*1024*1024)
       throw new Error('ZenCreator: до 8 референсов PNG/JPEG/WebP, до 10 МБ каждый и до 20 МБ суммарно. Запрос не отправлен.');
     j.zenCreditsEstimate??=zenCredits(j.model,j.refs.length);

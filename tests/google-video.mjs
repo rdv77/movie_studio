@@ -20,7 +20,7 @@ try {
   const j={kind:'video',model:model.id,prompt:'Камера приближается. Рты закрыты.',duration:7,refs:['ref']};
   mock((url,o)=>{assert.equal(o.headers['x-goog-api-key'],key);assert.equal(o.redirect,'manual');const b=JSON.parse(o.body);
    if(omni){assert.equal(url,base+'/interactions');assert(b.background&&b.store);assert.equal(b.response_format.delivery,'uri');assert.equal(b.input[0].data,'AA==');assert(b.input[1].text.includes(j.prompt));}
-   else {assert.equal(url,base+`/models/${model.id}:predictLongRunning`);assert.equal(b.parameters.durationSeconds,8);assert.equal(b.instances[0].image.inlineData.data,'AA==');assert.equal(b.instances[0].prompt,j.prompt);}
+   else {assert.equal(url,base+`/models/${model.id}:predictLongRunning`);assert.equal(b.parameters.durationSeconds,8);assert.deepEqual(b.instances[0].image,{bytesBase64Encoded:'AA==',mimeType:'image/png'});assert.equal(b.instances[0].prompt,j.prompt);}
    return Response.json(omni?{id:requestId,status:'in_progress'}:{name:requestId});});
   const queued=await P.generate(j,key,[frame],'16:9');assert(queued.pending);assert.equal(queued.requestId,requestId);assert.equal(calls.length,1);
   assert.equal(j.estimate,model.estimate);

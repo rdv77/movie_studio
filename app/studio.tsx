@@ -2211,7 +2211,7 @@ function GenerateDialog({
           </div>
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
-        {kind==='video'&&shot&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
+        {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
         <p className="muted small">
           {(item.stage===5&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другой план и запустить его. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.

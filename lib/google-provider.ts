@@ -36,7 +36,7 @@ export async function generateGoogle(j:Job,key:string,refs:string[],format:strin
     model:j.model,background:true,store:true,stream:false,
     input:[{type:'image',data:image[2],mime_type:image[1]},{type:'text',text:j.prompt+'\nCreate a single continuous 10-second shot, no cuts. Use the supplied image as the opening composition. Preserve its animated style.'}],
     response_format:{type:'video',aspect_ratio:format,resolution:'720p',delivery:'uri'},
-  }:{instances:[{prompt:j.prompt,image:{inlineData:{mimeType:image[1],data:image[2]}}}],
+  }:{instances:[{prompt:j.prompt,image:{bytesBase64Encoded:image[2],mimeType:image[1]}}],
     parameters:{aspectRatio:format,durationSeconds:8,resolution:'720p',sampleCount:1}};
   const d=await json(await call(omni?`${BASE}/interactions`:`${BASE}/models/${j.model}:predictLongRunning`,h(key),body));
   const requestId=omni?d.id:d.name;
