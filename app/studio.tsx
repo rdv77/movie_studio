@@ -2,7 +2,7 @@
 import { CaptionEditor } from './caption-editor';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
-import { storyboardReapprovalReason } from '@/lib/storyboard-approval';
+import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
 import { runnableJobs, newestProject, storyboardAdmissionIssue } from '@/lib/generation-queue';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
@@ -3175,8 +3175,10 @@ function SettingsDialog({ open, close, p, busy, perform, save }: any) {
 }
 function BulkApproval({ p, stage, busy, action, perform }: any) {
   const rows = approvalBatch(p, stage);
+  const reviewed = stage===5 ? unchangedStoryboardBatch(p) : [];
+  const unchanged = reviewed.filter(r=>!r.reason);
   const ready = rows.filter(r => !r.reason);
-  const blocked = rows.filter(r => r.reason);
+  const blocked = rows.filter(r => r.reason&&!unchanged.some(u=>u.itemId===r.itemId)).map(r=>({...r,reason:reviewed.find(u=>u.itemId===r.itemId)?.reason||r.reason}));
   const changed = stage===6 ? changedSpeechSelections(p) : [];
   const speechSelections = changed.map(i=>({itemId:i.id,variantId:i.selectedId!}));
   let speechReason='';
@@ -3189,6 +3191,14 @@ function BulkApproval({ p, stage, busy, action, perform }: any) {
       onClick={() => perform(() => action('approveBatch', {stage, selections: ready.map(({itemId, variantId}) => ({itemId, variantId}))}))}>
       <Check />Утвердить все неутверждённые · {ready.length}
     </Button>
+    {reviewed.length>0 && <div className="mt-4">
+      <p>Неизменившиеся планы с прежним утверждением: {unchanged.length}. Сравниваются описание, камера, речь, длительность, монтаж и общая основа. Новый выбор и изменённые планы нужно проверить отдельно.</p>
+      <Button className="h-auto whitespace-normal" disabled={busy||!unchanged.length}
+        onClick={()=>perform(()=>action('reapproveUnchangedStoryboard',{selections:unchanged.map(({itemId,variantId})=>({itemId,variantId}))}))}>
+        <Check/>Утвердить неизменившиеся планы · {unchanged.length}
+      </Button>
+      {!!unchanged.length&&<details className="mt-2"><summary>Какие планы будут утверждены · {unchanged.length}</summary><ul>{unchanged.map(r=><li key={r.itemId}>{r.title}</li>)}</ul></details>}
+    </div>}
     {blocked.length > 0 && <details className="mt-3"><summary>Какие карточки требуют внимания · {blocked.length}</summary>
       <ul>{blocked.map(r => <li key={r.itemId}><strong>{r.title}</strong>: {r.reason}</li>)}</ul>
     </details>}

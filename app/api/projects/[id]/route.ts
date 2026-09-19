@@ -3,7 +3,7 @@ import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
 import { reapproveVideo } from '@/lib/video-approval';
 import { reapproveStyle } from '@/lib/style-approval';
 import { reapproveScript } from '@/lib/script-approval';
-import { reapproveStoryboard } from '@/lib/storyboard-approval';
+import { reapproveStoryboard, reapproveUnchangedStoryboard } from '@/lib/storyboard-approval';
 import { reapproveSpeech } from '@/lib/speech-approval';
 import { removeCharacter, restoreCharacter } from '@/lib/character-removal';
 import { preparePlanCards } from '@/lib/storyboard';
@@ -133,6 +133,15 @@ export const PATCH = api(async (req, ctx) => {
       if(source?.kind==='image'&&(!source.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('image/')))
         throw new Error('Изображение недоступно. Выберите готовый кадр.');
       reapproveStoryboard(p,body.itemId!,variantId);break;
+    }
+    case 'reapproveUnchangedStoryboard': {
+      const {selections}=z.object({selections:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid()})).min(1).max(120)}).parse(d);
+      for(const s of selections) {
+        const source=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);
+        if(source?.kind==='image'&&(!source.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('image/')))
+          throw new Error('Изображение недоступно. Выберите готовый кадр.');
+      }
+      reapproveUnchangedStoryboard(p,selections);break;
     }
     case 'reapproveSpeech': {
       const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
