@@ -1,5 +1,6 @@
 import { prepareZenJobs } from '@/lib/zencreator-models';
 import { enqueuePlanJobs, videoAdmissionIssue } from '@/lib/generation-queue';
+import { videoDurationIssue } from '@/lib/video-readiness';
 import { prepareFalJobs } from '@/lib/fal-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
@@ -45,7 +46,7 @@ export const POST = api(async (req, ctx) => {
     const info=planSpeech(p,item);assertSpeech(info,'');
     const prompt=videoGenerationPrompt(p,item,row.prompt,s.characterIds);
     if(prompt.length>VIDEO_PROMPT_LIMIT)throw new Error(`${item.title}: вместе с героями промпт содержит ${prompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}.`);
-    if (shot.duration > 6) throw new Error(`${item.title}: разделите план длиннее 6 секунд в сценарии.`);
+    if (videoDurationIssue(item.title,shot.duration)) throw new Error(videoDurationIssue(item.title,shot.duration));
     const frame = await asset(user, row.ref, p);
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(frame.mime))
       throw new Error(`${item.title}: выберите первый кадр PNG, JPEG или WebP.`);

@@ -1,5 +1,7 @@
 'use client';
 import { CaptionEditor } from './caption-editor';
+import { VideoTiming } from './video-timing';
+import { videoDurationIssue, videoPlanIssues } from '@/lib/video-readiness';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
@@ -2191,7 +2193,7 @@ function GenerateDialog({
             <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {VIDEO_PROMPT_LIMIT} символов.</p>
             <details><summary>Полный промпт для модели</summary><p className="whitespace-pre-wrap">{effectivePrompt}</p></details>
             {effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: общий видеопромпт с героями должен быть до {VIDEO_PROMPT_LIMIT} символов. Запрос пока не запускается.</p>}
-            {shot && shot.duration > 6 && <p role="alert">План длиннее 6 секунд. Разделите его в подробном сценарии перед генерацией.</p>}
+            {shot&&selected.length>0&&<VideoTiming p={p} item={item} planSeconds={shot.duration} videoSeconds={Math.min(...selected.map(m=>generationSeconds(m.id)))}/>}
             {!shot && <p role="alert">Для этой карточки не найден план в утверждённом сценарии. Подтяните планы и выберите нужную карточку.</p>}
           </div>
         )}
@@ -2206,6 +2208,7 @@ function GenerateDialog({
           </div>
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
+        {kind==='video'&&shot&&videoDurationIssue(item.title,shot.duration)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration)}</p></section>}
         <p className="muted small">
           {(item.stage===5&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другой план и запустить его. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
@@ -2281,7 +2284,9 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
-  const incomplete = videoCharacterRefs(snapshot,m.provider,characterIds).length>7 || included.some(r => !r.ref || !r.prompt.trim() || videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT || r.duration > 6);
+  const blockReasons=[...(videoCharacterRefs(snapshot,m.provider,characterIds).length>7?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
+    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',VIDEO_PROMPT_LIMIT))];
+  const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
   return (
     <Dialog open onOpenChange={v => !v && close()}>
@@ -2332,19 +2337,20 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
                   onChange={e => { const f = e.target.files?.[0]; if (f) perform(async () => { const a = await upload(f); update(r.itemId, { ref: a.id }); }); e.target.value = ''; }} />
               </div>
               <PlanSpeechNote p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!}/>
+              <VideoTiming p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} planSeconds={r.duration} videoSeconds={generationSeconds(m.id)}/>
               <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length} / {VIDEO_PROMPT_LIMIT}</summary>
                 <Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })} />
                 <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds)}</p>
               </details>
               {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {VIDEO_PROMPT_LIMIT} символов.</p>}
-              {r.duration > 6 && <p role="alert">План длиннее 6 секунд. Исключите его из серии и разделите в сценарии.</p>}
+              {videoDurationIssue(r.title,r.duration)&&<p role="alert">{videoDurationIssue(r.title,r.duration)}</p>}
             </>}
           </section>
         ))}
         <div className="generation-total"><div><span>Будет отправлено</span><strong>{included.length} попыток</strong></div>
           <div><span>Предварительная оценка серии</span><strong>{money(total)}</strong></div></div>
         {costError && <p role="alert">{costError}</p>}
-        {incomplete && <p className="note">Выберите первые кадры для всех отмеченных планов и проверьте длину промптов.</p>}
+        {incomplete&&<section className="note" role="alert"><strong>Почему запуск недоступен · {blockReasons.length}</strong><ul>{blockReasons.map((reason,index)=><li key={index}>{reason}</li>)}</ul></section>}
         <p className="muted">До {PARALLEL_GENERATIONS} генераций одновременно. Можно запустить несколько планов; остальные начнутся по мере освобождения мест. Держите приложение открытым; после закрытия очередь продолжится при следующем открытии. Каждая попытка попадёт в журнал расходов. Утверждения остаются за вами.</p>
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {

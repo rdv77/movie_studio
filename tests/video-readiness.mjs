@@ -1,0 +1,32 @@
+import {build} from 'esbuild';
+import {strict as assert} from 'node:assert';
+await build({entryPoints:['lib/video-readiness.ts','lib/domain.ts','app/api/projects/[id]/generate/route.ts','app/api/projects/[id]/generate-remaining/route.ts'],bundle:true,platform:'node',format:'esm',outbase:'.',outdir:'work/tests/video-readiness',outExtension:{'.js':'.mjs'},plugins:[{name:'server',setup(b){
+ b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const api=f=>f;export const owner=async()=> 'owner';export const loadProject=async()=>structuredClone(state);export const saveProject=async(_,p)=>{globalThis.state=p;return p};export const getKey=async()=> 'mock';export const asset=async()=>({mime:'image/png',size:100});`}));
+}}]});
+const root='../work/tests/video-readiness/',R=await import(root+'lib/video-readiness.mjs'),D=await import(root+'lib/domain.mjs');
+assert.equal(R.videoDurationIssue('План 1',6),'');
+const message=R.videoDurationIssue('План 14 — Война приходит в Польшу',6.5);
+for(const text of ['План 14','6,5 сек','допустимо 6 сек','0,5 сек','Снимите галочку'])assert(message.includes(text));
+assert.equal(R.videoPlanIssues('План',5,1,'Камера',2000).length,0);
+assert.equal(R.videoPlanIssues('План',6.5,0,'x'.repeat(2001),2000).length,3);
+assert.match(R.speechTimingMessage(7.2,0.5,5,6),/Речь: 6,7 сек.*длиннее ролика на 0,7 сек/);
+assert.match(R.speechTimingMessage(5.5,0,4,6),/длиннее плана на 1,5 сек, но помещается/);
+assert.match(R.speechTimingMessage(4,0,4,6),/Речь помещается/);
+assert.match(R.speechTimingMessage(4,5,4,6),/за концом/);
+assert.match(R.speechTimingMessage(NaN,0,4,6),/не определена/);
+const p=D.newProject('Timing'),shots=Array.from({length:10},(_,n)=>({title:'План '+n,description:'Лес',duration:n===0?6.5:n===1?3.5:5,camera:'Наезд',dialogue:'Рассказ',speechType:'voiceover',continuity:'Склейка'}));
+for(const item of p.items.filter(i=>i.stage<7)){D.addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Основа',kind:item.stage===6?'audio':'text',assetId:item.stage===6?D.id():undefined});D.approve(p,item.id);}
+const video=p.items.find(i=>i.stage===7),voice=p.items.find(i=>i.stage===6),script=p.items.find(i=>i.stage===4);
+video.title='План 0';video.sourceShot={scriptId:script.id,title:'План 0'};voice.sourceShot={...video.sourceShot};p.speechMode='plans';
+const approved=D.chosen(voice);D.addVariant(p,voice.id,{kind:'audio',assetId:D.id(),duration:99});
+assert.equal(R.approvedPlanAudio(p,video).id,approved.id,'Measure the approved file, not new selected audio or planned duration');
+const track=structuredClone(p);track.speechMode='track';assert.equal(R.approvedPlanAudio(track,video),undefined);
+const archived=structuredClone(p);D.getItem(archived,voice.id).planArchive={reason:'removed'};assert.equal(R.approvedPlanAudio(archived,video),undefined);
+const other={...video,sourceShot:{scriptId:D.id(),title:'План 0'}};assert.equal(R.approvedPlanAudio(p,other),undefined);
+const {POST:single}=await import(root+'app/api/projects/[id]/generate/route.mjs'),{POST:batch}=await import(root+'app/api/projects/[id]/generate-remaining/route.mjs');
+const req=body=>new Request('https://test/api',{method:'POST',body:JSON.stringify(body)}),ctx={params:Promise.resolve({id:p.id})};
+globalThis.state=structuredClone(p);
+await assert.rejects(()=>single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:['grok-imagine-video-1.5'],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
+const example={id:D.id(),stage:7,title:'Пример',variants:[]};state.items.push(example);D.addVariant(state,example.id,{kind:'video',assetId:D.id(),model:'grok-imagine-video-1.5'});
+await assert.rejects(()=>batch(req({revision:state.revision,batchId:D.id(),sourceItemId:example.id,sourceVariantId:example.selectedId,estimate:'100',plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
+console.log('PASS video readiness: specific per-plan blockers, measured trimmed speech vs plan and clip, unknown/no-audio states, approved source linkage, identical single/batch API duration errors.');
