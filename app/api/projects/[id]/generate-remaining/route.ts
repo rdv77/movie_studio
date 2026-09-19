@@ -1,4 +1,5 @@
 import { prepareZenJobs } from '@/lib/zencreator-models';
+import { enqueuePlanJobs, videoAdmissionIssue } from '@/lib/generation-queue';
 import { prepareFalJobs } from '@/lib/fal-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
@@ -10,6 +11,7 @@ import { videoCharacterRefs, withCharacterIdentity, assertCharacterRefLimit } fr
 
 const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(),
+  basis: z.string().max(20000).optional(),
   sourceItemId: z.string().uuid(), sourceVariantId: z.string().uuid(),
   estimate: z.string().regex(/^\d+$/).nullable(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
@@ -23,10 +25,9 @@ export const POST = api(async (req, ctx) => {
   const s = input.parse(await req.json());
   // A repeated submission resumes the same saved queue, never another paid batch.
   if (p.jobs.some(j => j.batchId === s.batchId)) return Response.json(p);
-  if (p.revision !== s.revision) throw new Error('Проект изменился. Закройте окно и заново проверьте серию.');
+  if (p.revision !== s.revision&&s.basis!==dependencies(p,7)) throw new Error('Проект изменился. Закройте окно и заново проверьте серию.');
   if (!stageReady(p, 7)) throw new Error('Утвердите предыдущие этапы.');
-  if (p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
-    throw new Error('Дождитесь текущей серии или отмените неотправленные попытки.');
+  const queueIssue=videoAdmissionIssue(p);if(queueIssue)throw new Error(queueIssue);
   const source = getItem(p, s.sourceItemId);
   const m = selectedVideoModel(p, source);
   if (!m || chosen(source)?.id !== s.sourceVariantId)
@@ -61,7 +62,5 @@ export const POST = api(async (req, ctx) => {
   }
   await getKey(user, m.provider);
   prepareZenJobs(jobs);
-  assertBudget(p, jobs);
-  p.jobs.push(...jobs);
-  return Response.json(await saveProject(user, p, p.revision));
+  return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision),source.id));
 });

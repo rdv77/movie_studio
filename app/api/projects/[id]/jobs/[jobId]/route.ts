@@ -9,6 +9,7 @@ import {
   asset,
   runtime,
 } from '@/lib/server';
+import { parallelJob, generationInProgress, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
 import {
   dependencies,
   stageReady,
@@ -84,6 +85,9 @@ export const POST = api(async (req, ctx) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status !== 'queued')
         throw new Error('Попытка уже обрабатывается.');
+      // CAS in mutate makes the slot reservation global across browser tabs.
+      // A full pool leaves the request queued; it has not reached the provider.
+      if(parallelJob(p,job)&&p.jobs.filter(j=>j.id!==job.id&&parallelJob(p,j)&&generationInProgress(j)).length>=PARALLEL_GENERATIONS)return;
       const i = job.purpose==='voice-test'?undefined:getItem(p, job.itemId);
       if (i && (job.deps !== dependencies(p, i.stage) || !stageReady(p, i.stage))) {
         job.status = 'cancelled';
@@ -112,7 +116,7 @@ export const POST = api(async (req, ctx) => {
       }
     });
     j = p.jobs.find((x) => x.id === jobId)!;
-    if (j.status === 'cancelled') return Response.json(p);
+    if (j.status === 'cancelled'||j.status === 'queued') return Response.json(p);
   }
   try {
     const refs =

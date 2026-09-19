@@ -3,7 +3,7 @@ import { CaptionEditor } from './caption-editor';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
-import { runnableJobs, newestProject, storyboardAdmissionIssue } from '@/lib/generation-queue';
+import { runnableJobs, newestProject, storyboardAdmissionIssue, videoAdmissionIssue, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
@@ -786,7 +786,7 @@ function Workspace() {
                     В серии осталось {active.length} попыток. Обработка
                     продолжается, пока студия открыта; при возвращении очередь
                     возобновится.
-                    {step===5&&' Можно открыть другой план и запустить «Создать с ИИ», не дожидаясь текущего кадра.'}
+                    {[5,7].includes(step)&&` До ${PARALLEL_GENERATIONS} генераций одновременно. Можно открыть другой план и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
                   </span>
                   <Button variant="ghost" onClick={() => setPanel('budget')}>
                     Посмотреть
@@ -892,12 +892,12 @@ function Workspace() {
                   <div className="w-full">
                     <Button variant="outline" className="h-auto whitespace-normal mb-3" disabled={busy || active.length > 0}
                       onClick={() => setDialog('lipsync')}><Mic />Синхронизировать губы · sync-3</Button>
-                    <Button className="h-auto whitespace-normal" disabled={busy || !ready || active.length > 0 || !item || !selectedVideoModel(p, item) || !remainingVideoPlans(p).length}
+                    <Button className="h-auto whitespace-normal" disabled={busy || !ready || !!videoAdmissionIssue(p) || !item || !selectedVideoModel(p, item) || !remainingVideoPlans(p).length}
                       onClick={() => setDialog('remaining-video')}>
                       <Sparkles />Создать оставшиеся планы выбранной моделью
                     </Button>
                     <p className="mt-2 muted">{!ready ? 'Сначала утвердите предыдущие этапы. Озвучка и раскадровка должны быть актуальными.'
-                      : active.length > 0 ? 'Дождитесь завершения текущей серии генерации.'
+                      : videoAdmissionIssue(p) ? videoAdmissionIssue(p)
                       : !remainingVideoPlans(p).length ? 'Нет планов для этой серии: у всех уже есть видео либо попытка с неизвестным исходом. Проверьте журнал попыток.'
                       : item && selectedVideoModel(p, item)
                       ? `Модель: ${selectedVideoModel(p, item)!.name}. Без видео: ${remainingVideoPlans(p).length}. Перед запуском — выбор первых кадров и оценка всей серии.`
@@ -1824,7 +1824,7 @@ function GenerateDialog({
   const [voice, setVoice] = useState('');
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState('');
-  const queueIssue=item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):'';
+  const queueIssue=item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
   const allScriptAudio = scriptSpeech(p);
   const scriptAudio = {...allScriptAudio,sources:item.sourceShot?allScriptAudio.sources:allScriptAudio.sources.filter(s=>s.speechType==='voiceover')};
   const characters = speechCharacters(p);
@@ -2207,7 +2207,7 @@ function GenerateDialog({
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
         <p className="muted small">
-          {item.stage===5&&kind==='image'?'Изображения раскадровки обрабатываются параллельно. Пока идёт генерация, можно запустить другой план.':'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
+          {(item.stage===5&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другой план и запустить его. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
         </p>
         <DialogFooter>
@@ -2345,11 +2345,11 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
           <div><span>Предварительная оценка серии</span><strong>{money(total)}</strong></div></div>
         {costError && <p role="alert">{costError}</p>}
         {incomplete && <p className="note">Выберите первые кадры для всех отмеченных планов и проверьте длину промптов.</p>}
-        <p className="muted">Планы будут создаваться по очереди. Держите приложение открытым; после закрытия очередь продолжится при следующем открытии. Каждая попытка попадёт в журнал расходов. Утверждения остаются за вами.</p>
+        <p className="muted">До {PARALLEL_GENERATIONS} генераций одновременно. Можно запустить несколько планов; остальные начнутся по мере освобождения мест. Держите приложение открытым; после закрытия очередь продолжится при следующем открытии. Каждая попытка попадёт в журнал расходов. Утверждения остаются за вами.</p>
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {
             await submit({ revision: snapshot.revision, batchId: batch, sourceItemId: source.id, sourceVariantId: chosen(source)!.id,
-              estimate: perAttempt, characterIds, plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
+              estimate: perAttempt, characterIds, basis:dependencies(snapshot,7), plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
             close();
           })}><Sparkles />Запустить {included.length} планов</Button></DialogFooter>
       </DialogContent>

@@ -3,6 +3,17 @@ import { selectedReferences } from './reference-selection';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
+export const videoJob = (p:Project,j:Job) => j.kind==='video'&&!j.lipsync&&p.items.some(i=>i.id===j.itemId&&i.stage===7&&!i.removedAt&&!i.planArchive);
+export const parallelJob = (p:Project,j:Job) => storyboardJob(p,j)||videoJob(p,j);
+export const PARALLEL_GENERATIONS = 3;
+export const generationInProgress = (j:Job) => ['dispatching','pending','saving'].includes(j.status);
+export function videoAdmissionIssue(p:Project,itemId?:string) {
+  if(itemId&&p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
+    return 'Для этого плана уже есть текущая попытка или запрос с неизвестным исходом. Выберите другой план либо проверьте журнал.';
+  if(p.jobs.some(j=>activeGeneration(j)&&!videoJob(p,j)))
+    return 'Дождитесь задач другого этапа или синхронизации губ. Видеопланы можно создавать параллельно друг с другом.';
+  return '';
+}
 export function storyboardAdmissionIssue(p:Project,itemId:string) {
   if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
     return 'Для этого плана уже есть текущая попытка или запрос с неизвестным исходом. Выберите другой план либо проверьте журнал.';
@@ -12,30 +23,47 @@ export function storyboardAdmissionIssue(p:Project,itemId:string) {
 }
 
 // Fair scheduling keeps a slow asynchronous provider from monopolizing the
-// runner. Only storyboard requests run concurrently; other workflows stay serial.
+// runner. Image/video provider tasks occupy a slot until saved or failed, even
+// between HTTP polls. Enforce the same bound atomically when dispatching.
 export function runnableJobs(p:Project,inFlight:ReadonlySet<string>,attempted:ReadonlyMap<string,number>) {
   const active=p.jobs.filter(activeGeneration);
-  const parallel=active.length>0&&active.every(j=>storyboardJob(p,j));
+  const parallel=active.length>0&&active.every(j=>parallelJob(p,j));
   if(!parallel) return inFlight.size ? [] : active.filter(j=>j.status!=='queued').slice(0,1).concat(active.filter(j=>j.status==='queued')).slice(0,1);
-  const slots=Math.max(0,3-inFlight.size);
-  return active.filter(j=>!inFlight.has(j.id))
-    .sort((a,b)=>(attempted.get(a.id)??0)-(attempted.get(b.id)??0))
-    .slice(0,slots);
+  const slots=Math.max(0,PARALLEL_GENERATIONS-inFlight.size);
+  let starts=Math.max(0,PARALLEL_GENERATIONS-active.filter(j=>generationInProgress(j)||inFlight.has(j.id)).length);
+  const picked:Job[]=[],candidates=active.filter(j=>!inFlight.has(j.id));
+  const running=active.filter(j=>generationInProgress(j)||inFlight.has(j.id));
+  while(picked.length<slots) {
+    const occupancy=[...running,...picked];
+    const count=(j:Job,key:'model'|'itemId')=>occupancy.filter(x=>x[key]===j[key]).length;
+    const eligible=candidates.filter(j=>j.status!=='queued'||starts>0).sort((a,b)=>
+      (attempted.get(a.id)??0)-(attempted.get(b.id)??0)||count(a,'model')-count(b,'model')||count(a,'itemId')-count(b,'itemId'));
+    const next=eligible[0];if(!next)break;
+    picked.push(next);candidates.splice(candidates.indexOf(next),1);
+    if(next.status==='queued')starts--;
+  }
+  return picked;
 }
 export const newestProject = (previous:Project|undefined,next:Project) => previous?.id===next.id&&previous.revision>next.revision?previous:next;
 
 // Provider polling can save between admission and persistence. Merge only the
 // new jobs, recheck basis/selection and budget, and retry CAS conflicts (no API calls).
 export async function enqueueStoryboard(snapshot:Project,jobs:Job[],load:()=>Promise<Project>,save:(p:Project,revision:number)=>Promise<Project>) {
-  const itemId=jobs[0].itemId,batchId=jobs[0].batchId;
-  const original=JSON.stringify(getItem(snapshot,itemId)),basis=dependencies(snapshot,5);
+  return enqueuePlanJobs(snapshot,jobs,load,save);
+}
+export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promise<Project>,save:(p:Project,revision:number)=>Promise<Project>,sourceItemId?:string) {
+  const stage=getItem(snapshot,jobs[0].itemId).stage,batchId=jobs[0].batchId;
+  if(![5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии планов.');
+  const items=[...new Set(jobs.map(j=>j.itemId))];
+  const originals=new Map(items.map(id=>[id,JSON.stringify(getItem(snapshot,id))])),basis=dependencies(snapshot,stage);
   for(let n=0;n<5;n++) {
     const p=await load();
     if(p.jobs.some(j=>j.batchId===batchId))return p;
-    if(dependencies(p,5)!==basis||JSON.stringify(getItem(p,itemId))!==original||!stageReady(p,5))
+    if(dependencies(p,stage)!==basis||items.some(id=>JSON.stringify(getItem(p,id))!==originals.get(id))||!stageReady(p,stage)||
+      sourceItemId&&getItem(p,sourceItemId).selectedId!==getItem(snapshot,sourceItemId).selectedId)
       throw new Error('Основа или выбранный план изменились. Проверьте задачу заново.');
-    const issue=storyboardAdmissionIssue(p,itemId);if(issue)throw new Error(issue);
-    if(JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
+    for(const itemId of items){const issue=stage===5?storyboardAdmissionIssue(p,itemId):videoAdmissionIssue(p,itemId);if(issue)throw new Error(issue);}
+    if(stage===5&&JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
       throw new Error('Список референсов изменился. Проверьте галочки заново.');
     assertBudget(p,jobs);
     const revision=p.revision;
