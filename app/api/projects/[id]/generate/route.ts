@@ -45,6 +45,7 @@ export const POST = api(async (req, ctx) => {
       count: z.number().int().min(1).max(4),
       prompt: z.string().trim().min(1).max(20000),
       refs: z.array(z.string().uuid()).max(8),
+      characterIds: z.array(z.string().uuid()).max(120).optional(),
       referenceMode: z.enum(['auto','selected']).default('auto'),
       dialogue: z.string().max(9500),
       voiceId: z.string().max(150),
@@ -80,7 +81,7 @@ export const POST = api(async (req, ctx) => {
   for (const m of ms) await getKey(user, m.provider);
   const kind = ms[0].kind;
   const refs = kind === 'image' ? s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs) : s.refs;
-  const characterRefs = kind === 'video' && ms.some(m=>m.provider==='xai') ? videoCharacterRefs(p,'xai') : [];
+  const characterRefs = kind === 'video' ? videoCharacterRefs(p,ms.some(m=>m.provider==='xai')?'xai':'',s.characterIds) : [];
   if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   assertCharacterRefLimit(characterRefs,7);
   let imageBytes=0;
@@ -95,7 +96,7 @@ export const POST = api(async (req, ctx) => {
   }
   if(ms.some(m=>isOpenAIImage(m.id))&&imageBytes>OPENAI_IMAGE_REFS_BYTES)throw new Error('GPT Image: выберите референсы суммарно до 20 МБ. Запрос не отправлен.');
   if(ms.some(m=>isMiniMaxImage(m.id))){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw new Error(issue);}
-  const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt) : '';
+  const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt,s.characterIds) : '';
   const shot = ['image', 'video'].includes(kind) && [5, 7].includes(item.stage) ? videoShot(p, item) : undefined;
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
   if (kind === 'video') {
@@ -143,6 +144,7 @@ export const POST = api(async (req, ctx) => {
       volume: basis?.volume ?? 1,
       character: item.stage===1 ? item.character : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
+      characterIds: kind==='video'?s.characterIds:undefined,
       prompt: isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
         p,
         item,

@@ -202,6 +202,7 @@ export const POST = api(async (req, ctx) => {
           refs: job.refs,
           character:job.character,
           characterRefs:job.characterRefs,
+          characterIds:job.characterIds,
           dialogue: job.dialogue,
           speechType:job.speechType,
           speaker:job.speaker,

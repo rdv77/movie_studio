@@ -64,8 +64,8 @@ export function videoPrompt(p: Project, item: Item) {
   // Never cut action/camera instructions silently. A long source requires director edits.
   return sections.join('\n\n');
 }
-export function videoGenerationPrompt(p: Project, item: Item, prompt: string) {
-  return withSpeechDirection(withCharacterIdentity(p,prompt),planSpeech(p,item));
+export function videoGenerationPrompt(p: Project, item: Item, prompt: string, characterIds?:string[]) {
+  return withSpeechDirection(withCharacterIdentity(p,prompt,characterIds),planSpeech(p,item));
 }
 export function videoFrame(p: Project, item: Item) {
   const title = item.sourceShot?.title ?? item.title;

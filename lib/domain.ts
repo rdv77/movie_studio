@@ -30,6 +30,7 @@ export type Variant = {
   speaker?: string;
   character?: CharacterBrief;
   characterRefs?: string[];
+  characterIds?: string[];
   id: string;
   shotSource?: string;
   title: string;
@@ -72,6 +73,7 @@ export type Job = {
   speaker?: string;
   character?: CharacterBrief;
   characterRefs?: string[];
+  characterIds?: string[];
   id: string;
   shotSource?: string;
   batchId: string;

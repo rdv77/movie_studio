@@ -85,3 +85,37 @@ const remainingItem={id:D.id(),stage:7,title:'План 2',sourceShot:{scriptId:s
 assert.equal((await remaining(req({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items[7]).id,estimate:'8600000000',plans:[{itemId:remainingItem.id,ref:firstFrame,prompt:'Катя идёт к морю.'}]}),ctx)).status,200);
 assert.deepEqual(state.jobs[0].characterRefs,[approvedImage]);assert.match(state.jobs[0].prompt,/Рыжие косы/);
 console.log('PASS character workflow: owned photo/text drafts, immutable approved profiles, portrait generation snapshots, automatic single/batch references, Grok video reference_images, MiniMax first frame, reference/prompt limits before billing, and downstream reapproval. Zero paid calls.');
+
+// Explicit empty selection is different from legacy requests with no selection.
+const remainingBase=structuredClone(state);remainingBase.jobs=[];
+const remainingInput=()=>({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items.find(i=>i.id===video.id)).id,estimate:'8500000000',plans:[{itemId:remainingItem.id,ref:firstFrame,prompt:'Пейзаж у моря.'}]});
+for(const ids of [[],[hero.id]]){
+ state=structuredClone(remainingBase);const res=await remaining(req({...remainingInput(),characterIds:ids}),ctx);assert.equal(res.status,200,await res.clone().text());
+ const j=state.jobs[0];assert.deepEqual(j.characterIds,ids);assert.deepEqual(j.characterRefs??[],ids.length?[approvedImage]:[]);
+ assert.equal(j.prompt.includes('Рыжие косы'),!!ids.length);assert.deepEqual(j.refs,[firstFrame]);
+}
+const allHeroes=C.approvedCharacters(crowded),picked=allHeroes[1];
+for(const model of ['grok-imagine-video-1.5','MiniMax-Hailuo-2.3'])for(const ids of [[],[picked.itemId]]){
+ state=structuredClone(crowded);const initial=structuredClone(state.items);
+ const res=await generate(req({...input(video.id,model,[firstFrame]),characterIds:ids}),ctx);assert.equal(res.status,200,await res.clone().text());
+ const j=state.jobs[0];assert.deepEqual(j.characterIds,ids);assert.deepEqual(j.refs,[firstFrame]);assert.deepEqual(state.items,initial,'Exclusion never removes a hero or changes approvals');
+ assert.equal(j.prompt.includes('Постоянные герои:'),!!ids.length);
+ assert(!j.prompt.includes('Катя:'),'Unselected identity excluded from automatic prompt');
+ assert.equal(j.prompt.includes(picked.profile.name+':'),!!ids.length);
+ assert.deepEqual(j.characterRefs??[],model.startsWith('grok')&&ids.length?[picked.assetId]:[]);
+}
+for(const ids of [[D.id()],[hero.id,hero.id],[frame.id]]){
+ state=structuredClone(baseline);const res=await generate(req({...input(video.id,'grok-imagine-video-1.5',[firstFrame]),characterIds:ids}),ctx);assert.equal(res.status,400);assert.equal(state.jobs.length,0);
+ state=structuredClone(remainingBase);const batchRes=await remaining(req({...remainingInput(),characterIds:ids}),ctx);assert.equal(batchRes.status,400);assert.equal(state.jobs.length,0);
+}
+state=structuredClone(baseline);const explicit={...input(video.id,'grok-imagine-video-1.5',[firstFrame]),characterIds:[]};
+assert.equal((await generate(req({...explicit,revision:-1}),ctx)).status,400);assert.equal(state.jobs.length,0);
+assert.equal((await generate(req(explicit,'other'),ctx)).status,400);assert.equal(state.jobs.length,0);
+assert.equal((await generate(req(explicit),ctx)).status,200);const selectedJob=state.jobs[0];
+assert.equal((await generate(req(explicit),ctx)).status,200);assert.equal(state.jobs.length,1,'Retry does not create a second series');
+selectedJob.status='saving';selectedJob.output={url:'https://assets.example/result.mp4',mime:'video/mp4'};
+globalThis.fetch=async()=>new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'video/mp4'}});
+await tick(req({}),{params:Promise.resolve({id:state.id,jobId:selectedJob.id})});
+assert.equal(state.jobs[0].status,'done',state.jobs[0].error);
+assert.deepEqual(state.items.find(i=>i.id===video.id).variants.at(-1).characterIds,[],'Saved result preserves explicit empty selection');
+console.log('PASS video hero selection: one/none/legacy, prompt and provider refs agree, first frame and approvals preserved, remaining batch, persistence, stale/foreign/duplicate selection validation and idempotency.');

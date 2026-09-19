@@ -1548,11 +1548,13 @@ function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save
     <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button><Button variant="outline" disabled={busy||!valid} onClick={()=>submit()}>Сохранить карточку</Button><Button disabled={busy||!valid||!canGenerate} onClick={()=>submit(true)}><Sparkles/>Сохранить и создать образы с ИИ</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
-function CharacterReferences({p,mode='image'}:{p:Project;mode?:'image'|'video'|'sync'}) {
+function CharacterReferences({p,mode='image',selectedIds,onChange,disabled=false}:{p:Project;mode?:'image'|'video'|'sync';selectedIds?:string[];onChange?:(ids:string[])=>void;disabled?:boolean}) {
   const heroes=approvedCharacters(p);if(!heroes.length)return null;
   return <section className="note" aria-label="Постоянные герои"><strong>Утверждённые герои · {heroes.length}</strong>
-    <div className="reference-grid">{heroes.map(c=><div className="reference active" key={c.itemId}><img loading="lazy" src={'/api/assets/'+c.assetId} alt={`Утверждённый образ ${c.profile.name}`}/><span><Check size={14}/> {c.profile.name}</span></div>)}</div>
-    <p>{mode==='image'?'Эти изображения автоматически добавляются к запросу вместе с описаниями. Они задают внешность; состав сцены берётся из карточки плана.':mode==='video'?'Описания героев добавляются к каждому промпту. Grok также получает отдельные изображения героев. MiniMax сохраняет внешность через первый кадр раскадровки.':'Описания героев добавляются к задаче. sync-3 получает их внешность через утверждённый кадр раскадровки.'}</p>
+    {onChange&&<div className="row mt-2"><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>onChange(heroes.map(c=>c.itemId))}>Выбрать всех</Button><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>onChange([])}>Снять все галочки</Button><span>Выбрано: {(selectedIds??[]).length}</span></div>}
+    <div className="reference-grid">{heroes.map(c=>{const active=!onChange||(selectedIds??[]).includes(c.itemId);return <label className={'reference '+(active?'active':'')} key={c.itemId}><img loading="lazy" src={'/api/assets/'+c.assetId} alt={`Утверждённый образ ${c.profile.name}`}/><span>{onChange?<Checkbox aria-label={`Использовать героя: ${c.profile.name}`} checked={active} disabled={disabled} onCheckedChange={checked=>onChange(checked?[...new Set([...(selectedIds??[]),c.itemId])]:(selectedIds??[]).filter(id=>id!==c.itemId))}/>:<Check size={14}/>} {c.profile.name}</span></label>;})}</div>
+    {onChange&&<p>В эту серию попадут только отмеченные герои: их описания и, для Grok, отдельные изображения. Снятие галочки не удаляет героя из проекта и не убирает его с первого кадра. Имена, написанные в задаче вручную, при необходимости удалите из текста.</p>}
+    {!onChange&&<p>{mode==='image'?'Эти изображения автоматически добавляются к запросу вместе с описаниями. Они задают внешность; состав сцены берётся из карточки плана.':mode==='video'?'Описания героев добавляются к каждому промпту. Grok также получает отдельные изображения героев. MiniMax сохраняет внешность через первый кадр раскадровки.':'Описания героев добавляются к задаче. sync-3 получает их внешность через утверждённый кадр раскадровки.'}</p>}
   </section>;
 }
 function SpeechModeFields({value,onChange,disabled=false,allowNone=true,allowCharacter=true}:{value:SpeechInfo;onChange:(value:SpeechInfo)=>void;disabled?:boolean;allowNone?:boolean;allowCharacter?:boolean}) {
@@ -1588,6 +1590,7 @@ function VariantEditor({
       setData({
         character:value?.character??item.character,
         characterRefs:value?.characterRefs,
+        characterIds:value?.characterIds,
         title: value ? value.title + ' · правки' : 'Авторский вариант',
         text: (!value?.text || value.text === 'Предложи самостоятельный вариант для текущего материала.') && [5, 7].includes(item.stage)
           ? videoShot(p, item)?.description ?? value?.text ?? '' : value?.text ?? '',
@@ -1814,6 +1817,7 @@ function GenerateDialog({
   const [count, setCount] = useState(3);
   const [prompt, setPrompt] = useState('');
   const [refs, setRefs] = useState<string[]>([]);
+  const [characterIds,setCharacterIds]=useState<string[]>([]);
   const [speech, setSpeech] = useState('');
   const [speechSource, setSpeechSource] = useState('current');
   const [speechMeta,setSpeechMeta]=useState<SpeechInfo>({speechType:'voiceover',speaker:''});
@@ -1830,6 +1834,8 @@ function GenerateDialog({
   useEffect(() => {
     if (open) {
       const v = chosen(item);
+      const heroes=approvedCharacters(p).map(c=>c.itemId);
+      setCharacterIds(v?.characterIds?.filter(id=>heroes.includes(id))??heroes);
       const k: Kind = item.character || [3, 5].includes(item.stage)
         ? 'image'
         : item.stage === 6
@@ -1879,7 +1885,8 @@ function GenerateDialog({
   const selectableRefs=kind==='image';
   const excludedRefs=hiddenReferences(p);
   const effectiveRefs=selectableRefs?selectedReferences(p,refs):refs;
-  const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt):prompt;
+  const effectiveCharacters=characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
+  const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt,effectiveCharacters):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const falRequest=kind==='image'&&selected.some(m=>isFalImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,FAL_PROMPT_BUDGET):undefined;
@@ -1889,7 +1896,7 @@ function GenerateDialog({
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
     ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
-    : selected.some(m=>kind==='video'&&m.provider==='xai'&&videoCharacterRefs(p,'xai').length>7)?'Grok Video принимает до 7 отдельных образов героев.':'';
+    : selected.some(m=>kind==='video'&&m.provider==='xai'&&videoCharacterRefs(p,'xai',effectiveCharacters).length>7)?'Grok Video принимает до 7 отдельных образов героев.':'';
   const computed = (m: (typeof MODELS)[number]) =>
     estimates[m.id] !== undefined
       ? estimates[m.id]
@@ -1897,7 +1904,7 @@ function GenerateDialog({
         : null
       : m.id === 'grok-imagine-image-2.0'
         ? (400000000n + BigInt(effectiveRefs.length) * 100000000n).toString()
-        : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai').length)*100000000n).toString()
+        : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
         : m.estimate;
   let total: string | null = null;
   try {
@@ -2004,7 +2011,7 @@ function GenerateDialog({
                         estimates[m.id] ??
                         (m.id === 'grok-imagine-image-2.0'
                           ? String(0.04 + 0.01 * effectiveRefs.length)
-                          : m.id==='grok-imagine-video-1.5' ? (0.85+0.01*videoCharacterRefs(p,'xai').length).toFixed(2)
+                          : m.id==='grok-imagine-video-1.5' ? (0.85+0.01*videoCharacterRefs(p,'xai',effectiveCharacters).length).toFixed(2)
                           : m.estimate
                             ? String(Number(m.estimate) / 1e10)
                             : '')
@@ -2162,7 +2169,7 @@ function GenerateDialog({
             </Field>
           )
         )}
-        {item.stage>1&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'}/>}
+        {item.stage>1&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
         {referenceError&&<p role="alert">{referenceError}</p>}
         {falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
         {zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
@@ -2231,6 +2238,7 @@ function GenerateDialog({
                   count,
                   prompt,
                   refs:effectiveRefs,
+                  ...(kind==='video'?{characterIds:effectiveCharacters}:{}),
                   ...(selectableRefs?{referenceMode:'selected'}:{}),
                   dialogue: kind === 'audio' ? spoken : speech,
                   ...(kind==='audio'?speechMeta:{}),
@@ -2253,6 +2261,7 @@ function GenerateDialog({
 function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, submit }: any) {
   const [snapshot] = useState<Project>(p);
   const [source] = useState<Item>(item);
+  const [characterIds,setCharacterIds]=useState(()=>approvedCharacters(snapshot).map(c=>c.itemId));
   const m = selectedVideoModel(snapshot, source)!;
   const [batch] = useState(() => crypto.randomUUID());
   const [rows, setRows] = useState(() => remainingVideoPlans(snapshot).map(i => ({
@@ -2272,7 +2281,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
-  const incomplete = videoCharacterRefs(snapshot,m.provider).length>7 || included.some(r => !r.ref || !r.prompt.trim() || videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim()).length > VIDEO_PROMPT_LIMIT || r.duration > 6);
+  const incomplete = videoCharacterRefs(snapshot,m.provider,characterIds).length>7 || included.some(r => !r.ref || !r.prompt.trim() || videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT || r.duration > 6);
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
   return (
     <Dialog open onOpenChange={v => !v && close()}>
@@ -2287,8 +2296,9 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         </Field>
         <ZenCost modelId={m.id} refs={1} count={included.length}/>
         <p className="muted">Каждый исходный ролик: {generationSeconds(m.id)} сек. В монтаж войдёт длительность соответствующего плана.</p>
-        <CharacterReferences p={snapshot} mode="video"/>
-        {videoCharacterRefs(snapshot,m.provider).length>7&&<p role="alert">Grok Video принимает до 7 отдельных образов героев.</p>}
+        <CharacterReferences p={snapshot} mode="video" selectedIds={characterIds} disabled={busy} onChange={ids=>{setCharacterIds(ids);if(m.id==='grok-imagine-video-1.5')setEstimate((0.85+0.01*videoCharacterRefs(snapshot,'xai',ids).length).toFixed(2));}}/>
+        <p className="muted small">Этот выбор героев применяется ко всем отмеченным планам серии.</p>
+        {videoCharacterRefs(snapshot,m.provider,characterIds).length>7&&<p role="alert">Grok Video принимает до 7 отдельных образов героев.</p>}
         {rows.map((r, index) => (
           <section key={r.itemId} className="editor-surface p-4 mb-3">
             <label className="row mb-3"><Checkbox checked={r.include} onCheckedChange={v => update(r.itemId, { include: !!v })} />
@@ -2322,11 +2332,11 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
                   onChange={e => { const f = e.target.files?.[0]; if (f) perform(async () => { const a = await upload(f); update(r.itemId, { ref: a.id }); }); e.target.value = ''; }} />
               </div>
               <PlanSpeechNote p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!}/>
-              <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim()).length} / {VIDEO_PROMPT_LIMIT}</summary>
+              <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length} / {VIDEO_PROMPT_LIMIT}</summary>
                 <Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })} />
-                <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim())}</p>
+                <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds)}</p>
               </details>
-              {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim()).length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {VIDEO_PROMPT_LIMIT} символов.</p>}
+              {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {VIDEO_PROMPT_LIMIT} символов.</p>}
               {r.duration > 6 && <p role="alert">План длиннее 6 секунд. Исключите его из серии и разделите в сценарии.</p>}
             </>}
           </section>
@@ -2339,7 +2349,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {
             await submit({ revision: snapshot.revision, batchId: batch, sourceItemId: source.id, sourceVariantId: chosen(source)!.id,
-              estimate: perAttempt, plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
+              estimate: perAttempt, characterIds, plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
             close();
           })}><Sparkles />Запустить {included.length} планов</Button></DialogFooter>
       </DialogContent>

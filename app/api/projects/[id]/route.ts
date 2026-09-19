@@ -32,6 +32,7 @@ const variant = z.object({
   speaker: z.string().trim().max(100).optional(),
   character: character.optional(),
   characterRefs: z.array(z.string().uuid()).max(7).optional(),
+  characterIds: z.array(z.string().uuid()).max(120).optional(),
   shotSource: z.string().uuid().optional(),
   title: z.string().trim().min(1).max(120),
   text: z.string().max(80000),

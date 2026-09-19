@@ -19,12 +19,20 @@ export function characterReferenceNote(p: Project, refs: string[]) {
   const rows = approvedCharacters(p).filter(c=>refs.includes(c.assetId));
   return rows.length ? `\n\nРеференсы постоянных героев (порядок прикреплённых изображений):\n${rows.map(c=>`Изображение ${refs.indexOf(c.assetId)+1}: ${c.profile.name}. ${c.profile.appearance}`).join('\n')}\nИспользуй эти изображения как образцы внешности, а не как композицию сцены. Показывай только героев, участвующих в описанном действии. Не смешивай лица и одежду разных героев.` : '';
 }
-export function withCharacterIdentity(p: Project, prompt: string) {
-  const heroes = approvedCharacters(p);
+export function videoCharacters(p:Project,characterIds?:string[]) {
+  const heroes=approvedCharacters(p);
+  if(characterIds===undefined)return heroes;
+  if(new Set(characterIds).size!==characterIds.length||characterIds.some(id=>!heroes.some(c=>c.itemId===id)))
+    throw new Error('Список утверждённых героев изменился. Заново откройте серию и проверьте выбор.');
+  return heroes.filter(c=>characterIds.includes(c.itemId));
+}
+export function withCharacterIdentity(p: Project, prompt: string, characterIds?:string[]) {
+  const heroes = videoCharacters(p,characterIds);
   return heroes.length ? `${prompt}\n\nПостоянные герои: ${heroes.map(c=>`${c.profile.name}: ${c.profile.appearance || c.profile.description || 'внешность по утверждённому изображению'}`).join('; ')}. Сохрани лица, возраст, пропорции и одежду. Показывай только участников этого плана.` : prompt;
 }
-export function videoCharacterRefs(p: Project, provider: string) {
-  return provider === 'xai' ? [...new Set(approvedCharacters(p).map(c=>c.assetId))] : [];
+export function videoCharacterRefs(p: Project, provider: string, characterIds?:string[]) {
+  const heroes=videoCharacters(p,characterIds);
+  return provider === 'xai' ? [...new Set(heroes.map(c=>c.assetId))] : [];
 }
 export function assertCharacterRefLimit(refs: string[], limit: number) {
   if (refs.length > limit) throw new Error(`С учётом утверждённых героев нужно ${refs.length} референсов, а модель принимает до ${limit}. Уберите дополнительные изображения или выберите модель с большим лимитом. Образы героев не исключаются автоматически.`);
