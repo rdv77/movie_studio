@@ -55,7 +55,7 @@ export function videoPrompt(p: Project, item: Item) {
   const index = script.shots.findIndex(s => s.title === shot.title);
   const sections = [
     `Анимационный фильм. Сохрани внешность героев, одежду, палитру и стиль первого кадра. Формат ${p.format}.`,
-    `План: ${shot.title}. Заверши действие за ${shot.duration} с; затем удерживай финальную позу до конца 6-секундного клипа.`,
+    `План: ${shot.title}. Заверши действие за ${shot.duration} с; затем удерживай финальную позу до конца клипа.`,
     `Действие: ${shot.description}`,
     `Камера: ${shot.camera}`,
     `Непрерывность и монтаж: ${shot.continuity}`,

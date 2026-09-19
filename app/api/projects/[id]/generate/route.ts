@@ -1,4 +1,5 @@
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
+import { prepareGoogleJobs } from '@/lib/google-models';
 import { enqueuePlanJobs, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
 import { videoDurationIssue } from '@/lib/video-readiness';
 import { assertSelectedReferences } from '@/lib/reference-selection';
@@ -106,8 +107,8 @@ export const POST = api(async (req, ctx) => {
       throw new Error(`Видеопромпт вместе с описаниями героев содержит ${motionPrompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}; запрос не отправлен.`);
     if (item.stage === 7 && !shot)
       throw new Error('Подтяните планы из утверждённого подробного сценария и выберите нужный план.');
-    if (shot && videoDurationIssue(item.title,shot.duration))
-      throw new Error(videoDurationIssue(item.title,shot.duration));
+    if (shot && videoDurationIssue(item.title,shot.duration,s.models))
+      throw new Error(videoDurationIssue(item.title,shot.duration,s.models));
   }
   const speechSource = kind === 'audio' ? resolveSpeechSource(p, s.speechSource) : undefined;
   const info = kind==='audio' ? (s.speechType ? speechInfo(s) : speechSource ? speechInfo(speechSource) : planSpeech(p,item,chosen(item))) : planSpeech(p,item,kind==='video'?undefined:chosen(item));
@@ -171,6 +172,7 @@ export const POST = api(async (req, ctx) => {
   if(jobs.some(j=>isOpenAIImage(j.model)&&j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT))throw new Error('GPT Image: полный промпт с утверждённой основой длиннее 32 000 символов. Сократите задачу или описания. Запрос не отправлен.');
   if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
   prepareFalJobs(jobs, imageAssets);
+  prepareGoogleJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
   if(parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
   assertBudget(p, jobs);

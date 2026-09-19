@@ -2,6 +2,7 @@
 import { CaptionEditor } from './caption-editor';
 import { VideoTiming } from './video-timing';
 import { videoDurationIssue, videoPlanIssues } from '@/lib/video-readiness';
+import { GOOGLE_OMNI, googleEstimate } from '@/lib/google-models';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
@@ -1899,7 +1900,7 @@ function GenerateDialog({
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
     ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
     : selected.some(m=>kind==='video'&&m.provider==='xai'&&videoCharacterRefs(p,'xai',effectiveCharacters).length>7)?'Grok Video принимает до 7 отдельных образов героев.':'';
-  const computed = (m: (typeof MODELS)[number]) =>
+  const computed = (m: (typeof MODELS)[number]) => googleEstimate(m.id,
     estimates[m.id] !== undefined
       ? estimates[m.id]
         ? ticks(estimates[m.id])
@@ -1907,7 +1908,7 @@ function GenerateDialog({
       : m.id === 'grok-imagine-image-2.0'
         ? (400000000n + BigInt(effectiveRefs.length) * 100000000n).toString()
         : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
-        : m.estimate;
+        : m.estimate);
   let total: string | null = null;
   try {
     const costs = selected.map(computed);
@@ -2187,7 +2188,9 @@ function GenerateDialog({
         {kind === 'video' && (
           <div className="note">
             {selected.some(m=>m.id==='MiniMax-H3')&&<p>MiniMax H3 использует выбранный первый кадр; пропорции видео определяются этим изображением. Сохранённый ключ MiniMax должен иметь доступ Pay-as-you-go. Образы героев учитываются в первом кадре и тексте, отдельные изображения героев не добавляются к этому запросу.</p>}
-            <p>{selected.length ? selected.map(m=>`${m.name}: ${generationSeconds(m.id)} сек`).join(' · ') : 'Выберите модель, чтобы увидеть длительность'}.  В монтаж войдут первые {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
+            <p>{selected.length ? selected.map(m=>`${m.name}: ${m.id===GOOGLE_OMNI?'запрос на ':''}${generationSeconds(m.id)} сек`).join(' · ') : 'Выберите модель, чтобы увидеть длительность'}.  Для монтажа требуется {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
+            {selected.some(m=>m.provider==='google')&&<p>Google получает выбранную картинку и описания включённых героев. Референсы героев отдельными файлами в этом режиме не передаются. Встроенный звук ролика не заменяет утверждённую озвучку фильма. Оценку Google можно увеличить; уменьшить ниже расчётной нельзя.</p>}
+            {selected.some(m=>m.id===GOOGLE_OMNI)&&<p>Gemini Omni: длительность задаётся просьбой в промпте, результат может длиться 3–10 секунд. После генерации проверьте хронометраж. Ориентир $1.05 за попытку включает 10 секунд 720p и запас на вход; фактические расходы зависят от токенов.</p>}
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
             <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {VIDEO_PROMPT_LIMIT} символов.</p>
@@ -2208,7 +2211,7 @@ function GenerateDialog({
           </div>
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
-        {kind==='video'&&shot&&videoDurationIssue(item.title,shot.duration)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration)}</p></section>}
+        {kind==='video'&&shot&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
         <p className="muted small">
           {(item.stage===5&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другой план и запустить его. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
@@ -2225,7 +2228,7 @@ function GenerateDialog({
               prompt.trim().length>20000 || !!imagePromptError ||
               count < 1 ||
               count > 4 ||
-              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT || !shot || shot.duration > 6)) ||
+              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
               (kind === 'audio' && (!voice.trim() || !spoken || speech.length > 9500 || models.length > 1))
             }
             onClick={() =>
@@ -2278,6 +2281,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
   let perAttempt: string | null = null, costError = '';
   try { if (estimate.trim()) perAttempt = ticks(estimate.trim()); }
   catch { costError = 'Укажите стоимость в USD, например 0.85.'; }
+  perAttempt=googleEstimate(m.id,perAttempt);
   const total = perAttempt === null ? null : (BigInt(perAttempt) * BigInt(included.length)).toString();
   const budget = totals(p);
   if (!costError && p.limit !== null) {
@@ -2285,7 +2289,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
   const blockReasons=[...(videoCharacterRefs(snapshot,m.provider,characterIds).length>7?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
-    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',VIDEO_PROMPT_LIMIT))];
+    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',VIDEO_PROMPT_LIMIT,[m.id]))];
   const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
   return (
@@ -2300,7 +2304,8 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
           <Input aria-label="Оценка одной попытки, USD" value={estimate} inputMode="decimal" onChange={e => setEstimate(e.target.value)} />
         </Field>
         <ZenCost modelId={m.id} refs={1} count={included.length}/>
-        <p className="muted">Каждый исходный ролик: {generationSeconds(m.id)} сек. В монтаж войдёт длительность соответствующего плана.</p>
+        <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. В монтаж войдёт длительность соответствующего плана.</p>
+        {m.provider==='google'&&<p className="muted">Один первый кадр и текстовые описания выбранных героев. Оценку можно увеличить, но нельзя уменьшить ниже расчётной. Списание сверяйте в Google AI Studio; встроенный звук не заменяет утверждённые голоса.</p>}
         <CharacterReferences p={snapshot} mode="video" selectedIds={characterIds} disabled={busy} onChange={ids=>{setCharacterIds(ids);if(m.id==='grok-imagine-video-1.5')setEstimate((0.85+0.01*videoCharacterRefs(snapshot,'xai',ids).length).toFixed(2));}}/>
         <p className="muted small">Этот выбор героев применяется ко всем отмеченным планам серии.</p>
         {videoCharacterRefs(snapshot,m.provider,characterIds).length>7&&<p role="alert">Grok Video принимает до 7 отдельных образов героев.</p>}
@@ -2343,7 +2348,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
                 <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds)}</p>
               </details>
               {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {VIDEO_PROMPT_LIMIT} символов.</p>}
-              {videoDurationIssue(r.title,r.duration)&&<p role="alert">{videoDurationIssue(r.title,r.duration)}</p>}
+              {videoDurationIssue(r.title,r.duration,[m.id])&&<p role="alert">{videoDurationIssue(r.title,r.duration,[m.id])}</p>}
             </>}
           </section>
         ))}
@@ -2831,6 +2836,7 @@ function Connections({ data, refresh, perform, busy }: any) {
                   )}
                 </div>
               </form>
+              {provider.id==='google'&&<p className="note">Ключ Google AI Studio подключает Gemini Omni Flash, Veo 3.1 и Veo 3.1 Fast. В проекте Google должен быть включён платный Gemini API; доступ зависит от аккаунта и региона. Ключ сохраняется на сервере. Сохранение ключа не запускает платную генерацию.</p>}
               {provider.id==='fal'&&<p className="note">Создайте ключ со scope API в кабинете fal.ai и вставьте его целиком. Один ключ подключает Qwen Image Edit для образов и раскадровки, MiniMax H3 Max и Wan 2.2 A14B для видеопланов. Оценка расходов показана перед запуском; фактическое списание проверяйте в fal.ai. Сохранение ключа бесплатно.</p>}
               {provider.id==='zencreator'&&<div className="note">
                 <p>Создайте ключ с правами read и generate. Оплата — кредитами ZenCreator; отдельная проверка читает каталог и баланс, без генерации.</p>

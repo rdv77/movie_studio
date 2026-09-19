@@ -1,3 +1,4 @@
+import { retrieveGoogle } from '@/lib/google-provider';
 import {
   api,
   owner,
@@ -78,7 +79,7 @@ export const POST = api(async (req, ctx) => {
   }
   const saving = j.status === 'saving';
   const refreshZen = saving && model(j.model).provider === 'zencreator';
-  const key = saving && !refreshZen ? '' : await getKey(user, model(j.model).provider);
+  const key = saving && !refreshZen && model(j.model).provider!=='google' ? '' : await getKey(user, model(j.model).provider);
   const polling = j.status === 'pending';
   if (!polling && !saving) {
     p = await mutate(user, id, (p) => {
@@ -166,7 +167,7 @@ export const POST = api(async (req, ctx) => {
       let mime = result.mime;
       if (!bytes) {
         if (!result.url) throw new Error('Провайдер не вернул файл.');
-        const file = await retrieve(result.url);
+        const file = model(j.model).provider==='google' ? await retrieveGoogle(result.url,key) : await retrieve(result.url);
         bytes = file.bytes;
         mime = file.mime;
       }

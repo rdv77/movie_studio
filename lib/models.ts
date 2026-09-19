@@ -1,4 +1,5 @@
 import { ZEN_MODELS } from './zencreator-models';
+import { GOOGLE_MODELS } from './google-models';
 import type { Kind } from './domain';
 export const MODELS: {
   id: string;
@@ -8,6 +9,7 @@ export const MODELS: {
   estimate: string | null;
   note: string;
 }[] = [
+  ...GOOGLE_MODELS,
   ...ZEN_MODELS,
   {id:'fal-minimax-h3-max',name:'fal.ai · MiniMax H3 Max',provider:'fal',kind:'video',estimate:'4800000000',
     note:'Видео из первого кадра · 6 сек · 768P · оценка $0.48 без учёта акций; списание уточняйте в fal.ai'},
@@ -116,6 +118,7 @@ export const SYNC_MODELS = [
     note: 'Больше деталей лица; рот в исходном видео уже должен двигаться', rate: '0.08325' },
 ];
 export const PROVIDERS = [
+  {id:'google',name:'Google · Gemini / Veo',url:'https://aistudio.google.com/apikey'},
   {id:'fal',name:'fal.ai · изображения и видео',url:'https://fal.ai/dashboard/keys'},
   {id:'zencreator',name:'ZenCreator · агрегатор',url:'https://app.zencreator.pro/api-keys'},
   { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys' },

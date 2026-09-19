@@ -1,4 +1,5 @@
 import { prepareZenJobs } from '@/lib/zencreator-models';
+import { prepareGoogleJobs } from '@/lib/google-models';
 import { enqueuePlanJobs, videoAdmissionIssue } from '@/lib/generation-queue';
 import { videoDurationIssue } from '@/lib/video-readiness';
 import { prepareFalJobs } from '@/lib/fal-models';
@@ -46,12 +47,13 @@ export const POST = api(async (req, ctx) => {
     const info=planSpeech(p,item);assertSpeech(info,'');
     const prompt=videoGenerationPrompt(p,item,row.prompt,s.characterIds);
     if(prompt.length>VIDEO_PROMPT_LIMIT)throw new Error(`${item.title}: вместе с героями промпт содержит ${prompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}.`);
-    if (videoDurationIssue(item.title,shot.duration)) throw new Error(videoDurationIssue(item.title,shot.duration));
+    if (videoDurationIssue(item.title,shot.duration,[m.id])) throw new Error(videoDurationIssue(item.title,shot.duration,[m.id]));
     const frame = await asset(user, row.ref, p);
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(frame.mime))
       throw new Error(`${item.title}: выберите первый кадр PNG, JPEG или WebP.`);
     prepareZenJobs([{model:m.id,kind:'video',prompt,refs:[row.ref],duration:shot.duration} as Job],[frame]);
     prepareFalJobs([{model:m.id,kind:'video',prompt,refs:[row.ref],duration:shot.duration} as Job],[frame]);
+    prepareGoogleJobs([{model:m.id,kind:'video',prompt,refs:[row.ref],duration:shot.duration} as Job],[frame]);
     jobs.push({ id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind: 'video',
       prompt, brief: row.prompt, refs: [row.ref], characterRefs:characterRefs.length?characterRefs:undefined, camera: shot.camera,
       characterIds:s.characterIds,
@@ -63,5 +65,6 @@ export const POST = api(async (req, ctx) => {
   }
   await getKey(user, m.provider);
   prepareZenJobs(jobs);
+  prepareGoogleJobs(jobs);
   return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision),source.id));
 });
