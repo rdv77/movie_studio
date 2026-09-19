@@ -1,4 +1,5 @@
 import { approve, chosen, dependencies, isApproved, participates, stageReady, type Project } from './domain';
+import { reapproveSpeech, unchangedSpeechReason } from './speech-approval';
 
 export function approvalBatch(p: Project, stage: number) {
   if (![5, 6, 7].includes(stage)) throw new Error('Массовое утверждение доступно для раскадровки, озвучки и видеопланов.');
@@ -7,7 +8,7 @@ export function approvalBatch(p: Project, stage: number) {
     const v = chosen(i);
     const reason = !stageReady(p, stage) ? 'Сначала утвердите предыдущие этапы.'
       : !v ? 'Выберите вариант.'
-      : v.deps !== dependencies(p, stage) ? stage===6 ? 'Основа изменилась. Откройте карточку, прослушайте запись и нажмите «Утвердить эту запись для текущей версии», если она подходит.' : 'Основа изменилась. Сохраните актуальную версию через «Правки» и проверьте её.'
+      : v.deps !== dependencies(p, stage) ? stage===6 ? unchangedSpeechReason(p,i.id,v.id) : 'Основа изменилась. Сохраните актуальную версию через «Правки» и проверьте её.'
       : v.kind !== kind || !v.assetId ? `Выберите готовый ${stage === 5 ? 'кадр' : stage === 6 ? 'аудиофайл' : 'видеоролик'}.`
       : p.jobs.some(j => j.itemId === i.id && ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)) ? 'Дождитесь завершения генерации.'
       : '';
@@ -25,7 +26,13 @@ export function approveBatch(p: Project, stage: number, selections: {itemId: str
     if (!row || row.variantId !== s.variantId) throw new Error('Выбор изменился. Обновите проект перед утверждением.');
     if (row.reason) throw new Error(`${row.title}: ${row.reason}`);
   }
-  for (const s of selections) approve(p, s.itemId);
+  const copy=structuredClone(p);
+  for (const s of selections) {
+    const item=copy.items.find(i=>i.id===s.itemId)!;
+    if(stage===6&&chosen(item)!.deps!==dependencies(copy,6))reapproveSpeech(copy,s.itemId,s.variantId);
+    else approve(copy,s.itemId);
+  }
+  for(const s of selections)Object.assign(p.items.find(i=>i.id===s.itemId)!,copy.items.find(i=>i.id===s.itemId)!);
 }
 export function changedSpeechSelections(p: Project) {
   return p.items.filter(i => i.stage === 6 && participates(p,i) && i.selectedId !== i.approvedId && chosen(i)?.kind === 'audio');

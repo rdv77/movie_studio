@@ -34,7 +34,8 @@ const baseline=structuredClone(p),jobsBefore=structuredClone(p.jobs),videosBefor
 assert.equal(fifth.selectedId,fifth.approvedId);assert(!D.isApproved(p,fifth));assert.notEqual(tenth.selectedId,tenth.approvedId);
 assert.equal(S.speechReapprovalReason(p,fifth.id,fifth.selectedId),'');assert.equal(S.speechReapprovalReason(p,tenth.id,tenth.selectedId),'');
 assert.throws(()=>D.approve(p,fifth.id),/Основа изменилась/,'Reproduce disabled ordinary approval');
-assert(B.approvalBatch(p,6).every(r=>r.reason.includes('Утвердить эту запись')));
+assert.equal(B.approvalBatch(p,6).find(r=>r.itemId===fifth.id).reason,'');
+assert.match(B.approvalBatch(p,6).find(r=>r.itemId===tenth.id).reason,/новый выбор/);
 assert(approvalBlockers(p,7).filter(r=>r.stage===6).every(r=>r.reason.includes('Утвердить эту запись')));
 S.reapproveSpeech(p,fifth.id,fifth.selectedId);assert(D.isApproved(p,fifth));assert(!D.stageReady(p,7));
 assert.deepEqual(D.chosen(fifth),{...fifthBefore,deps:D.dependencies(p,6)});assert.equal(fifth.variants.length,1,'No duplicate recording');
@@ -60,3 +61,44 @@ assets.set(fifthBefore.assetId,{id:fifthBefore.assetId,mime:'audio/mpeg'});r=awa
 const after=structuredClone(state);r=await request({...body,revision:state.revision});assert.equal(r.status,400);assert.deepEqual(state,after,'Already-current audio follows the normal approval path');
 const ordinary=state.items.find(i=>i.id===fifth.id);D.addVariant(state,ordinary.id,{kind:'audio',assetId:fifthBefore.assetId,dialogue:'Новая запись'});assert.match(S.speechReapprovalReason(state,ordinary.id,ordinary.selectedId),/обычное утверждение/);D.approve(state,ordinary.id);assert(D.isApproved(state,ordinary));
 console.log('PASS speech reapproval: stale plans 5/10 with same and changed selected IDs, same-card approval, preserved file/words/speaker/timing/history/costs, inactive/archive/metadata/job guards, API ownership/MIME/revision validation and obsolete lipsync protection. No paid calls.');
+
+const batch=structuredClone(baseline);
+for(const i of batch.items.filter(i=>i.stage===6&&i.sourceShot)){i.selectedId=i.approvedId;D.chosen(i).deps=oldBasis;}
+const selections=x=>B.approvalBatch(x,6).filter(r=>!r.reason).map(({itemId,variantId})=>({itemId,variantId}));
+assert.equal(selections(batch).length,11);
+const batchOriginal=structuredClone(batch),oldVideos=structuredClone(batch.items.filter(i=>i.stage===7));
+B.approveBatch(batch,6,selections(batch));assert(W.stageComplete(batch,6));
+assert.deepEqual(batch.items.filter(i=>i.stage===7),oldVideos);assert.deepEqual(batch.jobs,batchOriginal.jobs);
+for(const i of batch.items.filter(i=>i.stage===6&&i.sourceShot)){
+ const prev=batchOriginal.items.find(x=>x.id===i.id);assert.equal(i.variants.length,prev.variants.length);
+ assert.deepEqual(D.chosen(i),{...D.chosen(prev),deps:D.dependencies(batch,6)});
+}
+// Scenario changes are checked independently from image overrides and from
+// the old audio text which the speech editor intentionally preserves.
+for(const patch of [s=>s.dialogue='Другая реплика',s=>s.speaker='Петя',s=>s.speechType='character',s=>s.duration=5]){
+ const x=structuredClone(batchOriginal),script=x.items.find(i=>i.stage===4),data=JSON.parse(D.chosen(script).text);patch(data.shots[4]);
+ if(data.shots[4].duration===5)data.shots[3].duration=4;
+ D.addVariant(x,script.id,{text:JSON.stringify(data)});D.approve(x,script.id);
+ for(const frame of x.items.filter(i=>i.stage===5))D.chosen(frame).deps=D.dependencies(x,5);
+ assert(D.stageReady(x,6));assert(!selections(x).some(s=>s.itemId===fifth.id));
+}
+const imageChange=structuredClone(batchOriginal),fifthFrame=imageChange.items.find(i=>i.stage===5&&i.title===fifth.title);
+D.addVariant(imageChange,fifthFrame.id,{...D.chosen(fifthFrame),id:D.id(),dialogue:'Новый текст из раскадровки'});D.approve(imageChange,fifthFrame.id);
+assert(!selections(imageChange).some(s=>s.itemId===fifth.id));
+// Two script revisions with identical spoken content remain bulk-approvable.
+const cosmetic=structuredClone(batchOriginal),cosmeticScript=cosmetic.items.find(i=>i.stage===4),cosmeticData=JSON.parse(D.chosen(cosmeticScript).text);cosmeticData.shots[0].camera='Новая камера';
+D.addVariant(cosmetic,cosmeticScript.id,{text:JSON.stringify(cosmeticData)});D.approve(cosmetic,cosmeticScript.id);
+for(const frame of cosmetic.items.filter(i=>i.stage===5))D.chosen(frame).deps=D.dependencies(cosmetic,5);
+assert.equal(selections(cosmetic).length,11);
+for(const mutate of [x=>x.configVersion++,x=>x.jobs.push({status:'saving'}),x=>D.getItem(x,fifth.id).approvedId=undefined,x=>D.getItem(x,fifth.id).sourceShot.title='Missing',x=>D.getItem(x,fifth.id).sourceShot=undefined]){
+ const x=structuredClone(batchOriginal);mutate(x);assert(!selections(x).some(s=>s.itemId===fifth.id));
+}
+const mixed=structuredClone(imageChange),snapshot=structuredClone(mixed);
+assert.throws(()=>B.approveBatch(mixed,6,selections(batchOriginal)));assert.deepEqual(mixed,snapshot);
+globalThis.state=structuredClone(batchOriginal);
+const batchBody={revision:state.revision,action:'approveBatch',data:{stage:6,selections:selections(state)}};
+assets.delete(fifthBefore.assetId);r=await request(batchBody);assert.equal(r.status,400);assert.deepEqual(state,batchOriginal);
+assets.set(fifthBefore.assetId,{mime:'audio/mpeg'});r=await request(batchBody,'other');assert.equal(r.status,401);assert.deepEqual(state,batchOriginal);
+r=await request(batchBody);assert.equal(r.status,200,await r.clone().text());assert(W.stageComplete(state,6));
+const savedBatch=structuredClone(state);r=await request(batchBody);assert.equal(r.status,400);assert.deepEqual(state,savedBatch);
+console.log('PASS bulk speech reapproval: all 11 unchanged voices, changed dialogue/speaker/type/duration excluded, no duplicate files, atomic approval and API permission/media/revision guards.');

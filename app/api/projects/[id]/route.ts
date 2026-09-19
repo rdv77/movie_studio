@@ -189,6 +189,11 @@ export const PATCH = api(async (req, ctx) => {
         stage: z.union([z.literal(5), z.literal(6), z.literal(7)]),
         selections: z.array(z.object({ itemId: z.string().uuid(), variantId: z.string().uuid() })).min(1).max(120),
       }).parse(d);
+      if(batch.stage===6)for(const s of batch.selections){
+        const source=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);
+        if(!source?.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('audio/'))
+          throw new Error('Аудиофайл недоступен. Выберите готовую запись.');
+      }
       approveBatch(p, batch.stage, batch.selections);
       break;
     }

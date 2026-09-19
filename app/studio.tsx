@@ -3185,6 +3185,7 @@ function BulkApproval({ p, stage, busy, action, perform }: any) {
   if(changed.length) try { approveSelectedSpeech(structuredClone(p),speechSelections); } catch(e) { speechReason=(e as Error).message; }
   return <section className="editor-surface p-5 mb-5" aria-label="Массовое утверждение">
     <strong>Утверждение выбранных вариантов</strong>
+    {stage===6&&<p>Кнопка также повторно утверждает прежние выбранные голоса, если реплика, говорящий, вид речи и длительность плана не изменились. Замена изображения сама по себе не требует повторного прослушивания.</p>}
     <p>Готово к утверждению: {ready.length}. Требуют внимания: {blocked.length}. Уже утверждённые карточки сохранят свой вариант.</p>
     <p>В каждой карточке будет утверждён вариант с пометкой «Выбран». Чтобы изменить выбор, откройте карточку перед нажатием кнопки.</p>
     <Button className="h-auto whitespace-normal" disabled={busy || !ready.length}
