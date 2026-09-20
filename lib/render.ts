@@ -7,7 +7,8 @@ type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
   const stage = animatic ? 5 : 7;
   const items = p.items.filter((i) => i.stage === stage && participates(p,i));
-  if (!items.length || items.some((i) => !isApproved(p, i)))
+  if (!items.length) throw new Error('В последовательности нет планов. Восстановите план из раздела «Удалённые планы» или подготовьте новые карточки.');
+  if (items.some((i) => !isApproved(p, i)))
     throw new Error('Утвердите все планы перед сборкой.');
   const clips: RenderClip[] = items.map((i) => {
     const v=i.variants.find((v) => v.id === i.approvedId)!;

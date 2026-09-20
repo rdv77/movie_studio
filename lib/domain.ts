@@ -53,7 +53,8 @@ export type Variant = {
   lipsync?: LipsyncBasis;
 };
 export type Item = {
-  planArchive?: { reason:'duplicate'|'removed'; replacementId?:string };
+  planArchive?: { reason:'duplicate'|'removed'|'excluded'; replacementId?:string };
+  excludedAt?: string;
   removedAt?: string;
   character?: CharacterBrief;
   id: string;
@@ -211,11 +212,14 @@ export function participates(p: Project, i: Item): boolean {
 export function silentFilm(p:Project) {
   const script=p.items.find(i=>i.stage===4&&!i.removedAt&&!i.planArchive),v=script?.variants.find(v=>v.id===script.approvedId);
   if(!v)return false;
-  try{return parseShots(v.text,p.seconds).every(s=>{
+  try{return parseShots(v.text,p.seconds).filter(s=>!excludedShot(p,script!.id,s.title)).every(s=>{
     const frame=p.items.find(i=>i.stage===5&&!i.planArchive&&!i.removedAt&&(i.sourceShot?.title??i.title)===s.title);
     const image=frame?.variants.find(v=>v.id===frame.approvedId);
     return speechInfo(image?.speechType?image:s).speechType==='none';
   });}catch{return false;}
+}
+export function excludedShot(p:Project,scriptId:string,title:string) {
+  return p.items.some(i=>i.stage===5&&!!i.excludedAt&&i.sourceShot?.scriptId===scriptId&&i.sourceShot.title===title);
 }
 export function isApproved(p: Project, item: Item): boolean {
   return approvalCurrent(p, item) && (independentApproval(item.stage) || stageReady(p, item.stage));

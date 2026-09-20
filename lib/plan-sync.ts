@@ -26,7 +26,7 @@ export function reconcilePlanStage(p:Project,stage:number,script:PlanScript,crea
   const labels=script.shots.map(s=>planLabel(s.title));
   const used=new Set<string>(), ordered:Item[]=[];
   let changed=false, reorder=false;
-  const update=(item:Item,field:'sourceShot'|'planArchive',value:any)=>{
+  const update=(item:Item,field:'sourceShot'|'planArchive'|'excludedAt',value:any)=>{
     if(JSON.stringify(item[field])!==JSON.stringify(value)){(item as any)[field]=value;changed=true;}
   };
   for(const [index,shot] of script.shots.entries()) {
@@ -47,11 +47,14 @@ export function reconcilePlanStage(p:Project,stage:number,script:PlanScript,crea
       item={id:id(),stage,title:shot.title,variants:[]};p.items.push(item);changed=true;reorder=true;
     }
     if(!item)continue;
-    used.add(item.id);ordered.push(item);
+    used.add(item.id);
     if(item.sourceShot?.scriptVersion!==script.variant.id)reorder=true;
     if(!item.sourceShot||item.title===item.sourceShot.title){if(item.title!==shot.title){item.title=shot.title;changed=true;}}
     update(item,'sourceShot',{scriptId:script.source.id,title:shot.title,key:unique?key:'title:'+shot.title,scriptVersion:script.variant.id});
-    update(item,'planArchive',undefined);
+    const excludedAt=item.excludedAt??p.items.find(f=>f.stage===5&&f.excludedAt&&f.sourceShot?.scriptId===script.source.id&&f.sourceShot.title===shot.title)?.excludedAt;
+    if(excludedAt)update(item,'excludedAt',excludedAt);
+    update(item,'planArchive',excludedAt?{reason:'excluded'}:undefined);
+    if(!excludedAt)ordered.push(item);
     for(const duplicate of candidates.slice(1)){
       used.add(duplicate.id);
       update(duplicate,'planArchive',{reason:'duplicate',replacementId:item.id});

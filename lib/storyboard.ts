@@ -6,13 +6,14 @@ import { reconcilePlanStage, planKey } from './plan-sync';
 import { parseShots } from './shots';
 
 export function preparePlanCards(p: Project) {
-  const script = scriptVideo(p);
+  const script = scriptVideo(p,true);
   if (!script.source) throw new Error(script.message);
   if (p.jobs.some(j => ['queued', 'pending', 'dispatching', 'saving'].includes(j.status)))
     throw new Error('Дождитесь текущей серии перед подготовкой карточек.');
   let changed = reconcilePlanStage(p,5,script);
   for (const shot of script.shots) {
-    const frame=p.items.find(i=>i.stage===5&&!i.planArchive&&i.sourceShot?.scriptId===script.source!.id&&i.sourceShot.title===shot.title)!;
+    const frame=p.items.find(i=>i.stage===5&&!i.planArchive&&i.sourceShot?.scriptId===script.source!.id&&i.sourceShot.title===shot.title);
+    if(!frame)continue;
     const selected=chosen(frame);
     let generatedDraft=!!selected?.planDraft;
     // Migrate untouched automatic descriptions from older app versions. Manual

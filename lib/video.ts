@@ -1,4 +1,4 @@
-import { id, isApproved, type Item, type Project } from './domain';
+import { id, isApproved, excludedShot, type Item, type Project } from './domain';
 import { parseShots } from './shots';
 import { MODELS } from './models';
 import { chosen } from './domain';
@@ -22,12 +22,13 @@ export function remainingVideoPlans(p: Project) {
 
 // A common application limit; MiniMax's video API accepts at most 2000 characters.
 export const VIDEO_PROMPT_LIMIT = 2000;
-export function scriptVideo(p: Project) {
+export function scriptVideo(p: Project, includeExcluded = false) {
   const source = p.items.find(i => i.stage === 4 && isApproved(p, i));
   if (!source) return { shots: [], message: 'Утвердите подробный сценарий.' };
   try {
     const variant = source.variants.find(v => v.id === source.approvedId)!;
-    const shots = orderedScriptShots(p,source.id,parseShots(variant.text, p.seconds));
+    const parsed = orderedScriptShots(p,source.id,parseShots(variant.text, p.seconds));
+    const shots = includeExcluded ? parsed : parsed.filter(s=>!excludedShot(p,source.id,s.title));
     if (new Set(shots.map(s => s.title)).size !== shots.length)
       throw new Error('Названия планов в сценарии должны быть разными.');
     return { shots, source, variant, message: '' };
@@ -42,7 +43,7 @@ export function videoShot(p: Project, item: Item) {
   return script.shots.find(s => s.title === (item.sourceShot?.title ?? item.title));
 }
 export function syncVideoPlans(p: Project) {
-  const script = scriptVideo(p);
+  const script = scriptVideo(p,true);
   if (!script.source) throw new Error(script.message);
   if (p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
     throw new Error('Дождитесь текущей серии перед подготовкой планов.');

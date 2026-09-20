@@ -1,5 +1,6 @@
 import { syncVideoPlans } from '@/lib/video';
 import { moveStoryboardPlan } from '@/lib/plan-order';
+import { setPlanExcluded } from '@/lib/plan-removal';
 import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
 import { reapproveVideo } from '@/lib/video-approval';
 import { reapproveStyle } from '@/lib/style-approval';
@@ -66,9 +67,11 @@ export const PATCH = api(async (req, ctx) => {
   if (body.revision !== p.revision)
     throw new Error('Проект изменился. Обновите данные перед сохранением.');
   const d: any = body.data;
-  if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
+  if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive&&body.action!=='restorePlan')throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'removePlan':setPlanExcluded(p,body.itemId!,true);break;
+    case 'restorePlan':setPlanExcluded(p,body.itemId!,false);break;
     case 'moveStoryboardPlan': {
       const {toIndex}=z.object({toIndex:z.number().int().min(0).max(119)}).parse(d);
       moveStoryboardPlan(p,body.itemId!,toIndex);break;
@@ -81,7 +84,8 @@ export const PATCH = api(async (req, ctx) => {
         if(i.stage!==7||i.removedAt||i.planArchive||i.approvedId!==c.variantId||!isApproved(p,i)||v?.kind!=='video'||!v.assetId)
           throw new Error('Выберите утверждённый видеоплан текущего проекта.');
       }
-      p.assemblyCuts=cuts.sort((a,b)=>a.itemId.localeCompare(b.itemId));
+      const retained=(p.assemblyCuts??[]).filter(c=>p.items.some(i=>i.id===c.itemId&&i.planArchive?.reason==='excluded'));
+      p.assemblyCuts=[...retained,...cuts].sort((a,b)=>a.itemId.localeCompare(b.itemId));
       break;
     }
     case 'saveCaption': {

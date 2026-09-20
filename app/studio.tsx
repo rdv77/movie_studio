@@ -931,10 +931,19 @@ function Workspace() {
                   <p className="mt-3">{speechNames[speechInfo(currentShot).speechType]}{currentShot.speaker?' · '+currentShot.speaker:''}: {currentShot.dialogue || 'Без речи'}</p>
                 </div>
               )}
-              {[5,6,7].includes(step)&&p.items.some(i=>i.stage===step&&i.planArchive)&&<details className="editor-surface p-5 mb-5">
-                <summary>История карточек · {p.items.filter(i=>i.stage===step&&i.planArchive).length}</summary>
+              {[5,7].includes(step)&&item&&<div className="mb-5">
+                <Button variant="outline" disabled={busy||active.length>0} onClick={()=>perform(async()=>{await action('removePlan',undefined,item.id);setItemId('');})}><Trash2/>Удалить план из фильма</Button>
+                <p className="muted small mt-2">План и его озвучка исключаются из раскадровки, аниматика, видеопланов и новой финальной сборки. Можно восстановить ниже.</p>
+              </div>}
+              {[5,6,7,8,9].includes(step)&&p.items.some(i=>i.stage===5&&i.planArchive?.reason==='excluded')&&<details className="editor-surface p-5 mb-5">
+                <summary>Удалённые планы · {p.items.filter(i=>i.stage===5&&i.planArchive?.reason==='excluded').length}</summary>
+                <p>Файлы, титры и настройки длительности сохранены. После удаления или восстановления пересоберите аниматик и фильм.</p>
+                {p.items.filter(i=>i.stage===5&&i.planArchive?.reason==='excluded').map(i=><div className="flex items-center justify-between gap-3 py-2" key={i.id}><span>{i.title}</span><Button variant="outline" disabled={busy||active.length>0} onClick={()=>perform(()=>action('restorePlan',undefined,i.id))}><Undo2/>Восстановить план</Button></div>)}
+              </details>}
+              {[5,6,7].includes(step)&&p.items.some(i=>i.stage===step&&i.planArchive&&i.planArchive.reason!=='excluded')&&<details className="editor-surface p-5 mb-5">
+                <summary>История карточек · {p.items.filter(i=>i.stage===step&&i.planArchive&&i.planArchive.reason!=='excluded').length}</summary>
                 <p className="muted">Эти карточки заменены актуальными планами или отсутствуют в новом сценарии. Они не участвуют в утверждении и сборке. Файлы, варианты и расходы сохранены.</p>
-                {p.items.filter(i=>i.stage===step&&i.planArchive).map(i=><details className="mt-4" key={i.id}><summary>{i.title} · {i.variants.length} вариантов</summary>
+                {p.items.filter(i=>i.stage===step&&i.planArchive&&i.planArchive.reason!=='excluded').map(i=><details className="mt-4" key={i.id}><summary>{i.title} · {i.variants.length} вариантов</summary>
                   {i.planArchive?.replacementId&&<p>Актуальный план: {p.items.find(card=>card.id===i.planArchive!.replacementId)?.title}</p>}
                   {i.variants.map(v=><div className="editor-surface p-3 mt-3" key={v.id}><strong>{v.title}</strong>{v.assetId?<><Media v={v}/><a href={'/api/assets/'+v.assetId} target="_blank" rel="noreferrer">Открыть файл</a></>:<p className="whitespace-pre-wrap">{readableText(v.text)}</p>}</div>)}
                 </details>)}
@@ -3311,7 +3320,8 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
       {reason&&<div id="assembly-blocker" role="alert" className="note mb-4"><strong>Почему сборка недоступна</strong><p>{reason}</p></div>}
       {!animatic&&<AssemblyEditor key={JSON.stringify([p.id,p.assemblyCuts,items.map((i:Item)=>[i.id,i.approvedId])])} p={p} busy={busy} videoSeconds={videoTiming.data}
         speechSeconds={items.map((_:Item,n:number)=>Math.max(0,...(base?.audioClipIndexes.flatMap((index,j)=>index===n&&timing.data?[timing.data[j]-base!.audio[j].trim]:[])??[])))}
-        save={async cuts=>{let saved=false;await perform(async()=>{await action('saveAssemblyCuts',{cuts});saved=true;});if(!saved)throw new Error('Не удалось сохранить длительности.');}} onDirty={setCutsDirty}/>}
+        save={async cuts=>{let saved=false;await perform(async()=>{await action('saveAssemblyCuts',{cuts});saved=true;});if(!saved)throw new Error('Не удалось сохранить длительности.');}} onDirty={setCutsDirty}
+        remove={itemId=>perform(()=>action('removePlan',undefined,itemId))}/>}
       {!animatic&&videoTiming.isError&&<p role="alert">Не удалось заранее прочитать длительность видео. При сборке файлы будут проверены повторно.</p>}
       <div className="timeline-clips">
         {items.map((i: Item, n: number) => {
@@ -3352,6 +3362,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
                 >
                   <ArrowDown size={14} />
                 </Button>
+                <Button variant="ghost" size="sm" disabled={busy||cutsDirty} onClick={()=>perform(()=>action('removePlan',undefined,i.id))}><Trash2 size={14}/>Удалить план</Button>
               </div>
             </div>
           );

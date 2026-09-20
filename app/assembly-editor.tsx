@@ -4,7 +4,7 @@ import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {participates,type Project} from '@/lib/domain';
 
-export function AssemblyEditor({p,busy,videoSeconds,speechSeconds,save,onDirty}:{p:Project;busy:boolean;videoSeconds?:number[];speechSeconds:number[];save:(cuts:NonNullable<Project['assemblyCuts']>)=>Promise<unknown>;onDirty:(dirty:boolean)=>void}) {
+export function AssemblyEditor({p,busy,videoSeconds,speechSeconds,save,onDirty,remove}:{p:Project;busy:boolean;videoSeconds?:number[];speechSeconds:number[];save:(cuts:NonNullable<Project['assemblyCuts']>)=>Promise<unknown>;onDirty:(dirty:boolean)=>void;remove:(itemId:string)=>Promise<unknown>}) {
   const items=p.items.filter(i=>i.stage===7&&participates(p,i));
   const initial=items.flatMap(i=>{
     const v=i.variants.find(v=>v.id===i.approvedId);
@@ -28,6 +28,7 @@ export function AssemblyEditor({p,busy,videoSeconds,speechSeconds,save,onDirty}:
         const issue=length!==undefined&&speech>length+0.001?`Речь ${speech.toFixed(2)} сек не помещается в ${length.toFixed(2)} сек.`:c.duration!==null&&available!==undefined&&c.duration>available+0.001?`Доступно только ${available.toFixed(2)} сек видео.`:'';
         return <div key={c.itemId} className="rounded-xl border p-4 space-y-3">
           <strong>{item.title}</strong>
+          <Button variant="ghost" size="sm" disabled={busy||dirty} onClick={()=>void remove(item.id)}>Удалить план из фильма</Button>
           <p className="text-sm">Исходный файл: {source?.toFixed(2)??'проверяем…'} сек · Речь: {speech.toFixed(2)} сек</p>
           <details><summary>Посмотреть исходный ролик</summary><video className="w-full mt-2" controls preload="none" src={'/api/assets/'+v.assetId}/></details>
           <label className="block">Начало в исходном файле, сек<Input aria-label={`Начало — ${item.title}`} type="number" min={0} max={600} step={0.01} disabled={busy} value={Number.isNaN(c.trim)?'':c.trim} onChange={e=>update(n,{trim:e.target.value===''?NaN:Number(e.target.value)})}/></label>

@@ -1,4 +1,4 @@
-import { chosen, isApproved, participates, type Item, type Project } from './domain';
+import { chosen, isApproved, participates, excludedShot, type Item, type Project } from './domain';
 import { parseShots } from './shots';
 import { spokenText } from './spoken-text';
 import { scriptVideo } from './video';
@@ -53,7 +53,7 @@ export function scriptSpeech(p: Project): {
   const version = script.variants.find((v) => v.id === script.approvedId)!;
   let shots;
   try {
-    shots = parseShots(version.text, p.seconds);
+    shots = parseShots(version.text, p.seconds).filter(s=>!excludedShot(p,script.id,s.title));
   } catch {
     return {
       sources: [],
