@@ -1,0 +1,40 @@
+import {build} from 'esbuild';
+import {strict as assert} from 'node:assert';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/render';export * as A from './lib/animatic';export * as V from './lib/video';export * as S from './lib/storyboard';export * as O from './lib/plan-order';export * as P from './lib/plan-sync';export * as Speech from './lib/speech';export {PATCH} from './app/api/projects/[id]/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/storyboard-order.mjs',external:['@ffmpeg/ffmpeg'],plugins:[{name:'server',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw Error('Unauthorized');return 'owner'};export const loadProject=async()=>structuredClone(globalThis.state);export const saveProject=async(_,p,revision)=>{if(state.revision!==revision)throw Error('revision');p.revision++;globalThis.state=structuredClone(p);return p};export const asset=async()=>({mime:'video/mp4'});`}));}}]});
+const {D,R,A,V,S,O,P,Speech,PATCH}=await import('../work/tests/storyboard-order.mjs');
+const p=D.newProject('Порядок');p.speechMode='plans';p.seconds=15;
+const shots=Array.from({length:3},(_,n)=>({title:`План ${n+1} — История ${n+1}`,description:'Действие '+n,duration:5,camera:'Наезд',continuity:'Склейка',dialogue:'Привет '+n,speechType:'voiceover'}));
+for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+p.items=p.items.filter(i=>![5,6,7].includes(i.stage));const script=p.items.find(i=>i.stage===4);
+for(const stage of [5,6,7])for(const shot of shots){const i={id:D.id(),stage,title:shot.title,sourceShot:{scriptId:script.id,title:shot.title,key:P.planKey(shot.title),scriptVersion:script.approvedId},variants:[]};p.items.push(i);D.addVariant(p,i.id,{kind:stage===5?'image':stage===6?'audio':'video',assetId:D.id(),duration:5,dialogue:shot.dialogue,text:shot.description,shotSource:script.approvedId});D.approve(p,i.id);}
+const frames=p.items.filter(i=>i.stage===5),videos=p.items.filter(i=>i.stage===7);
+p.assemblyCuts=[{itemId:videos[0].id,variantId:videos[0].approvedId,trim:1,duration:4}];p.captions=[{planId:frames[0].id,text:'Титр',enabled:true}];
+const stale=D.makeVariant(p,videos[0],{kind:'video',assetId:D.id(),deps:'old-basis'});videos[0].variants.push(stale);
+const basis=A.animaticBasis(p),finalDeps=D.dependencies(p,8),assets=p.items.flatMap(i=>i.variants.map(v=>[i.id,v.id,v.assetId])).sort(),approvals=p.items.map(i=>[i.id,i.selectedId,i.approvedId]).sort();
+globalThis.state=structuredClone(p);
+const patch=(toIndex,itemId=frames[0].id,revision=state.revision)=>PATCH(new Request('http://test',{method:'PATCH',body:JSON.stringify({action:'moveStoryboardPlan',itemId,revision,data:{toIndex}})}),{params:Promise.resolve({id:p.id})});
+await patch(2);
+const order=[shots[1].title,shots[2].title,shots[0].title];
+for(const stage of [5,6,7])assert.deepEqual(state.items.filter(i=>i.stage===stage).map(i=>i.title),order);
+assert.deepEqual(state.items.map(i=>[i.id,i.selectedId,i.approvedId]).sort(),approvals);
+assert.deepEqual(state.items.flatMap(i=>i.variants.map(v=>[i.id,v.id,v.assetId])).sort(),assets);
+assert.deepEqual(state.assemblyCuts,p.assemblyCuts);assert.deepEqual(state.captions,p.captions);
+assert(state.items.filter(i=>[5,6,7].includes(i.stage)).every(i=>D.isApproved(state,i)));
+assert.equal(state.items.flatMap(i=>i.variants).find(v=>v.id===stale.id).deps,'old-basis');
+assert.notEqual(A.animaticBasis(state),basis);assert.notEqual(D.dependencies(state,8),finalDeps);
+assert.deepEqual(V.scriptVideo(state).shots.map(s=>s.title),order);
+assert.match(V.videoPrompt(state,state.items.find(i=>i.id===videos[0].id)),/Предыдущий план: План 3.*Следующий: конец фильма/);
+assert.deepEqual(Speech.speechPlans(state).map(s=>s.title),order);
+assert.deepEqual(R.editPlan(state,false).clips.map(v=>v.assetId),[videos[1],videos[2],videos[0]].map(i=>D.chosen(i).assetId));
+S.preparePlanCards(state);for(const stage of [5,6,7])assert.deepEqual(state.items.filter(i=>i.stage===stage&&!i.planArchive).map(i=>i.title),order);
+for(const index of [-1,3,0.5])await assert.rejects(()=>patch(index));await assert.rejects(()=>patch(0,D.id()));await assert.rejects(()=>patch(0,frames[0].id,state.revision-1));
+globalThis.denied=true;await assert.rejects(()=>patch(0),/Unauthorized/);globalThis.denied=false;
+state.jobs.push({id:D.id(),status:'pending'});const before=structuredClone(state);await assert.rejects(()=>patch(0),/Дождитесь/);assert.deepEqual(state,before);state.jobs=[];
+await patch(0);assert.deepEqual(state.items.filter(i=>i.stage===5).map(i=>i.title),shots.map(s=>s.title));
+// Reordering survives renamed/reconciled script versions and appends new plans.
+O.moveStoryboardPlan(state,frames[0].id,2);
+const renamed=shots.map((s,n)=>({...s,title:`Кадр ${n+1}: Переименован ${n+1}`}));
+D.addVariant(state,script.id,{text:JSON.stringify({shots:renamed})});D.approve(state,script.id);S.preparePlanCards(state);
+assert.deepEqual(state.items.filter(i=>i.stage===5&&!i.planArchive).map(i=>i.id),[frames[1].id,frames[2].id,frames[0].id]);
+assert.deepEqual(V.scriptVideo(state).shots.map(s=>s.title),[renamed[1].title,renamed[2].title,renamed[0].title]);
+console.log('PASS storyboard reordering: API auth/revision/bounds, preserved media and current approvals, stale variants stay stale, linked speech/video/captions/cuts, neighbors, assembly invalidation and reconciliation.');

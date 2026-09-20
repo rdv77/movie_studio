@@ -884,6 +884,18 @@ function Workspace() {
                     onClick={() => setDialog('storyboard-batch')}><Sparkles />Создать кадры всех планов</Button>
                 </div>
               )}
+              {step===5&&item&&group.length>1&&<section className="editor-surface p-4 mb-5" aria-label="Порядок планов раскадровки">
+                <strong>Порядок планов · {item.title}</strong>
+                <div className="flex flex-wrap items-center gap-3 mt-3">
+                  <Button variant="outline" disabled={busy||active.length>0||group[0].id===item.id} onClick={()=>perform(()=>action('moveStoryboardPlan',{toIndex:group.findIndex(i=>i.id===item.id)-1},item.id))}><ArrowUp size={16}/>Раньше</Button>
+                  <label>Место в фильме <select className="caption-select" aria-label="Место плана в фильме" value={group.findIndex(i=>i.id===item.id)} disabled={busy||active.length>0} onChange={e=>perform(()=>action('moveStoryboardPlan',{toIndex:Number(e.target.value)},item.id))}>
+                    {group.map((i,n)=><option key={i.id} value={n}>{n+1} из {group.length}</option>)}
+                  </select></label>
+                  <Button variant="outline" disabled={busy||active.length>0||group[group.length-1].id===item.id} onClick={()=>perform(()=>action('moveStoryboardPlan',{toIndex:group.findIndex(i=>i.id===item.id)+1},item.id))}>Позже<ArrowDown size={16}/></Button>
+                </div>
+                <p className="muted small mt-3">Откройте нужную карточку и выберите её место. Изображения, озвучка по планам, видео и титры останутся со своими сценами. Утверждения материалов сохраняются; аниматик и фильм после перестановки нужно собрать заново. Названия планов не меняются.</p>
+                {active.length>0&&<p role="status">Перестановка станет доступна после завершения текущей генерации.</p>}
+              </section>}
               {step === 7 && (
                 <div className="info-banner">
                   <div>

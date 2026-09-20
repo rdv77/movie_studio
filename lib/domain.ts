@@ -114,6 +114,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  storyboardOrder?: string[];
   assemblyCuts?: { itemId: string; variantId: string; trim: number; duration: number | null }[];
   captions?: PlanCaption[];
   hiddenReferenceIds?: string[];

@@ -6,6 +6,7 @@ import { planSpeech } from './plan-speech';
 import { withSpeechDirection } from './speech-mode';
 import { withCharacterIdentity } from './characters';
 import { reconcilePlanStage } from './plan-sync';
+import { orderedScriptShots } from './plan-order';
 
 export function selectedVideoModel(p: Project, item: Item) {
   const v = chosen(item);
@@ -26,7 +27,7 @@ export function scriptVideo(p: Project) {
   if (!source) return { shots: [], message: 'Утвердите подробный сценарий.' };
   try {
     const variant = source.variants.find(v => v.id === source.approvedId)!;
-    const shots = parseShots(variant.text, p.seconds);
+    const shots = orderedScriptShots(p,source.id,parseShots(variant.text, p.seconds));
     if (new Set(shots.map(s => s.title)).size !== shots.length)
       throw new Error('Названия планов в сценарии должны быть разными.');
     return { shots, source, variant, message: '' };

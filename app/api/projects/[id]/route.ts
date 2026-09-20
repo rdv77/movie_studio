@@ -1,4 +1,5 @@
 import { syncVideoPlans } from '@/lib/video';
+import { moveStoryboardPlan } from '@/lib/plan-order';
 import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
 import { reapproveVideo } from '@/lib/video-approval';
 import { reapproveStyle } from '@/lib/style-approval';
@@ -68,6 +69,10 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'moveStoryboardPlan': {
+      const {toIndex}=z.object({toIndex:z.number().int().min(0).max(119)}).parse(d);
+      moveStoryboardPlan(p,body.itemId!,toIndex);break;
+    }
     case 'saveAssemblyCuts': {
       const {cuts}=z.object({cuts:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),trim:z.number().min(0).max(600),duration:z.number().min(0.2).max(3600).nullable()})).max(120)}).parse(d);
       if(new Set(cuts.map(c=>c.itemId)).size!==cuts.length)throw new Error('План указан дважды.');
@@ -290,6 +295,13 @@ export const PATCH = api(async (req, ctx) => {
     }
     case 'moveItem': {
       const i = getItem(p, body.itemId!);
+      if(i.stage===5){
+        const direction=z.union([z.literal(-1),z.literal(1)]).parse(d?.direction);
+        const frames=p.items.filter(x=>x.stage===5&&!x.removedAt&&!x.planArchive);
+        const toIndex=frames.findIndex(x=>x.id===i.id)+direction;
+        if(toIndex>=0&&toIndex<frames.length)moveStoryboardPlan(p,i.id,toIndex);
+        break;
+      }
       const group = p.items.filter((x) => x.stage === i.stage);
       const at = group.findIndex((x) => x.id === i.id);
       const next =

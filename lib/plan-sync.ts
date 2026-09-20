@@ -58,6 +58,11 @@ export function reconcilePlanStage(p:Project,stage:number,script:PlanScript,crea
     }
   }
   for(const item of existing)if(!used.has(item.id))update(item,'planArchive',{reason:'removed'});
+  if(p.storyboardOrder?.length){
+    const rank=new Map(p.storyboardOrder.map((id,n)=>[id,n]));
+    const position=(i:Item)=>rank.get(stage===5?i.id:p.items.find(f=>f.stage===5&&!f.planArchive&&!f.removedAt&&f.sourceShot?.scriptId===i.sourceShot?.scriptId&&f.sourceShot?.title===i.sourceShot?.title)?.id??'')??Infinity;
+    ordered.sort((a,b)=>position(a)-position(b));
+  }
   if(reorder||changed){
     const ids=new Set(ordered.map(i=>i.id));let at=0;
     const next=p.items.map(i=>ids.has(i.id)?ordered[at++]:i);
