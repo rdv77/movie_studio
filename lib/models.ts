@@ -1,5 +1,6 @@
 import { ZEN_MODELS } from './zencreator-models';
 import { GOOGLE_MODELS } from './google-models';
+import { MUSIC_MODELS } from './music';
 import type { Kind } from './domain';
 export const MODELS: {
   id: string;
@@ -137,7 +138,7 @@ export const PROVIDERS = [
   { id: 'sync', name: 'sync.so · синхронизация губ', url: 'https://sync.so/' },
 ];
 export function model(id: string) {
-  const m = [...MODELS, ...SYNC_MODELS].find((m) => m.id === id);
+  const m = [...MODELS, ...SYNC_MODELS, ...MUSIC_MODELS].find((m) => m.id === id);
   if (!m) throw new Error('Модель не поддерживается.');
   return m;
 }

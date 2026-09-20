@@ -46,6 +46,7 @@ export function projectAssetIds(p: Project): Set<string> {
     for (const value of item.variants) variant(value);
   }
   for (const removed of p.removedVariants ?? []) variant(removed.variant);
+  for (const value of [...p.music?.variants??[],...p.music?.removedVariants??[]]) variant(value);
   for (const value of p.animatic?.variants ?? []) variant(value);
   for (const value of p.animatic?.removedVariants ?? []) variant(value);
 

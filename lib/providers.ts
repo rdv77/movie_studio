@@ -53,6 +53,13 @@ export async function generate(
   if(m.provider==='google')return generateGoogle(j,key,refs,format);
   if(m.provider==='zencreator')return generateZen(j,key,refs,format);
   let d: any;
+  if(j.purpose==='music') {
+    if(j.model!=='music_v1'||!j.prompt.trim()||j.prompt.length>4100||j.duration<3||j.duration>600)
+      throw new ProviderError('Музыка: проверьте модель, описание (до 4100 символов) и длительность 3–600 сек. Запрос не отправлен.',true,true);
+    const r=await call('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128',h,{model_id:'music_v1',prompt:j.prompt,music_length_ms:Math.round(j.duration*1000),force_instrumental:true});
+    if(!r.headers.get('content-type')?.startsWith('audio/'))throw new ProviderError('ElevenLabs не вернул аудиофайл. Проверьте запрос в кабинете.',true);
+    return {bytes:new Uint8Array(await r.arrayBuffer()),mime:'audio/mpeg',requestId:r.headers.get('song-id')??undefined,actual:null};
+  }
   if (j.kind === 'image' && isMiniMaxImage(j.model)) {
     if (!j.prompt.trim() || j.prompt.length > MINIMAX_IMAGE_PROMPT_LIMIT)
       throw new ProviderError('MiniMax image-01: промпт должен содержать от 1 до 1500 символов. Запрос не отправлен.',true,true);

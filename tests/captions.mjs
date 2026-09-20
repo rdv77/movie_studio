@@ -26,7 +26,7 @@ await patch({...caption,enabled:false});assert.equal(C.captionForPlan(state,vide
 await patch(caption);
 for(const invalid of [{planId:D.id()},{planId:video.id},{font:'malicious'},{size:0},{size:161},{x:-1},{y:101},{text:'x'.repeat(301)}]){const old=structuredClone(state);await assert.rejects(()=>patch({...caption,...invalid}));assert.deepEqual(state,old);}
 await assert.rejects(()=>patch(caption,state.revision-1));globalThis.denied=true;await assert.rejects(()=>patch(caption),/Unauthorized/);globalThis.denied=false;
-assert.equal(W.nextStage(7),10);assert.equal(W.nextStage(10),8);assert.equal(W.WORKFLOW.length,11);assert(W.workflowReady(p,10));
+assert.equal(W.nextStage(7),11);assert.equal(W.nextStage(10),8);assert.equal(W.WORKFLOW.length,12);assert(W.workflowReady(p,10));
 const calls=[],ctx={clearRect(){},measureText:t=>({width:[...t].length*28}),fillRect(...args){calls.push(['box',...args])},fillText(...args){calls.push(['text',...args])}};
 const canvas={getContext:()=>ctx};C.drawCaption(canvas,caption,1920,1080);
 assert(calls.some(c=>c[0]==='text'&&c[1]==='Завод «Шкода»'));assert(calls.some(c=>c[0]==='text'&&c[1].includes('[test]')));

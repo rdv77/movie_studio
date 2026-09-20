@@ -2,6 +2,7 @@ import type { SpeechType } from './speech-mode';
 import type { PlanCaption } from './captions';
 import { speechInfo } from './speech-mode';
 import { parseShots } from './shots';
+import { musicIssue, musicSettings, type MusicState } from './music';
 export const STAGES = [
   'Общий сценарий',
   'Герои',
@@ -68,7 +69,7 @@ export type Item = {
 export type Job = {
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test';
+  purpose?: 'voice-test' | 'music' | 'music-ideas';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -115,6 +116,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  music?: MusicState;
   storyboardOrder?: string[];
   assemblyCuts?: { itemId: string; variantId: string; trim: number; duration: number | null }[];
   captions?: PlanCaption[];
@@ -186,9 +188,11 @@ export function dependencies(p: Project, stage: number): string {
       .map((i) => [i.id, i.approvedId ?? null]),
     ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
     ...(stage===8&&p.assemblyCuts?.length ? [['assemblyCuts',p.assemblyCuts]] : []),
+    ...(stage===8&&musicSettings(p).enabled ? [['music',p.music?.approvedId,p.music?.approvedSettings]] : []),
   ]);
 }
 export function stageReady(p: Project, stage: number): boolean {
+  if(stage===8&&musicIssue(p))return false;
   if (stage > 6 && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items
     .filter((i) => i.stage < stage && participates(p, i))

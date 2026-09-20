@@ -1,4 +1,5 @@
 import { retrieveGoogle } from '@/lib/google-provider';
+import {isMusicJob,musicBasis,parseMusicIdeas,DEFAULT_MUSIC} from '@/lib/music';
 import {
   api,
   owner,
@@ -89,7 +90,8 @@ export const POST = api(async (req, ctx) => {
       // CAS in mutate makes the slot reservation global across browser tabs.
       // A full pool leaves the request queued; it has not reached the provider.
       if(parallelJob(p,job)&&p.jobs.filter(j=>j.id!==job.id&&parallelJob(p,j)&&generationInProgress(j)).length>=PARALLEL_GENERATIONS)return;
-      const i = job.purpose==='voice-test'?undefined:getItem(p, job.itemId);
+      const i = job.purpose==='voice-test'||isMusicJob(job)?undefined:getItem(p, job.itemId);
+      if(isMusicJob(job)&&job.deps!==musicBasis(p)){job.status='cancelled';job.actual='0';job.actualSource='Сценарий или стиль изменились до отправки';return;}
       if (i && (job.deps !== dependencies(p, i.stage) || !stageReady(p, i.stage))) {
         job.status = 'cancelled';
         job.actual = '0';
@@ -102,7 +104,7 @@ export const POST = api(async (req, ctx) => {
         if(job.purpose==='voice-test'&&!p.voiceComparisons?.some(c=>!c.removedAt&&c.id===job.itemId&&c.samples.some(s=>s.jobId===job.id))) {
           job.status='cancelled';job.actual='0';job.actualSource='Проба удалена до отправки';return;
         }
-        if (job.kind === 'audio' && job.purpose!=='voice-test') {
+        if (job.kind === 'audio' && job.purpose!=='voice-test' && !isMusicJob(job)) {
           job.dialogue = spokenText(job.dialogue, [...speechCharacters(p),job.speaker??'']);
           if (!job.dialogue) {
             job.status = 'cancelled';
@@ -147,6 +149,7 @@ export const POST = api(async (req, ctx) => {
         job.actualSource = 'Ответ API';
       }
       if (result.usage) job.usage = result.usage;
+      if(job.purpose==='music-ideas'&&result.text)job.output={text:result.text.slice(0,20000)};
       if (result.requestId) job.requestId = result.requestId;
       if (result.pollingUrl) job.pollingUrl = result.pollingUrl;
       if (!result.pending && result.url) {
@@ -189,6 +192,17 @@ export const POST = api(async (req, ctx) => {
     }
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
+      if(isMusicJob(job)){
+        p.music??={variants:[],settings:{...DEFAULT_MUSIC}};
+        if(job.purpose==='music-ideas'){
+          try{p.music.ideas=parseMusicIdeas(result.text??job.output?.text??'',job.id);}catch(e){throw new ProviderError(e instanceof Error?e.message:'Не удалось прочитать музыкальные идеи.',true);}
+        }else if(!p.music.variants.some(v=>v.jobId===job.id)){
+          if(!assetId)throw Error('Не найден созданный музыкальный файл.');
+          p.music.variants.push(makeVariant(p,{id:p.id,stage:0,title:'Музыка',variants:[]},{id:job.id,jobId:job.id,title:model(job.model).name+' · '+(p.music.variants.length+1),text:job.brief,kind:'audio',assetId,duration:job.duration,model:job.model,deps:job.deps}));
+          if(!p.music.selectedId)p.music.selectedId=job.id;
+        }
+        job.status='done';job.error=undefined;return;
+      }
       if(job.purpose==='voice-test') {
         const sample=p.voiceComparisons?.find(c=>c.id===job.itemId)?.samples.find(s=>s.jobId===jobId);
         if(!sample||!assetId)throw new Error('Не найдена проба голоса для сохранения результата.');

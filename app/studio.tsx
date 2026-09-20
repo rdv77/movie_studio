@@ -133,6 +133,8 @@ import { AssemblyEditor } from './assembly-editor';
 import { planFields, storyboardPrompt, storyboardBatchPlans } from '@/lib/storyboard';
 import { animaticBasis, animaticIssue, animaticApproved } from '@/lib/animatic';
 import { WORKFLOW, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
+import {MusicEditor} from './music-editor';
+import {MUSIC_MODELS,musicSettings} from '@/lib/music';
 type Asset = { id: string; name: string; mime: string; size: number };
 type Summary = { id: string; title: string; updated: string };
 async function request(
@@ -321,7 +323,7 @@ function Workspace() {
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
   const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
-  const showCards=step!==9&&step!==10&&(step!==6||voiceView==='plans');
+  const showCards=step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
@@ -449,7 +451,7 @@ function Workspace() {
       name: 'open_film_stage',
       title: 'Открыть этап фильма',
       description:
-        'Открыть этап 1–11 в режиссерской студии; ничего не утверждает и не генерирует.',
+        `Открыть этап 1–${WORKFLOW.length} в режиссерской студии; ничего не утверждает и не генерирует.`,
       inputSchema: {
         type: 'object',
         properties: { stage: { type: 'integer', minimum: 1, maximum: WORKFLOW.length } },
@@ -518,7 +520,7 @@ function Workspace() {
             : 'Монтаж · ' + new Date().toLocaleTimeString('ru-RU'),
           text: animatic
             ? 'Аниматик из утверждённой раскадровки с выбранной озвучкой.\n' + editPlan(p,true).audio.map(v=>`${v.title}: ${[...MODELS,...SYNC_MODELS].find(m=>m.id===v.model)?.name??v.model} · ${v.voiceId||'загруженный голос'} · вариант ${v.id}`).join('\n') + '\nДлительности кадров при сборке:\n' + timing
-            : 'Монтаж из утвержденных видеопланов. Исходный звук видеомоделей отключен; отдельные звуковые дорожки сведены по таймлайну. Длительности планов при сборке:\n' + timing,
+            : 'Монтаж из утвержденных видеопланов. Исходный звук видеомоделей отключен; отдельные звуковые дорожки сведены по таймлайну. Длительности планов при сборке:\n' + timing + (musicSettings(p).enabled?'\nМузыка: '+p.music?.variants.find(v=>v.id===p.music?.approvedId)?.title+'\n'+p.music?.variants.find(v=>v.id===p.music?.approvedId)?.text+'\nГромкость без речи / при речи: '+musicSettings(p).volume+' / '+musicSettings(p).speechVolume:''),
           kind: 'video',
           assetId: a.id,
           duration: seconds,
@@ -731,7 +733,7 @@ function Workspace() {
                   </div>
                   <h1>{stageTitle(step)}</h1>
                   <p className="muted">
-                    {step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
+                    {step===11 ? 'Выберите музыку по сценарию и настройте громкость под речь.' : step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
@@ -949,6 +951,11 @@ function Workspace() {
                 </details>)}
               </details>}
               {[5, 6, 7].includes(step) && showCards && <BulkApproval p={p} stage={step} busy={busy} action={action} perform={perform} />}
+              {step===11&&<MusicEditor key={p.id} p={p} busy={busy} connections={cq.data} upload={upload} submit={async(action,data)=>{
+                const epoch=projectEpoch.current;
+                const next=await request('/api/projects/'+p.id+'/music','POST',{revision:p.revision,action,data});replace(next);
+                if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');return next as Project;
+              }} onContinue={()=>{setStep(10);setItemId('');}}/>}
               {step===10&&<CaptionEditor p={p} busy={busy} save={async c=>{let result:Project|undefined;await perform(async()=>{result=await action('saveCaption',c);});if(!result)throw new Error('Титр не сохранён.');return result;}} onContinue={()=>{setStep(8);setItemId('');}}/>}
               {(step === 8 || step === 9) && (
                 <Timeline
@@ -3008,9 +3015,10 @@ function Budget({ p, action, perform, replace }: any) {
               <TableRow key={j.id}>
                 <TableCell>
                   <strong>
-                    {[...MODELS, ...SYNC_MODELS].find((m) => m.id === j.model)?.name ?? j.model}
+                    {[...MODELS, ...SYNC_MODELS,...MUSIC_MODELS].find((m) => m.id === j.model)?.name ?? j.model}
                   </strong>
                   {j.purpose==='voice-test'&&<small>Проба голоса · {j.voiceName||j.voiceId}</small>}
+                  {(j.purpose==='music'||j.purpose==='music-ideas')&&<small>{j.purpose==='music'?'Музыкальное сопровождение':'Музыкальные направления по сценарию'}</small>}
                   <small>{new Date(j.created).toLocaleString('ru-RU')}</small>
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
                 </TableCell>
@@ -3323,6 +3331,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
         save={async cuts=>{let saved=false;await perform(async()=>{await action('saveAssemblyCuts',{cuts});saved=true;});if(!saved)throw new Error('Не удалось сохранить длительности.');}} onDirty={setCutsDirty}
         remove={itemId=>perform(()=>action('removePlan',undefined,itemId))}/>}
       {!animatic&&videoTiming.isError&&<p role="alert">Не удалось заранее прочитать длительность видео. При сборке файлы будут проверены повторно.</p>}
+      {!animatic&&musicSettings(p).enabled&&<div className="editor-surface p-4"><strong>Музыка: {p.music?.variants.find((v:Variant)=>v.id===p.music?.approvedId)?.title??'требует утверждения'}</strong><p>Без речи: {Math.round(musicSettings(p).volume*100)}% · при речи: {Math.round(musicSettings(p).speechVolume*100)}%. Настройки — на этапе «Музыка».</p><p className="text-sm whitespace-pre-wrap">{p.music?.variants.find((v:Variant)=>v.id===p.music?.approvedId)?.text}</p></div>}
       <div className="timeline-clips">
         {items.map((i: Item, n: number) => {
           const v = i.variants.find((v) => v.id === i.approvedId);

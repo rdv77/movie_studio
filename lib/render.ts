@@ -3,8 +3,10 @@ import { captionForPlan, captionPng } from './captions';
 import type { Project, Variant } from './domain';
 import { chosen, dependencies, stageReady, isApproved, participates } from './domain';
 import { scriptSpeech, speechPlans } from './speech';
+import {musicIssue,musicSettings,musicEnvelope,type MusicSettings} from './music';
 type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
+  if(!animatic&&musicIssue(p))throw new Error(musicIssue(p));
   const stage = animatic ? 5 : 7;
   const items = p.items.filter((i) => i.stage === stage && participates(p,i));
   if (!items.length) throw new Error('В последовательности нет планов. Восстановите план из раздела «Удалённые планы» или подготовьте новые карточки.');
@@ -65,6 +67,8 @@ export function editPlan(p: Project, animatic = false) {
     if (animatic && v.offset >= seconds) throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте «Начало в фильме, сек» через «Правки» и утвердите вариант.`);
   }
   return {
+    music:!animatic&&musicSettings(p).enabled?p.music?.variants.find(v=>v.id===p.music?.approvedId):undefined,
+    musicSettings:musicSettings(p),
     clips,
     audio,
     audioClipIndexes: audio.map(v => {
@@ -197,16 +201,18 @@ export function clipArgs(
     `clip${index}.mp4`,
   ];
 }
-export function audioArgs(audio: Variant[], seconds: number) {
+export function audioArgs(audio: Variant[], seconds: number, music?:MusicSettings) {
   const inputs = audio.flatMap((_, i) => ['-i', `audio${i}`]);
+  if(music)inputs.push(...(music.loop?['-stream_loop','-1']:[]),'-i','music.wav');
   const filters = audio.map(
     (v, i) =>
       `[${i + 1}:a]atrim=start=${v.trim}:duration=${v.duration},asetpts=PTS-STARTPTS,volume=${v.volume},adelay=${Math.round(v.offset * 1000)}:all=1[a${i}]`,
   );
-  filters.push(
-    audio.map((_, i) => `[a${i}]`).join('') +
-      `amix=inputs=${audio.length}:normalize=0,alimiter=limit=0.95,apad[mix]`,
-  );
+  if(music){
+    const fade=Math.min(music.fade,seconds/2);
+    filters.push(`[${audio.length+1}:a]apad,atrim=duration=${seconds},asetpts=PTS-STARTPTS,volume='${musicEnvelope(audio,music)}':eval=frame${fade?`,afade=t=in:st=0:d=${fade},afade=t=out:st=${seconds-fade}:d=${fade}`:''}[music]`);
+  }
+  filters.push(audio.map((_,i)=>`[a${i}]`).join('')+(music?'[music]':'')+`amix=inputs=${audio.length+(music?1:0)}:normalize=0,alimiter=limit=0.95,apad[mix]`);
   return [
     '-y',
     '-i',
@@ -344,9 +350,18 @@ export async function renderFilm(
     )
       throw new Error('Не удалось склеить планы.');
     let output = 'silent.mp4';
-    if (plan.audio.length) {
+    if(plan.music){
+      progress('Подготовка утверждённой музыки…');
+      await input('music-source',plan.music);
+      if(await ff.ffprobe(['-v','error','-show_entries','format=duration:stream=codec_type','-of','json','-o','music-probe.json','music-source'])>0)throw Error('Не удалось прочитать музыкальный трек.');
+      const raw=await ff.readFile('music-probe.json'),info=JSON.parse(typeof raw==='string'?raw:new TextDecoder().decode(raw));
+      if(!info.streams?.some((s:{codec_type:string})=>s.codec_type==='audio')||!Number.isFinite(Number(info.format?.duration))||Number(info.format.duration)<=plan.musicSettings.trim)throw Error('В музыкальном файле нет доступного аудио после выбранного начала.');
+      if(await ff.exec(['-y','-i','music-source','-af',`atrim=start=${plan.musicSettings.trim}:duration=${plan.seconds},asetpts=PTS-STARTPTS,loudnorm=I=-18:TP=-2:LRA=11`,'-ar','44100','-ac','2','music.wav'])!==0)throw Error('Не удалось подготовить музыку. Проверьте формат файла.');
+      await ff.deleteFile('music-source');
+    }
+    if (plan.audio.length || plan.music) {
       progress('Сведение речи и музыки…');
-      if ((await ff.exec(audioArgs(plan.audio, plan.seconds))) !== 0)
+      if ((await ff.exec(audioArgs(plan.audio, plan.seconds,plan.music?plan.musicSettings:undefined))) !== 0)
         throw new Error('Не удалось свести звуковые дорожки.');
       output = 'film.mp4';
     }
