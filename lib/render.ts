@@ -3,14 +3,18 @@ import { captionForPlan, captionPng } from './captions';
 import type { Project, Variant } from './domain';
 import { chosen, dependencies, stageReady, isApproved, participates } from './domain';
 import { scriptSpeech, speechPlans } from './speech';
+type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
   const stage = animatic ? 5 : 7;
   const items = p.items.filter((i) => i.stage === stage && participates(p,i));
   if (!items.length || items.some((i) => !isApproved(p, i)))
     throw new Error('Утвердите все планы перед сборкой.');
-  const clips = items.map((i) =>
-    i.variants.find((v) => v.id === i.approvedId)!,
-  );
+  const clips: RenderClip[] = items.map((i) => {
+    const v=i.variants.find((v) => v.id === i.approvedId)!;
+    if(animatic)return {...v};
+    const cut=p.assemblyCuts?.find(c=>c.itemId===i.id&&c.variantId===v.id);
+    return {...v,title:i.title,trim:cut?.trim??v.trim,duration:cut?.duration??v.duration,assemblyMode:cut?.duration!=null?'custom':'full'};
+  });
   if (
     clips.some((v) => !v.assetId || v.kind !== (animatic ? 'image' : 'video'))
   )
@@ -57,7 +61,7 @@ export function editPlan(p: Project, animatic = false) {
     throw new Error('В сценарии есть реплики, но нет утверждённой озвучки. Создайте или выберите аудиозапись и нажмите «Утвердить вариант» перед сборкой.');
   for (const v of audio) {
     if (v.volume <= 0) throw new Error(`У озвучки «${v.title}» громкость равна нулю. Исправьте её через «Правки» и утвердите вариант.`);
-    if (v.offset >= seconds) throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте «Начало в фильме, сек» через «Правки» и утвердите вариант.`);
+    if (animatic && v.offset >= seconds) throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте «Начало в фильме, сек» через «Правки» и утвердите вариант.`);
   }
   return {
     clips,
@@ -110,13 +114,43 @@ export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds
   return { ...plan, clips, audio, seconds };
 }
 export const fitAnimaticToSpeech = fitPlanToSpeech;
+// Final montage has its own cuts. Speech never shortens a video or silently
+// overrides an explicit cut; all following voices use these same cut boundaries.
+export function resolveFinalClip(v: RenderClip, sourceSeconds: number, speechSeconds = 0): RenderClip {
+  if(!Number.isFinite(sourceSeconds)||sourceSeconds<=v.trim)throw new Error(`Не удалось определить доступный участок видео «${v.title}». Проверьте начало в исходном файле.`);
+  const available=sourceSeconds-v.trim;
+  let duration=v.assemblyMode==='full'?Math.floor(available*24+1e-6)/24:Math.ceil(v.duration*24-1e-8)/24;
+  if(v.assemblyMode==='full'&&v.lipsync&&speechSeconds>duration&&speechSeconds<=available+1/24+0.001)
+    duration=Math.ceil(speechSeconds*24-1e-8)/24;
+  if(duration<=0)throw new Error(`Выбранный участок «${v.title}» короче одного кадра.`);
+  if(speechSeconds>duration+0.001)throw new Error(`Реплика «${v.title}» длится ${speechSeconds.toFixed(2)} сек, а в сборке оставлено ${duration.toFixed(2)} сек. Увеличьте «Оставить в фильме, сек» или выберите «Весь ролик». Если исходного видео недостаточно, переозвучьте план либо выберите более длинный ролик. Речь не обрезана.`);
+  const clip={...v,duration};
+  validateVideoDuration(clip,sourceSeconds,v.title);
+  return clip;
+}
+export function fitFinalPlan(plan: ReturnType<typeof editPlan>, videoSeconds: number[], speechSeconds: number[]) {
+  if(videoSeconds.length!==plan.clips.length)throw new Error('Не удалось проверить длительность всех видео.');
+  if(plan.audioClipIndexes.some(i=>i>=0)&&speechSeconds.length!==plan.audio.length)throw new Error('Не удалось проверить длительность всех реплик.');
+  const audio=plan.audio.map((v,n)=>{
+    if(plan.audioClipIndexes[n]<0)return {...v};
+    const duration=speechSeconds[n]-v.trim;
+    if(!Number.isFinite(duration)||duration<=0)throw new Error(`Не удалось определить звучащий участок «${v.title}».`);
+    return {...v,duration};
+  });
+  const clips=plan.clips.map((v,n)=>resolveFinalClip(v,videoSeconds[n],Math.max(0,...audio.filter((_,j)=>plan.audioClipIndexes[j]===n).map(v=>v.duration))));
+  let seconds=0;
+  const offsets=clips.map(v=>{const start=seconds;seconds+=v.duration;return start;});
+  audio.forEach((v,n)=>{if(plan.audioClipIndexes[n]>=0)v.offset=offsets[plan.audioClipIndexes[n]];});
+  for(const v of audio)if(v.offset>=seconds)throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте начало звуковой дорожки.`);
+  return {...plan,clips,audio,seconds};
+}
 export function validateVideoDuration(v: Variant, sourceDuration: number, title: string) {
   if (!Number.isFinite(sourceDuration) || sourceDuration <= 0)
     throw new Error(`Не удалось определить длительность видео «${title}».`);
   const available = sourceDuration - v.trim;
   const tolerance = (v.lipsync ? 1 / 24 : 0) + 0.001;
   if (available + tolerance < v.duration)
-    throw new Error(`Для плана «${title}» с полной репликой нужно ${v.duration.toFixed(2)} сек видео, а после начала выбранного участка доступно ${Math.max(0, available).toFixed(2)} сек. Переозвучьте этот план с более короткой репликой и утвердите новую запись в разделе «Голоса». Также можно выбрать более длинный ролик или уменьшить «Начало в исходном файле» через «Правки». Речь не обрезана.`);
+    throw new Error(`Для плана «${title}» в сборке нужно ${v.duration.toFixed(2)} сек видео, а после начала выбранного участка доступно ${Math.max(0, available).toFixed(2)} сек. Уменьшите длительность или начало участка в финальной сборке, либо выберите более длинный ролик. Если не помещается речь, переозвучьте план. Речь не обрезана.`);
 }
 export function fittedSpeechDuration(v: Variant, sourceSeconds: number) {
   if (!Number.isFinite(sourceSeconds) || sourceSeconds <= v.trim)
@@ -230,7 +264,8 @@ export async function renderFilm(
         speechSeconds.push(Number(info.format?.duration));
       }
     }
-    if (p.speechMode === 'plans') plan = fitPlanToSpeech(plan, speechSeconds);
+    if (animatic && p.speechMode === 'plans') plan = fitPlanToSpeech(plan, speechSeconds);
+    const videoSeconds: number[] = [];
     progress(`Хронометраж с озвучкой: ${plan.seconds.toFixed(2)} сек. Подготовка кадров…`);
     for (let i = 0; i < plan.clips.length; i++) {
       progress(`Подготовка плана ${i + 1} из ${plan.clips.length}…`);
@@ -261,7 +296,9 @@ export async function renderFilm(
             typeof raw === 'string' ? raw : new TextDecoder().decode(raw),
           ).format?.duration,
         );
-        validateVideoDuration(plan.clips[i], sourceDuration, p.items.filter(item => item.stage === 7 && participates(p,item))[i].title);
+        videoSeconds.push(sourceDuration);
+        const speech=Math.max(0,...plan.audio.flatMap((v,n)=>plan.audioClipIndexes[n]===i?[speechSeconds[n]-v.trim]:[]));
+        plan.clips[i]=resolveFinalClip(plan.clips[i],sourceDuration,speech);
       }
       if (
         (await ff.exec(
@@ -274,6 +311,7 @@ export async function renderFilm(
       await ff.deleteFile('in' + i);
       if(captionFile)await ff.deleteFile(captionFile);
     }
+    if(!animatic)plan=fitFinalPlan(plan,videoSeconds,speechSeconds);
     await ff.writeFile(
       'list.txt',
       new TextEncoder().encode(

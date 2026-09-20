@@ -45,6 +45,8 @@ for(const stage of [5,6,7])for(const [n,shot] of shots.entries()){
  const item={id:D.id(),stage,title:shot.title,sourceShot:{scriptId:p.items.find(i=>i.stage===4).id,title:shot.title},variants:[]};p.items.push(item);
  D.addVariant(p,item.id,{kind:stage===5?'image':stage===6?'audio':'video',assetId:stage===6?(n===1?'voice-a':'voice-b'):'video',duration:shot.duration,trim:0});D.approve(p,item.id);
 }
+// Explicit montage durations replace the legacy automatic scenario cuts.
+p.assemblyCuts=p.items.filter(i=>i.stage===7).map((i,n)=>({itemId:i.id,variantId:i.approvedId,trim:0,duration:n===1?4.625:5}));
 const before=structuredClone(p);
 const needed=R.fitPlanToSpeech(R.editPlan(p,false),[4.6,1]);
 assert.equal(needed.clips[1].duration,4.625);assert.equal(needed.audio[1].offset,9.625);assert.equal(needed.seconds,49.625);
@@ -71,7 +73,7 @@ assert.equal(info.streams.find(s=>s.codec_type==='video').height,90);
 for(const start of [9.2,9.8]){logs=[];exec(['-v','info','-ss',String(start),'-i','film.mp4','-t','0.15','-af','volumedetect','-vn','-f','null','-']);
  const volume=logs.map(s=>s.match(/max_volume: (-?[\d.]+) dB/)).find(Boolean);assert(volume&&Number(volume[1])>-40,'Full tail and next voice must be audible');}
 await writeFile('work/tests/final-timing.mp4',core.FS.readFile('film.mp4'));
-const short=structuredClone(p);D.chosen(short.items.filter(i=>i.stage===7)[1]).trim=2;
+const short=structuredClone(p);short.assemblyCuts[1].trim=2;
 await assert.rejects(()=>R.renderFilm(short,false,()=>{}),/доступно 4.00/);
 // A sync result may end one frame before its requested, frame-aligned duration.
 // Render the actual short media: the missing frame must be cloned and the separate
@@ -105,6 +107,24 @@ const tailVolume=logs.map(s=>s.match(/max_volume: (-?[\d.]+) dB/)).find(Boolean)
 assert(tailVolume&&Number(tailVolume[1])>-40,'Speech remains audible after the short source video ends at 9.5833s');
 const ordinaryShort=structuredClone(sync);delete D.chosen(ordinaryShort.items.filter(i=>i.stage===7)[1]).lipsync;
 await assert.rejects(()=>R.renderFilm(ordinaryShort,false,()=>{}),/доступно/);
-const syncTooShort=structuredClone(sync);D.chosen(syncTooShort.items.filter(i=>i.stage===7)[1]).trim=1/24;
+const syncTooShort=structuredClone(sync);syncTooShort.assemblyCuts[1].trim=1/24;
 await assert.rejects(()=>R.renderFilm(syncTooShort,false,()=>{}),/доступно/);
-console.log('PASS real final render: complete speech, shifted cuts, 49.625s MP4, oversized output preserved, one-frame sync shortfall cloned with audible speech tail, ordinary and more-than-one-frame shortfalls rejected.');
+// A silent plan and a plan with short speech both retain the complete 6s source.
+const full=structuredClone(p);delete full.assemblyCuts;
+commands=[];
+const fullResult=await R.renderFilm(full,false,()=>{});
+assert.equal(fullResult.seconds,60);assert.match(fullResult.timing,/1\. 6.000 сек/);assert.match(fullResult.timing,/3\. 6.000 сек/);
+assert(commands.some(a=>a.join(' ').includes('adelay=12000')));
+core.reset();core.ffprobe('-v','error','-show_entries','format=duration','-of','json','-o','full-probe.json','film.mp4');
+assert(Math.abs(Number(JSON.parse(new TextDecoder().decode(core.FS.readFile('full-probe.json'))).format.duration)-60)<0.05);
+const manual=structuredClone(full),first=manual.items.find(i=>i.stage===7);
+manual.assemblyCuts=[{itemId:first.id,variantId:first.approvedId,trim:1,duration:2}];
+commands=[];
+const manualResult=await R.renderFilm(manual,false,()=>{});
+assert.equal(manualResult.seconds,56);
+assert(commands.some(a=>a.includes('clip0.mp4')&&a[a.indexOf('-ss')+1]==='1'&&a[a.indexOf('-t')+1]==='2'));
+assert(commands.some(a=>a.join(' ').includes('adelay=2000')));
+const voiceClip=manual.items.filter(i=>i.stage===7)[1];
+manual.assemblyCuts.push({itemId:voiceClip.id,variantId:voiceClip.approvedId,trim:0,duration:4});
+await assert.rejects(()=>R.renderFilm(manual,false,()=>{}),/Реплика.*4.60.*4.00/);
+console.log('PASS real final render: explicit cuts, full 60s video including silent tails, manual 56s montage with shifted speech, trim, short-cut rejection, large files and one-frame sync padding.');

@@ -114,6 +114,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  assemblyCuts?: { itemId: string; variantId: string; trim: number; duration: number | null }[];
   captions?: PlanCaption[];
   hiddenReferenceIds?: string[];
   voiceComparisons?: { id: string; phrase: string; created: string; removedAt?: string; samples: { jobId: string; model: string; voiceId: string; name: string; assetId?: string }[] }[];
@@ -182,6 +183,7 @@ export function dependencies(p: Project, stage: number): string {
       .filter((i) => i.stage < stage && participates(p, i))
       .map((i) => [i.id, i.approvedId ?? null]),
     ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
+    ...(stage===8&&p.assemblyCuts?.length ? [['assemblyCuts',p.assemblyCuts]] : []),
   ]);
 }
 export function stageReady(p: Project, stage: number): boolean {

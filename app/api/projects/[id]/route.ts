@@ -68,6 +68,17 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'saveAssemblyCuts': {
+      const {cuts}=z.object({cuts:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),trim:z.number().min(0).max(600),duration:z.number().min(0.2).max(3600).nullable()})).max(120)}).parse(d);
+      if(new Set(cuts.map(c=>c.itemId)).size!==cuts.length)throw new Error('План указан дважды.');
+      for(const c of cuts){
+        const i=getItem(p,c.itemId),v=i.variants.find(v=>v.id===c.variantId);
+        if(i.stage!==7||i.removedAt||i.planArchive||i.approvedId!==c.variantId||!isApproved(p,i)||v?.kind!=='video'||!v.assetId)
+          throw new Error('Выберите утверждённый видеоплан текущего проекта.');
+      }
+      p.assemblyCuts=cuts.sort((a,b)=>a.itemId.localeCompare(b.itemId));
+      break;
+    }
     case 'saveCaption': {
       const c=z.object({planId:z.string().uuid(),text:z.string().trim().max(300),enabled:z.boolean(),font:z.enum(['Arial','Times New Roman','Courier New']),size:z.number().int().min(16).max(160),x:z.number().min(0).max(100),y:z.number().min(0).max(100),color:z.enum(['white','black']),background:z.boolean()}).parse(d);
       if(!p.items.some(i=>i.id===c.planId&&i.stage===5&&!i.removedAt&&!i.planArchive))throw new Error('Выберите актуальный план раскадровки этого проекта.');

@@ -127,8 +127,9 @@ import { spokenText } from '@/lib/spoken-text';
 import { scriptVideo, videoShot, videoPrompt, videoGenerationPrompt, videoFrame, videoFrameOptions, VIDEO_PROMPT_LIMIT, selectedVideoModel, remainingVideoPlans } from '@/lib/video';
 import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, speechNames, speechDirection, type SpeechInfo } from '@/lib/speech-mode';
-import { renderFilm, editPlan, fitPlanToSpeech } from '@/lib/render';
-import { audioDuration } from '@/lib/audio-duration';
+import { renderFilm, editPlan, fitPlanToSpeech, fitFinalPlan } from '@/lib/render';
+import { audioDuration, videoDuration } from '@/lib/audio-duration';
+import { AssemblyEditor } from './assembly-editor';
 import { planFields, storyboardPrompt, storyboardBatchPlans } from '@/lib/storyboard';
 import { animaticBasis, animaticIssue, animaticApproved } from '@/lib/animatic';
 import { WORKFLOW, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
@@ -3235,6 +3236,7 @@ function BulkApproval({ p, stage, busy, action, perform }: any) {
   </section>;
 }
 function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
+  const [cutsDirty,setCutsDirty]=useState(false);
   const stage = animatic ? 5 : 7;
   const items = p.items.filter((i: Item) => i.stage === stage && participates(p,i));
   const clips = items
@@ -3262,7 +3264,16 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
     retry: false,
   });
   let fitted = base;
-  if (autoTiming && base && timing.data) {
+  const videoTiming=useQuery({
+    queryKey:['assembly-video-durations',p.id,base?.clips.map(v=>v.assetId)],
+    enabled:!animatic&&!!base,
+    queryFn:({signal})=>Promise.all(base!.clips.map(v=>videoDuration(v.assetId!,signal))),
+    staleTime:Infinity,retry:false,
+  });
+  if (!animatic&&base&&videoTiming.data&&(!autoTiming||timing.data)) {
+    try {fitted=fitFinalPlan(base,videoTiming.data,timing.data??[]);audio=fitted.audio;total=fitted.seconds;}
+    catch(e){reason=(e as Error).message;}
+  } else if (animatic && autoTiming && base && timing.data) {
     try {
       fitted = fitPlanToSpeech(base, timing.data);
       audio = fitted.audio;
@@ -3280,12 +3291,16 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
           </span>
           <small>{total.toFixed(2)} сек{autoTiming && timing.data && !reason ? ' · с учётом реплик' : ''} · 1080p · 24 кадра/с</small>
         </div>
-        <Button disabled={busy || !!reason || (autoTiming && timing.isFetching)} aria-describedby={reason?'assembly-blocker':undefined} onClick={onRender}>
+        <Button disabled={busy || !!reason || cutsDirty || (!animatic&&videoTiming.isFetching) || (autoTiming && timing.isFetching)} aria-describedby={reason?'assembly-blocker':undefined} onClick={onRender}>
           <Clapperboard />
           {animatic ? 'Собрать аниматик' : 'Собрать MP4'}
         </Button>
       </div>
       {reason&&<div id="assembly-blocker" role="alert" className="note mb-4"><strong>Почему сборка недоступна</strong><p>{reason}</p></div>}
+      {!animatic&&<AssemblyEditor key={JSON.stringify([p.id,p.assemblyCuts,items.map((i:Item)=>[i.id,i.approvedId])])} p={p} busy={busy} videoSeconds={videoTiming.data}
+        speechSeconds={items.map((_:Item,n:number)=>Math.max(0,...(base?.audioClipIndexes.flatMap((index,j)=>index===n&&timing.data?[timing.data[j]-base!.audio[j].trim]:[])??[])))}
+        save={async cuts=>{let saved=false;await perform(async()=>{await action('saveAssemblyCuts',{cuts});saved=true;});if(!saved)throw new Error('Не удалось сохранить длительности.');}} onDirty={setCutsDirty}/>}
+      {!animatic&&videoTiming.isError&&<p role="alert">Не удалось заранее прочитать длительность видео. При сборке файлы будут проверены повторно.</p>}
       <div className="timeline-clips">
         {items.map((i: Item, n: number) => {
           const v = i.variants.find((v) => v.id === i.approvedId);
@@ -3350,7 +3365,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
       <p className="muted small">{audio.length
         ? `В сборку войдёт звуковых дорожек: ${audio.length}.`
         : 'В сборке пока нет утверждённых звуковых дорожек.'}</p>
-      {autoTiming && <p className="muted small">{timing.isFetching ? 'Измеряем длительность утверждённых реплик…' : timing.isError ? 'Не удалось заранее измерить реплики. Сборка повторит проверку по аудиофайлам.' : animatic ? 'Длительность кадров в аниматике подстраивается под полные реплики. Следующий кадр и его голос сдвигаются вместе.' : 'Длительность видеопланов подстраивается под полные реплики за счёт доступной части исходного ролика. Следующие видео и голоса сдвигаются вместе. Скорость воспроизведения сохраняется; при нехватке видео сборка укажет конкретный план.'}</p>}
+      {autoTiming && <p className="muted small">{timing.isFetching ? 'Измеряем длительность утверждённых реплик…' : timing.isError ? 'Не удалось заранее измерить реплики. Сборка повторит проверку по аудиофайлам.' : animatic ? 'Длительность кадров в аниматике подстраивается под полные реплики. Следующий кадр и его голос сдвигаются вместе.' : 'Монтаж использует сохранённые длительности. Видео после конца речи сохраняется. Если речь не помещается, сборка укажет план; речь не ускоряется и не обрезается.'}</p>}
       <p className="muted small">
         {reason ||
           (animatic ? 'Планы соединятся прямыми склейками. Выбранные дорожки речи и музыки добавятся по указанному времени.' : 'Планы соединятся прямыми склейками. Звук видео отключен; утвержденные дорожки речи и музыки добавятся по указанному времени.')}

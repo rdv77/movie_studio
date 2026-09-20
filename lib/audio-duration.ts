@@ -1,7 +1,13 @@
 // Read media metadata only; no playback, provider calls or changes to the project.
 export function audioDuration(assetId: string, signal: AbortSignal): Promise<number> {
+  return mediaDuration(assetId, signal, 'audio');
+}
+export function videoDuration(assetId: string, signal: AbortSignal): Promise<number> {
+  return mediaDuration(assetId, signal, 'video');
+}
+function mediaDuration(assetId: string, signal: AbortSignal, kind: 'audio' | 'video'): Promise<number> {
   return new Promise((resolve, reject) => {
-    const media = new Audio();
+    const media = kind === 'audio' ? new Audio() : document.createElement('video');
     const finish = (error?: Error) => {
       const seconds = media.duration;
       clearTimeout(timer);
@@ -20,7 +26,7 @@ export function audioDuration(assetId: string, signal: AbortSignal): Promise<num
     if (signal.aborted) { abort(); return; }
     media.preload = 'metadata';
     media.onloadedmetadata = () => finish();
-    media.onerror = () => finish(new Error('Не удалось загрузить озвучку для проверки длительности.'));
+    media.onerror = () => finish(new Error('Не удалось загрузить медиафайл для проверки длительности.'));
     media.src = '/api/assets/' + assetId;
   });
 }
