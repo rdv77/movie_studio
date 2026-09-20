@@ -114,6 +114,12 @@ export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds
   return { ...plan, clips, audio, seconds };
 }
 export const fitAnimaticToSpeech = fitPlanToSpeech;
+export function videoStreamDuration(info: {streams?: {codec_type?: string;duration?: string|number}[];format?: {duration?: string|number}}) {
+  const video=info.streams?.find(s=>s.codec_type==='video');
+  if(!video)throw new Error('В исходном файле нет видеодорожки.');
+  const seconds=Number(video.duration);
+  return Number.isFinite(seconds)&&seconds>0?seconds:Number(info.format?.duration);
+}
 // Final montage has its own cuts. Speech never shortens a video or silently
 // overrides an explicit cut; all following voices use these same cut boundaries.
 export function resolveFinalClip(v: RenderClip, sourceSeconds: number, speechSeconds = 0): RenderClip {
@@ -279,7 +285,7 @@ export async function renderFilm(
             '-v',
             'error',
             '-show_entries',
-            'format=duration',
+            'format=duration:stream=codec_type,duration',
             '-of',
             'json',
             '-o',
@@ -291,10 +297,10 @@ export async function renderFilm(
             'Не удалось определить длительность исходного плана.',
           );
         const raw = await ff.readFile('probe.json');
-        const sourceDuration = Number(
+        const sourceDuration = videoStreamDuration(
           JSON.parse(
             typeof raw === 'string' ? raw : new TextDecoder().decode(raw),
-          ).format?.duration,
+          ),
         );
         videoSeconds.push(sourceDuration);
         const speech=Math.max(0,...plan.audio.flatMap((v,n)=>plan.audioClipIndexes[n]===i?[speechSeconds[n]-v.trim]:[]));

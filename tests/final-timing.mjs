@@ -17,6 +17,9 @@ let logs=[];core.setLogger(({message})=>logs.push(message));
 const exec=args=>{core.reset();const code=core.exec(...args);if(code!==0)throw new Error(logs.slice(-15).join('\n'));return code;};
 exec(['-f','lavfi','-i','testsrc2=size=160x90:rate=24','-t','6','-c:v','libx264','-preset','ultrafast','-threads','1','source.mp4']);
 const files=new Map([['video',new Uint8Array(core.FS.readFile('source.mp4'))]]);
+// Provider MP4s can contain an audio tail longer than their visual track.
+exec(['-i','source.mp4','-f','lavfi','-i','sine=frequency=220:duration=7','-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','long-audio.mp4']);
+files.set('long-audio-video',new Uint8Array(core.FS.readFile('long-audio.mp4')));
 for(const [name,duration] of [['voice-a',4.6],['voice-b',1]]){
  exec(['-f','lavfi','-i',`sine=frequency=440:duration=${duration}`,'-c:a','pcm_s16le','-f','wav',name]);
  files.set(name,new Uint8Array(core.FS.readFile(name)));
@@ -111,6 +114,7 @@ const syncTooShort=structuredClone(sync);syncTooShort.assemblyCuts[1].trim=1/24;
 await assert.rejects(()=>R.renderFilm(syncTooShort,false,()=>{}),/доступно/);
 // A silent plan and a plan with short speech both retain the complete 6s source.
 const full=structuredClone(p);delete full.assemblyCuts;
+D.chosen(full.items.find(i=>i.stage===7)).assetId='long-audio-video';
 commands=[];
 const fullResult=await R.renderFilm(full,false,()=>{});
 assert.equal(fullResult.seconds,60);assert.match(fullResult.timing,/1\. 6.000 сек/);assert.match(fullResult.timing,/3\. 6.000 сек/);

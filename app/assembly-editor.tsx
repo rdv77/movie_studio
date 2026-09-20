@@ -19,6 +19,7 @@ export function AssemblyEditor({p,busy,videoSeconds,speechSeconds,save,onDirty}:
   const invalid=draft.some(c=>!Number.isFinite(c.trim)||c.trim<0||c.trim>600||(c.duration!==null&&(!Number.isFinite(c.duration)||c.duration<0.2||c.duration>3600)));
   return <section className="space-y-4 mb-5" aria-label="Длительность планов в сборке">
     <p>По умолчанию сохраняется весь доступный ролик, даже если речь закончилась раньше или её нет. Снимите «Весь ролик», чтобы задать длительность вручную. Озвучка следующего плана начнётся вместе с его видео.</p>
+    <p className="text-sm">Длительности до сборки предварительные: встроенная звуковая дорожка файла иногда длиннее изображения. При сборке проверяется длина самого видео.</p>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {draft.map((c,n)=>{
         const item=items.find(i=>i.id===c.itemId)!,v=item.variants.find(v=>v.id===c.variantId)!;

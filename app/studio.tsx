@@ -3289,7 +3289,7 @@ function Timeline({ p, animatic, busy, onRender, action, perform }: any) {
               ? 'Аниматик из раскадровки'
               : 'Монтажная последовательность'}
           </span>
-          <small>{total.toFixed(2)} сек{autoTiming && timing.data && !reason ? ' · с учётом реплик' : ''} · 1080p · 24 кадра/с</small>
+          <small>{total.toFixed(2)} сек{!animatic?' · предварительно':''}{autoTiming && timing.data && !reason ? ' · с учётом реплик' : ''} · 1080p · 24 кадра/с</small>
         </div>
         <Button disabled={busy || !!reason || cutsDirty || (!animatic&&videoTiming.isFetching) || (autoTiming && timing.isFetching)} aria-describedby={reason?'assembly-blocker':undefined} onClick={onRender}>
           <Clapperboard />
