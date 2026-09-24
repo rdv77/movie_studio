@@ -1,4 +1,5 @@
 import { syncVideoPlans } from '@/lib/video';
+import {stopJobWait} from '@/lib/job-wait';
 import { moveStoryboardPlan } from '@/lib/plan-order';
 import { setPlanExcluded } from '@/lib/plan-removal';
 import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
@@ -352,6 +353,11 @@ export const PATCH = api(async (req, ctx) => {
       j.actual = '0';
       j.actualSource = 'Не отправлено';
       break;
+    }
+    case 'stopJobWait': {
+      const {jobId}=z.object({jobId:z.string().uuid()}).parse(d);
+      const j=p.jobs.find(j=>j.id===jobId);if(!j)throw Error('Попытка не найдена.');
+      stopJobWait(j,'manual');break;
     }
     case 'importLibrary': {
       const x = z

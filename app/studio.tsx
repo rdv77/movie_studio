@@ -135,6 +135,7 @@ import { animaticBasis, animaticIssue, animaticApproved } from '@/lib/animatic';
 import { WORKFLOW, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
 import {MusicEditor} from './music-editor';
 import {MUSIC_MODELS,musicSettings} from '@/lib/music';
+import {waitLimitMs} from '@/lib/job-wait';
 type Asset = { id: string; name: string; mime: string; size: number };
 type Summary = { id: string; title: string; updated: string };
 async function request(
@@ -405,9 +406,16 @@ function Workspace() {
     const flights=jobFlights.current.get(projectId)??new Set<string>();
     const attempts=jobAttempts.current.get(projectId)??new Map<string,number>();
     jobFlights.current.set(projectId,flights);jobAttempts.current.set(projectId,attempts);
+    const checkingWait=new Set<string>();
     const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
       if(!current)return;
+      for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
+        checkingWait.add(job.id);
+        void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait'})
+          .then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next)))
+          .catch(()=>{}).finally(()=>checkingWait.delete(job.id));
+      }
       for(const job of runnableJobs(current,flights,attempts)) {
         flights.add(job.id);attempts.set(job.id,Date.now());
         void (async()=>{
@@ -3023,7 +3031,9 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
                 </TableCell>
                 <TableCell>
-                  {statuses[j.status]}
+                  {j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
+                  {['dispatching','pending','saving'].includes(j.status)&&<small>Начало: {new Date(j.waitStartedAt??j.started??j.created).toLocaleTimeString('ru-RU')} · автоостановка через {waitLimitMs(j)/60000} мин ожидания</small>}
+                  {j.waitStoppedAt&&<small>Очередь освобождена. Остановка ожидания не отменяет запрос и возможное списание у провайдера.</small>}
                   {j.error && <small className="warning-text">{j.error}</small>}
                 </TableCell>
                 <TableCell>{money(j.estimate)}{j.zenCreditsEstimate!==undefined&&<small>≈ {j.zenCreditsEstimate} кредитов ZenCreator</small>}</TableCell>
@@ -3058,6 +3068,8 @@ function Budget({ p, action, perform, replace }: any) {
                       Отменить
                     </Button>
                   )}
+                  {['dispatching','pending','saving'].includes(j.status)&&<Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(()=>action('stopJobWait',{jobId:j.id}))}>Остановить ожидание</Button>}
+                  {j.status==='unknown'&&j.waitStoppedAt&&j.resumeStatus&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'resume-wait'}));}finally{setRecovering('');}})}>Проверить готовый результат</Button><small>Без повторной генерации: загрузка сохранённой ссылки или проверка прежнего запроса.</small></>}
                 </TableCell>
               </TableRow>
             ))}

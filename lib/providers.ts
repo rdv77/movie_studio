@@ -364,6 +364,9 @@ export async function poll(j: Job, key: string): Promise<Result> {
 }
 function resultUrl(url: string) {
   const u = new URL(url);
+  // MiniMax image-01 returns this OSS origin with http links. Upgrade this
+  // exact known storage origin; never send media requests over plain HTTP.
+  if(u.protocol==='http:'&&u.hostname==='hailuo-image-algeng-data-us.oss-us-east-1.aliyuncs.com'&&!u.port&&!u.username&&!u.password)u.protocol='https:';
   const host = u.hostname.replace(/\.$/, '');
   if (
     u.protocol !== 'https:' ||

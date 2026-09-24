@@ -67,6 +67,11 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  waitStartedAt?: string;
+  waitStoppedAt?: string;
+  waitStopReason?: 'manual'|'timeout'|'saving';
+  resumeStatus?: 'pending'|'saving';
+  saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
   purpose?: 'voice-test' | 'music' | 'music-ideas';

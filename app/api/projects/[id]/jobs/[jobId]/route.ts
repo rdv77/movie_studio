@@ -1,4 +1,5 @@
 import { retrieveGoogle } from '@/lib/google-provider';
+import {waitExpired,stopJobWait,resumeJobWait} from '@/lib/job-wait';
 import {isMusicJob,musicBasis,parseMusicIdeas,DEFAULT_MUSIC} from '@/lib/music';
 import {
   api,
@@ -38,10 +39,22 @@ export const POST = api(async (req, ctx) => {
   let p = await loadProject(user, id);
   let j = p.jobs.find((j) => j.id === jobId);
   if (!j) throw new Error('Попытка не найдена.');
+  const recoveryAction=((await req.json().catch(()=>null)) as {action?:unknown}|null)?.action;
+  if(j.waitStoppedAt&&j.status==='unknown'&&recoveryAction==='resume-wait'){
+    p=await mutate(user,id,p=>resumeJobWait(p.jobs.find(x=>x.id===jobId)!));
+    j=p.jobs.find(x=>x.id===jobId)!;
+  }
+  if(waitExpired(j)){
+    p=await mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;if(waitExpired(job))stopJobWait(job,'timeout');});
+    return Response.json(p);
+  }
+  // A watchdog may run while the original HTTP request is still in flight.
+  // It only checks the deadline; it must never dispatch or poll a provider.
+  if(recoveryAction==='check-wait')return Response.json(p);
   // A byte-return TTS may already be paid and stored when the final project
   // write fails. Recover only that owned file; never call the provider again.
   if(j.purpose==='voice-test'&&['unknown','dispatching'].includes(j.status)&&
-    ((await req.json().catch(()=>null)) as {action?:unknown}|null)?.action==='recover-voice-file') {
+    recoveryAction==='recover-voice-file') {
     const saved=await asset(user, jobId, p).catch(()=>null);
     if(!saved?.mime.startsWith('audio/')||!await runtime.FILES.head(jobId))throw new Error('Сохранённая проба пока не найдена. Новая генерация не запускалась. Проверьте исход запроса в кабинете провайдера.');
     p=await mutate(user,id,p=>{
@@ -54,7 +67,7 @@ export const POST = api(async (req, ctx) => {
   // Explicit recovery only polls the existing provider receipt. It must never
   // move a failed request back to queued or resend a paid generation.
   if (j.status === 'failed' && j.lipsync && j.requestId &&
-      ((await req.json().catch(() => null)) as {action?: unknown} | null)?.action === 'recover-result') {
+      recoveryAction === 'recover-result') {
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status === 'failed' && job.lipsync && job.requestId) {
@@ -67,15 +80,6 @@ export const POST = api(async (req, ctx) => {
   if (['done', 'failed', 'unknown', 'cancelled'].includes(j.status))
     return Response.json(p);
   if (j.status === 'dispatching') {
-    if (Date.now() - Date.parse(j.started!) > 15 * 60 * 1000)
-      p = await mutate(user, id, (p) => {
-        const job = p.jobs.find((x) => x.id === jobId)!;
-        if (job.status === 'dispatching') {
-          job.status = 'unknown';
-          job.error =
-            'Связь с задачей потеряна. Проверьте запрос и списание у провайдера; повтор не отправлен.';
-        }
-      });
     return Response.json(p);
   }
   const saving = j.status === 'saving';
@@ -154,12 +158,12 @@ export const POST = api(async (req, ctx) => {
       if (result.pollingUrl) job.pollingUrl = result.pollingUrl;
       if (!result.pending && result.url) {
         job.output = { url: result.url, mime: result.mime };
-        job.status = 'saving';
+        if(job.waitStoppedAt)job.resumeStatus='saving';else job.status = 'saving';
       }
       if (result.pending) {
         if (!job.requestId)
           throw new Error('Провайдер не вернул идентификатор задачи.');
-        job.status = 'pending';
+        if(job.waitStoppedAt)job.resumeStatus='pending';else job.status = 'pending';
       }
     });
     if (result.error) throw new ProviderError(result.error, true);
@@ -192,6 +196,8 @@ export const POST = api(async (req, ctx) => {
     }
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
+      // A late, valid result is still retained after stopping local waiting.
+      job.waitStoppedAt=undefined;job.waitStopReason=undefined;job.resumeStatus=undefined;
       if(isMusicJob(job)){
         p.music??={variants:[],settings:{...DEFAULT_MUSIC}};
         if(job.purpose==='music-ideas'){
@@ -248,11 +254,14 @@ export const POST = api(async (req, ctx) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status === 'done') return;
       job.error = e instanceof Error ? e.message : 'Ошибка обработки.';
+      if(job.waitStoppedAt){job.status='unknown';return;}
       if (!polling && e instanceof ProviderError && e.notSent) {
         job.actual = '0';
         job.actualSource = 'Запрос не отправлен';
       }
       if (job.status === 'saving') {
+        job.saveFailures=(job.saveFailures??0)+1;
+        if(job.saveFailures>=3)stopJobWait(job,'saving');
         return;
       }
       if (polling && !(e instanceof ProviderError && e.definite)) {

@@ -25,8 +25,9 @@ export function storyboardAdmissionIssue(p:Project,itemId:string) {
 // Fair scheduling keeps a slow asynchronous provider from monopolizing the
 // runner. Image/video provider tasks occupy a slot until saved or failed, even
 // between HTTP polls. Enforce the same bound atomically when dispatching.
-export function runnableJobs(p:Project,inFlight:ReadonlySet<string>,attempted:ReadonlyMap<string,number>) {
+export function runnableJobs(p:Project,inputFlights:ReadonlySet<string>,attempted:ReadonlyMap<string,number>) {
   const active=p.jobs.filter(activeGeneration);
+  const inFlight=new Set([...inputFlights].filter(id=>active.some(j=>j.id===id)));
   const parallel=active.length>0&&active.every(j=>parallelJob(p,j));
   if(!parallel) return inFlight.size ? [] : active.filter(j=>j.status!=='queued').slice(0,1).concat(active.filter(j=>j.status==='queued')).slice(0,1);
   const slots=Math.max(0,PARALLEL_GENERATIONS-inFlight.size);
