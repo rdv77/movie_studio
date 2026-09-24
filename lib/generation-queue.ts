@@ -4,9 +4,17 @@ import { selectedReferences } from './reference-selection';
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
 export const videoJob = (p:Project,j:Job) => j.kind==='video'&&!j.lipsync&&p.items.some(i=>i.id===j.itemId&&i.stage===7&&!i.removedAt&&!i.planArchive);
-export const parallelJob = (p:Project,j:Job) => storyboardJob(p,j)||videoJob(p,j);
+export const conceptImageJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&[1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive);
+export const parallelJob = (p:Project,j:Job) => conceptImageJob(p,j)||storyboardJob(p,j)||videoJob(p,j);
 export const PARALLEL_GENERATIONS = 3;
 export const generationInProgress = (j:Job) => ['dispatching','pending','saving'].includes(j.status);
+export function conceptImageAdmissionIssue(p:Project,itemId:string) {
+  if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
+    return 'Для этой карточки уже есть текущая попытка или запрос с неизвестным исходом. Откройте другого героя или материал либо проверьте журнал.';
+  if(p.jobs.some(j=>activeGeneration(j)&&!conceptImageJob(p,j)))
+    return 'Дождитесь задач другого этапа. Образы героев, визуальный стиль и локации можно генерировать параллельно.';
+  return '';
+}
 export function videoAdmissionIssue(p:Project,itemId?:string) {
   if(itemId&&p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
     return 'Для этого плана уже есть текущая попытка или запрос с неизвестным исходом. Выберите другой план либо проверьте журнал.';
@@ -54,7 +62,7 @@ export async function enqueueStoryboard(snapshot:Project,jobs:Job[],load:()=>Pro
 }
 export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promise<Project>,save:(p:Project,revision:number)=>Promise<Project>,sourceItemId?:string) {
   const stage=getItem(snapshot,jobs[0].itemId).stage,batchId=jobs[0].batchId;
-  if(![5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии планов.');
+  if(![1,2,3,5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии материалов.');
   const items=[...new Set(jobs.map(j=>j.itemId))];
   const originals=new Map(items.map(id=>[id,JSON.stringify(getItem(snapshot,id))])),basis=dependencies(snapshot,stage);
   for(let n=0;n<5;n++) {
@@ -63,8 +71,8 @@ export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promi
     if(dependencies(p,stage)!==basis||items.some(id=>JSON.stringify(getItem(p,id))!==originals.get(id))||!stageReady(p,stage)||
       sourceItemId&&getItem(p,sourceItemId).selectedId!==getItem(snapshot,sourceItemId).selectedId)
       throw new Error('Основа или выбранный план изменились. Проверьте задачу заново.');
-    for(const itemId of items){const issue=stage===5?storyboardAdmissionIssue(p,itemId):videoAdmissionIssue(p,itemId);if(issue)throw new Error(issue);}
-    if(stage===5&&JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
+    for(const itemId of items){const issue=stage===5?storyboardAdmissionIssue(p,itemId):stage===7?videoAdmissionIssue(p,itemId):conceptImageAdmissionIssue(p,itemId);if(issue)throw new Error(issue);}
+    if(stage!==7&&JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
       throw new Error('Список референсов изменился. Проверьте галочки заново.');
     assertBudget(p,jobs);
     const revision=p.revision;

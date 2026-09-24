@@ -1,6 +1,6 @@
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { prepareGoogleJobs } from '@/lib/google-models';
-import { enqueuePlanJobs, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
+import { enqueuePlanJobs, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
 import { videoDurationIssue } from '@/lib/video-readiness';
 import { assertSelectedReferences } from '@/lib/reference-selection';
 import { prepareZenJobs, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
@@ -68,9 +68,10 @@ export const POST = api(async (req, ctx) => {
   const ms = [...new Set(s.models)].map(model);
   const parallelStoryboard=item.stage===5&&ms.every(m=>m.kind==='image');
   const parallelVideo=item.stage===7&&ms.every(m=>m.kind==='video'&&m.provider!=='sync');
-  const queueIssue=parallelStoryboard?storyboardAdmissionIssue(p,item.id):parallelVideo?videoAdmissionIssue(p,item.id):'';
+  const parallelConcept=[1,2,3].includes(item.stage)&&ms.every(m=>m.kind==='image');
+  const queueIssue=parallelConcept?conceptImageAdmissionIssue(p,item.id):parallelStoryboard?storyboardAdmissionIssue(p,item.id):parallelVideo?videoAdmissionIssue(p,item.id):'';
   if(queueIssue)throw new Error(queueIssue);
-  if (!parallelStoryboard && !parallelVideo &&
+  if (!parallelConcept && !parallelStoryboard && !parallelVideo &&
     p.jobs.some((j) =>
       ['queued', 'dispatching', 'pending', 'saving'].includes(j.status),
     )
@@ -174,7 +175,7 @@ export const POST = api(async (req, ctx) => {
   prepareFalJobs(jobs, imageAssets);
   prepareGoogleJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
-  if(parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
+  if(parallelConcept||parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
   assertBudget(p, jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));

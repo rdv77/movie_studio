@@ -6,7 +6,7 @@ import { GOOGLE_OMNI, googleEstimate } from '@/lib/google-models';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
-import { runnableJobs, newestProject, storyboardAdmissionIssue, videoAdmissionIssue, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
+import { runnableJobs, newestProject, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
@@ -800,7 +800,7 @@ function Workspace() {
                     В серии осталось {active.length} попыток. Обработка
                     продолжается, пока студия открыта; при возвращении очередь
                     возобновится.
-                    {[5,7].includes(step)&&` До ${PARALLEL_GENERATIONS} генераций одновременно. Можно открыть другой план и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
+                    {[1,2,3,5,7].includes(step)&&` Для изображений и видеопланов — до ${PARALLEL_GENERATIONS} генераций одновременно. Можно открыть другую карточку и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
                   </span>
                   <Button variant="ghost" onClick={() => setPanel('budget')}>
                     Посмотреть
@@ -1864,7 +1864,7 @@ function GenerateDialog({
   const [voice, setVoice] = useState('');
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState('');
-  const queueIssue=item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
+  const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
   const allScriptAudio = scriptSpeech(p);
   const scriptAudio = {...allScriptAudio,sources:item.sourceShot?allScriptAudio.sources:allScriptAudio.sources.filter(s=>s.speechType==='voiceover')};
   const characters = speechCharacters(p);
@@ -2250,7 +2250,7 @@ function GenerateDialog({
         {queueIssue&&<p role="status">{queueIssue}</p>}
         {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
         <p className="muted small">
-          {(item.stage===5&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другой план и запустить его. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
+          {([1,2,3,5].includes(item.stage)&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другую карточку и запустить её. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
         </p>
         <DialogFooter>
