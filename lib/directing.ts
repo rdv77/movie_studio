@@ -38,9 +38,11 @@ export type DirectorRole='critic'|'scenes'|'story'|'camera'|'art'|'dialogue'|'ed
 export const ROLE_NAMES:Record<DirectorRole,string>={critic:'Рецензент',scenes:'Разбиение на сцены',story:'Режиссёр сцены',camera:'Оператор',art:'Художник',dialogue:'Автор реплик',editor:'Редактор фильма',compress:'Редактор промпта'};
 export type DirectorTask={id:string;role:DirectorRole;sceneId?:string;shotId?:string;requires:string[];jobId?:string;result?:unknown;applied?:boolean;error?:string;};
 export type DirectorRun={id:string;created:string;basis:string;model:string;mode:'critic'|'scenes'|'develop'|'role'|'editor'|'compress';tasks:DirectorTask[];stopped?:boolean;sceneIds:string[];published?:boolean;};
-export type EditorIssue={id:string;sceneId?:string;shotId?:string;severity:'note'|'conflict';message:string;resolved?:boolean;resolution?:string;};
-export type EditorPatch={id:string;shotId:string;section:'story'|'cinematography'|'productionDesign'|'dialogue';before:string;after:string;reason:string;applied?:boolean;};
-export type DirectingState={brief:z.infer<typeof creativeBriefSchema>;scenes:Scene[];scenesApproved?:string;editorBasis?:string;runs:DirectorRun[];issues:EditorIssue[];patches:EditorPatch[];critic?:{review:string;alternatives:{title:string;text:string}[]};};
+export const EDITOR_SECTIONS=['story','cinematography','productionDesign','dialogue','stateIn','stateOut','continuityChanges'] as const;
+export const EDITOR_SECTION_NAMES:Record<typeof EDITOR_SECTIONS[number],string>={story:'Сценарий',cinematography:'Оператор',productionDesign:'Художник',dialogue:'Реплики',stateIn:'Состояние в начале',stateOut:'Состояние в конце',continuityChanges:'Изменения одежды и реквизита'};
+export type EditorIssue={id:string;sceneId?:string;shotId?:string;severity:'note'|'conflict';message:string;solution?:string;resolved?:boolean;resolution?:string;};
+export type EditorPatch={id:string;issueId?:string;shotId:string;section:typeof EDITOR_SECTIONS[number];before:string;after:string;reason:string;applied?:boolean;};
+export type DirectingState={brief:z.infer<typeof creativeBriefSchema>;scenes:Scene[];scenesApproved?:string;editorBasis?:string;patchesBasis?:string;runs:DirectorRun[];issues:EditorIssue[];patches:EditorPatch[];critic?:{review:string;alternatives:{title:string;text:string}[]};};
 export const stable=(value:unknown):string=>Array.isArray(value)?'['+value.map(stable).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+stable((value as any)[k])).join(',')+'}':JSON.stringify(value)??'null';
 // Compact, deterministic content signatures. Full snapshots stay in the run's saved prompts.
 export function signature(value:unknown){let a=2166136261,b=5381;for(const c of stable(value)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
@@ -76,7 +78,7 @@ export function taskReady(run:DirectorRun,t:DirectorTask){return !run.stopped&&!
 function context(p:Project,run:DirectorRun,t:DirectorTask){
   const d=ensureDirecting(p),index=d.scenes.findIndex(s=>s.id===t.sceneId);
   const script=p.items.find(i=>i.stage===0),currentScenario=t.role==='critic'?script&&chosen(script)?.text:script?.variants.find(v=>v.id===script.approvedId)?.text;
-  return {film:p.title,brief:d.brief,currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),
+  return {film:p.title,brief:d.brief,currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
     ...(t.sceneId?{previous:d.scenes[index-1],scene:d.scenes[index],next:d.scenes[index+1]}:{scenes:d.scenes}),shotId:t.shotId};
 }
 export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
@@ -88,7 +90,7 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
     camera:'Разработай операторскую работу всех планов текущей сцены: начальная композиция, крупность, ракурс, движение или статика, монтажный переход, взгляды и направления. Учитывай соседние сцены. Не меняй действия или IDs. Верни {"shots":[{"id":"существующий ID","cinematography":"..."}]}.',
     art:'Разработай художественное решение каждого плана: свет, цвет, пространство, костюм и реквизит. Обязательно сохраняй одежду/предметы из continuity сцены. Различай неизменное и меняющееся в действии. Не добавляй новых героев. Верни {"shots":[{"id":"существующий ID","productionDesign":"..."}]}.',
     dialogue:'Разработай реплики с подтекстом и индивидуальным словарём. Не добавляй слова, если достаточно действия. Один говорящий на план; не меняй IDs. Длительность должна оставлять время на паузы. Верни {"shots":[{"id":"существующий ID","dialogue":{"speechType":"voiceover|character|none","speaker":"имя или пусто","text":"только произносимые слова","delivery":"эмоция и паузы"}}]}.',
-    editor:'Проверь весь фильм: сюжет, стиль, монтаж, длительность действий/речи, ясность. Особенно проверь одежду, предметы, руки, положения и изменения между соседними планами внутри сцены. Обязательную неисправность отметь conflict. Верни {"issues":[{"sceneId":"ID","shotId":"ID","severity":"note|conflict","message":"точная проблема"}],"patches":[{"shotId":"ID","section":"story|cinematography|productionDesign|dialogue","after":"новый текст; для dialogue строка JSON объекта speechType,speaker,text,delivery","reason":"почему"}]}. Ничего не переписывай молча. Пустые массивы если ошибок нет.',
+    editor:'Проверь весь фильм: сюжет, стиль, монтаж, длительность действий/речи, ясность. Проверь одежду, предметы, руки, положения и изменения соседних планов. Для КАЖДОГО замечания сразу предложи конкретное решение и готовые патчи всех затронутых разделов/планов. Например, при повторной остановке героя замени story на обнаружение стрелы и опускание на колено, согласуй stateIn/stateOut. Изменения реквизита записывай в continuityChanges. Не меняй утверждённый сюжет. Если решение требует творческого выбора или недостающих данных, объясни это в solution и не выдумывай патч. Каждому issue дай уникальный id, свяжи патчи через issueId. Один окончательный патч на пару shotId+section; объединяй пересекающиеся замечания. Верни {"issues":[{"id":"issue-1","sceneId":"ID","shotId":"ID","severity":"note|conflict","message":"проблема","solution":"как исправить"}],"patches":[{"issueId":"issue-1","shotId":"ID","section":"story|cinematography|productionDesign|dialogue|stateIn|stateOut|continuityChanges","after":"ПОЛНЫЙ новый текст поля; для dialogue строка JSON объекта speechType,speaker,text,delivery","reason":"почему"}]}. Обязательную неисправность отметь conflict. Патчи являются предложениями, применяет их пользователь. Пустые массивы если ошибок нет.',
     compress:'Подготовь промпты для всех планов текущей сцены по утверждённым четырём разделам. Для картинки — только начальное состояние, для видео — движение и монтажный стык. Учти утверждённые стиль, локацию, внешность героев. Сожми по смыслу, не обрывай предложения. Камера и свет должны остаться точными. Каждый промпт до 3000 символов. Имена, костюм, реквизит и правило закрытого рта будут добавлены программой отдельно. Верни {"shots":[{"id":"существующий ID","imagePrompt":"...","videoPrompt":"..."}]}.',
   };
   return base+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
@@ -105,9 +107,12 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
     // Replacing a reviewed scene map is always explicit in the UI.
     d.scenes=data.scenes.map(s=>({...s,id:id(),shots:[]}));d.scenesApproved=undefined;
   }else if(t.role==='editor'){
-    const data=z.object({issues:z.array(z.object({sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text})).max(150),patches:z.array(z.object({shotId:z.string(),section:z.enum(['story','cinematography','productionDesign','dialogue']),after:text,reason:text})).max(150)}).parse(result);
-    d.issues=data.issues.map(v=>({...v,id:id()}));d.patches=data.patches.map(v=>{const shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===v.shotId);if(!shot)throw Error('Редактор указал неизвестный план.');return {...v,id:id(),before:typeof shot[v.section]==='string'?shot[v.section] as string:JSON.stringify(shot[v.section])};});
-    d.editorBasis=editorBasis(p);
+    const data=z.object({issues:z.array(z.object({id:z.string().optional(),sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text,solution:text.optional()})).max(150),patches:z.array(z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(EDITOR_SECTIONS),after:text,reason:text})).max(150)}).parse(result);
+    const links=new Map<string,string>();
+    const issues=data.issues.map(v=>{const key=id();if(v.id){if(links.has(v.id))throw Error('Редактор повторил ID замечания.');links.set(v.id,key);}return {...v,id:key};});
+    const fields=new Set<string>();
+    const patches=data.patches.map(v=>{const shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===v.shotId);if(!shot)throw Error('Редактор указал неизвестный план.');if(v.issueId&&!links.has(v.issueId))throw Error('Правка ссылается на неизвестное замечание.');const key=v.shotId+':'+v.section;if(fields.has(key))throw Error('Редактор предложил несовместимые повторные правки одного поля.');fields.add(key);return {...v,issueId:v.issueId?links.get(v.issueId):undefined,id:id(),before:typeof shot[v.section]==='string'?shot[v.section] as string:JSON.stringify(shot[v.section])};});
+    d.issues=issues;d.patches=patches;d.editorBasis=editorBasis(p);d.patchesBasis=d.editorBasis;
   }else{
     const scene=d.scenes.find(s=>s.id===t.sceneId);if(!scene)throw Error('Сцена удалена.');
     if(t.role==='compress'){
@@ -138,6 +143,22 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
     }
   }
   t.applied=true;t.error=undefined;
+}
+export function applyEditorPatches(p:Project,patchIds:string[]){
+  const copy=structuredClone(p),d=ensureDirecting(copy);
+  if(!patchIds.length||new Set(patchIds).size!==patchIds.length)throw Error('Выберите готовые решения без повторов.');
+  const patches=patchIds.map(id=>{const patch=d.patches.find(v=>v.id===id);if(!patch)throw Error('Предложение не найдено.');return patch;}).filter(v=>!v.applied);
+  if(!patches.length)return;
+  if(d.patchesBasis&&d.patchesBasis!==editorBasis(copy))throw Error('После проверки изменился сценарий или его основа. Запустите редактора ещё раз для актуальных решений.');
+  for(const patch of patches){
+    const shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===patch.shotId);if(!shot)throw Error('План больше не существует.');
+    const before=typeof shot[patch.section]==='string'?shot[patch.section]:JSON.stringify(shot[patch.section]);
+    if(before!==patch.before)throw Error('Раздел уже изменился. Запустите редактора ещё раз.');
+    if(patch.section==='dialogue')shot.dialogue=dialogueSchema.parse(JSON.parse(patch.after));else shot[patch.section]=patch.after;
+    directingShotSchema.parse(shot);validateDialogue(shot);shot.approved=undefined;patch.applied=true;
+  }
+  for(const issue of d.issues){const linked=d.patches.filter(v=>v.issueId===issue.id);if(linked.length&&linked.every(v=>v.applied)){issue.resolved=true;issue.resolution='Применено решение редактора: '+(issue.solution||linked.map(v=>v.reason).join('; '));}}
+  d.editorBasis=undefined;d.patchesBasis=editorBasis(copy);p.directing=d;
 }
 export function directorExport(p:Project){
   const d=ensureDirecting(p);

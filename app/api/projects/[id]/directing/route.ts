@@ -6,6 +6,7 @@ import { runDirectorStep } from '@/lib/director-runner';
 import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, scenesBasis, shotApproval, directorBasis, type DirectorRole } from '@/lib/directing';
 import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
+import {applyEditorPatches} from '@/lib/directing';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -61,13 +62,10 @@ export const POST=api(async(req,ctx)=>{
     }
     case 'resolveIssue':{const issue=d.issues.find(i=>i.id===v.issueId);if(!issue)throw Error('Замечание не найдено.');issue.resolution=z.string().trim().min(1).max(2000).parse(v.resolution);issue.resolved=true;break;}
     case 'applyPatch':{
-      const patch=d.patches.find(s=>s.id===v.patchId),shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===patch?.shotId);
-      if(!patch||!shot)throw Error('Предложение не найдено.');
-      const before=typeof shot[patch.section]==='string'?shot[patch.section]:JSON.stringify(shot[patch.section]);
-      if(before!==patch.before)throw Error('Раздел уже изменился. Сравните предложение с текущим текстом.');
-      if(patch.section==='dialogue')shot.dialogue=dialogueSchema.parse(JSON.parse(patch.after));else shot[patch.section]=patch.after;
-      shot.approved=undefined;patch.applied=true;break;
+      applyEditorPatches(p,[z.string().parse(v.patchId)]);break;
     }
+    case 'applySolution':applyEditorPatches(p,d.patches.filter(patch=>patch.issueId===z.string().parse(v.issueId)).map(patch=>patch.id));break;
+    case 'applyAllSolutions':applyEditorPatches(p,d.patches.filter(patch=>!patch.applied).map(patch=>patch.id));break;
     case 'useAlternative':{
       const a=d.critic?.alternatives[v.index],item=p.items.find(i=>i.stage===0);if(!a||!item)throw Error('Альтернатива не найдена.');
       const candidate=makeVariant(p,item,{kind:'text',text:a.text,title:a.title,model:'Рецензент'});item.variants.push(candidate);item.selectedId=candidate.id;break;
