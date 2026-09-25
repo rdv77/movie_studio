@@ -28,6 +28,7 @@ docker compose -f compose.yaml -f compose.https.yaml up -d --build
 
 - [Установка, HTTPS, обновление, резервные копии и диагностика](docs/DEPLOYMENT.md)
 - [Руководство режиссёра: все этапы и кнопки](docs/USER_GUIDE.md)
+- [Команда агентов, сцены, непрерывность, озвучка после видео и быстрое утверждение](docs/DIRECTOR_TEAM.md)
 - [Архитектура, API, хранение, очередь и расширение моделей](docs/ARCHITECTURE.md)
 - [Перенос данных с другой установки и из Sites](docs/DATA_MIGRATION.md)
 - [Безопасность и эксплуатационные ограничения](docs/SECURITY.md)

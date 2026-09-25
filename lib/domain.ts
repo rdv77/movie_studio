@@ -1,4 +1,7 @@
 import type { SpeechType } from './speech-mode';
+import type { DirectingState } from './directing';
+import { productionPrecedes } from './production-order';
+import { materialBasis } from './material-basis';
 import {precedesStage} from './stage-order';
 export {precedesStage,stagePosition,CREATIVE_STAGE_ORDER} from './stage-order';
 import type { PlanCaption } from './captions';
@@ -27,6 +30,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  reviewBasis?: string;
   animaticBasis?: string;
   planDraft?: boolean;
   speechType?: SpeechType;
@@ -61,7 +65,7 @@ export type Item = {
   removedAt?: string;
   character?: CharacterBrief;
   id: string;
-  sourceShot?: { scriptId: string; title: string; key?:string; scriptVersion?:string };
+  sourceShot?: { scriptId: string; title: string; key?:string; scriptVersion?:string; shotId?:string; sceneId?:string };
   stage: number;
   title: string;
   variants: Variant[];
@@ -69,6 +73,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  reviewBasis?:string;
   newSeriesAllowedAt?: string;
   waitStartedAt?: string;
   waitStoppedAt?: string;
@@ -77,7 +82,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'music' | 'music-ideas';
+  purpose?: 'voice-test' | 'music' | 'music-ideas' | 'directing';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -124,6 +129,9 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  directing?: DirectingState;
+  productionOrder?: 'voice-first' | 'video-first';
+  mediaDurations?: Record<string,number>;
   music?: MusicState;
   storyboardOrder?: string[];
   assemblyCuts?: { itemId: string; variantId: string; trim: number; duration: number | null }[];
@@ -192,7 +200,7 @@ export function dependencies(p: Project, stage: number): string {
   return JSON.stringify([
     p.configVersion,
     ...p.items
-      .filter((i) => precedesStage(i.stage,stage) && participates(p, i))
+      .filter((i) => productionPrecedes(p,i.stage,stage) && participates(p, i))
       .map((i) => [i.id, i.approvedId ?? null]),
     ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
     ...(stage===8&&p.assemblyCuts?.length ? [['assemblyCuts',p.assemblyCuts]] : []),
@@ -201,9 +209,9 @@ export function dependencies(p: Project, stage: number): string {
 }
 export function stageReady(p: Project, stage: number): boolean {
   if(stage===8&&musicIssue(p))return false;
-  if (stage > 6 && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
+  if (productionPrecedes(p,6,stage) && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items
-    .filter((i) => precedesStage(i.stage,stage) && participates(p, i))
+    .filter((i) => productionPrecedes(p,i.stage,stage) && participates(p, i))
     .every((i) => approvalCurrent(p, i));
 }
 // Creative decisions survive upstream edits. Generation requests still use the
@@ -212,10 +220,12 @@ export function independentApproval(stage: number) {
   return stage >= 1 && stage <= 3;
 }
 export function variantCurrent(p: Project, item: Item, variant: Variant) {
+  if(variant.reviewBasis&&[5,6,7].includes(item.stage))return variant.reviewBasis===materialBasis(p,item,variant);
   return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
 }
 export function approvalCurrent(p: Project, item: Item): boolean {
   const variant = item.variants.find(v => v.id === item.approvedId);
+  if(variant?.lipsync&&p.items.find(i=>i.id===variant.lipsync!.audioItemId)?.approvedId!==variant.lipsync.audioVariantId)return false;
   return !item.removedAt && !item.planArchive && !!variant && variantCurrent(p, item, variant);
 }
 export function participates(p: Project, i: Item): boolean {
@@ -252,6 +262,7 @@ export function makeVariant(
 ): Variant {
   const sameFile = data.assetId ? p.items.flatMap(i => i.variants).find(v => v.assetId === data.assetId && v.lipsync) : undefined;
   return {
+    ...(p.directing&&[5,6,7].includes(item.stage)?{reviewBasis:materialBasis(p,item,data)}:{}),
     title: 'Новый вариант',
     text: '',
     kind: 'text',
@@ -391,6 +402,7 @@ export function promptFor(
   instruction: string,
   variant?: Variant,
 ) {
+  if(p.directing)instruction=`Творческое задание фильма (утверждённые настройки): ${JSON.stringify(p.directing.brief)}\n${instruction}`;
   if (item.stage === 4) instruction += '\nРаздели закадровый рассказ и реплики видимых героев. Для каждого плана явно заполни speechType: voiceover (закадровый голос, внутренний монолог), character (герой говорит в кадре) или none (без речи). speaker — имя рассказчика или одного говорящего героя; для none пустая строка. В dialogue записывай только произносимые слова, без имени и ремарок. Один план — один вид речи и один говорящий. Если рассказчик сменяется героем или меняется говорящий, раздели действие на последовательные планы, сохранив общий хронометраж. Для none dialogue пустой. Не задавай артикуляцию персонажей при voiceover или none.';
   const context = p.items
     .filter((i) => precedesStage(i.stage,item.stage) && isApproved(p, i))

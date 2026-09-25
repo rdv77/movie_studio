@@ -54,12 +54,14 @@ export function syncVideoPlans(p: Project) {
 export function videoPrompt(p: Project, item: Item) {
   const script = scriptVideo(p), shot = videoShot(p, item);
   if (!shot) return '';
+  if(shot.videoPrompt)return shot.videoPrompt;
   const index = script.shots.findIndex(s => s.title === shot.title);
   const sections = [
     `Анимационный фильм. Сохрани внешность героев, одежду, палитру и стиль первого кадра. Формат ${p.format}.`,
     `План: ${shot.title}. Заверши действие за ${shot.duration} с; затем удерживай финальную позу до конца клипа.`,
     `Действие: ${shot.description}`,
     `Камера: ${shot.camera}`,
+    ...(shot.productionDesign?[`Художественное решение: ${shot.productionDesign}`]:[]),
     `Непрерывность и монтаж: ${shot.continuity}`,
     `Предыдущий план: ${script.shots[index - 1]?.title ?? 'начало фильма'}. Следующий: ${script.shots[index + 1]?.title ?? 'конец фильма'}.`,
   ];
@@ -67,6 +69,8 @@ export function videoPrompt(p: Project, item: Item) {
   return sections.join('\n\n');
 }
 export function videoGenerationPrompt(p: Project, item: Item, prompt: string, characterIds?:string[]) {
+  const shot=videoShot(p,item);
+  if(shot?.videoPrompt&&prompt.trim()===shot.videoPrompt.trim())return withSpeechDirection(prompt,planSpeech(p,item));
   return withSpeechDirection(withCharacterIdentity(p,prompt,characterIds),planSpeech(p,item));
 }
 export function videoFrame(p: Project, item: Item) {

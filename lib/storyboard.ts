@@ -65,6 +65,7 @@ export function planFields(p: Project, item: Item, value?: Variant) {
 export function storyboardPrompt(p: Project, item: Item) {
   const shot = videoShot(p, item);
   if (!shot) return '';
+  if(shot.imagePrompt)return shot.imagePrompt;
   const v = chosen(item), fields = planFields(p, item, v);
   // A saved image brief may already be our complete task. Refresh only its
   // known metadata footer; keep the action and any appended director notes.

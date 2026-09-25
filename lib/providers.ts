@@ -1,3 +1,4 @@
+import {videoPromptLimit} from './model-capabilities';
 import { generateFal, pollFal } from './fal-provider';
 import { generateGoogle, pollGoogle } from './google-provider';
 import { call, json, ProviderError } from './provider-http';
@@ -44,8 +45,8 @@ export async function generate(
   format: string,
   characterRefs: string[] = [],
 ): Promise<Result> {
-  if (j.kind === 'video' && j.prompt.length > VIDEO_PROMPT_LIMIT)
-    throw new ProviderError(`Видеопромпт длиннее ${VIDEO_PROMPT_LIMIT} символов. Сократите его и запустите новую серию. Запрос не отправлен.`, true, true);
+  if (j.kind === 'video' && j.prompt.length > videoPromptLimit(j.model))
+    throw new ProviderError(`Видеопромпт длиннее ${videoPromptLimit(j.model)} символов. Сократите его и запустите новую серию. Запрос не отправлен.`, true, true);
   const m = model(j.model),
     h = headers(m.provider, key);
   if (m.provider === 'sync') throw new ProviderError('Используйте отдельное окно синхронизации губ.', true, true);

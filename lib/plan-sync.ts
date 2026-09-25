@@ -1,6 +1,6 @@
 import { chosen, id, type Item, type Project, type Variant } from './domain';
 
-export type ScriptPlan = { title:string; description:string; duration:number; camera:string; dialogue:string; continuity:string; speechType?:'voiceover'|'character'|'none'; speaker?:string };
+export type ScriptPlan = { id?:string;sceneId?:string;productionDesign?:string;cast?:string[]; title:string; description:string; duration:number; camera:string; dialogue:string; continuity:string; speechType?:'voiceover'|'character'|'none'; speaker?:string };
 export type PlanScript = { source:Item; variant:Variant; shots:ScriptPlan[] };
 
 export function planKey(title:string) {
@@ -33,24 +33,24 @@ export function reconcilePlanStage(p:Project,stage:number,script:PlanScript,crea
     const key=keys[index],unique=keys.filter(k=>k===key).length===1;
     const label=labels[index],uniqueLabel=!!label&&labels.filter(l=>l===label).length===1&&new Set(existing.filter(i=>planLabel(i.sourceShot?.title??i.title)===label).map(i=>i.sourceShot?.key??planKey(i.sourceShot?.title??i.title))).size<=1;
     const uniqueDescription=script.shots.filter(s=>s.description.trim()===shot.description.trim()).length===1;
-    const candidates=existing.filter(i=>!used.has(i.id)&&(
+    const candidates=existing.filter(i=>!used.has(i.id)&&(shot.id&&i.sourceShot?.shotId?shot.id===i.sourceShot.shotId:(
       (i.sourceShot?.title??i.title)===shot.title ||
       (uniqueLabel&&planLabel(i.sourceShot?.title??i.title)===label) ||
       (unique&&uniqueDescription&&(i.sourceShot?.key??planKey(i.sourceShot?.title??i.title))===key&&previousDescription(p,i,shot.description)) ||
       (index===0&&!i.sourceShot&&(stage===5&&i.title==='Раскадровка'||stage===7&&!i.variants.length&&i.title==='Видеопланы'))
-    ));
+    )));
     const score=(i:Item)=>Number(!!chosen(i)?.assetId)*32+Number(i.variants.some(v=>v.id===i.approvedId&&v.assetId))*16+Number(i.variants.some(v=>v.assetId))*8+Number(!i.planArchive)*4+Number(i.sourceShot?.scriptId===script.source.id);
     candidates.sort((a,b)=>score(b)-score(a));
     let item=candidates[0];
     if(!item&&create){
-      if(p.items.length>=120)throw new Error('В проекте максимум 120 материалов.');
+      if(p.items.length>=500)throw new Error('В проекте максимум 500 материалов.');
       item={id:id(),stage,title:shot.title,variants:[]};p.items.push(item);changed=true;reorder=true;
     }
     if(!item)continue;
     used.add(item.id);
     if(item.sourceShot?.scriptVersion!==script.variant.id)reorder=true;
     if(!item.sourceShot||item.title===item.sourceShot.title){if(item.title!==shot.title){item.title=shot.title;changed=true;}}
-    update(item,'sourceShot',{scriptId:script.source.id,title:shot.title,key:unique?key:'title:'+shot.title,scriptVersion:script.variant.id});
+    update(item,'sourceShot',{scriptId:script.source.id,title:shot.title,key:unique?key:'title:'+shot.title,scriptVersion:script.variant.id,...(shot.id?{shotId:shot.id,sceneId:shot.sceneId}:{})});
     const excludedAt=item.excludedAt??p.items.find(f=>f.stage===5&&f.excludedAt&&f.sourceShot?.scriptId===script.source.id&&f.sourceShot.title===shot.title)?.excludedAt;
     if(excludedAt)update(item,'excludedAt',excludedAt);
     update(item,'planArchive',excludedAt?{reason:'excluded'}:undefined);

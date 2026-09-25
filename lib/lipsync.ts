@@ -1,4 +1,4 @@
-import { chosen, dependencies, getItem, isApproved, stageReady, type Project, type Job, type Variant, type Item } from './domain';
+import { chosen, dependencies, getItem, isApproved, stageReady,variantCurrent, type Project, type Job, type Variant, type Item } from './domain';
 import { videoShot } from './video';
 import { speechInfo } from './speech-mode';
 import { spokenText } from './spoken-text';
@@ -21,6 +21,8 @@ export function originalLipsyncVideo(item: Item) {
 export const SYNC_FILE_LIMIT = 19 * 1024 * 1024;
 export const SYNC_PAIR_LIMIT = 25 * 1024 * 1024;
 export function hasCurrentLipsyncVisuals(p: Project, video: Variant) {
+  const item=p.items.find(i=>i.stage===7&&i.variants.some(v=>v.id===video.id));
+  if(video.reviewBasis&&item)return variantCurrent(p,item,video);
   if (video.deps === dependencies(p,7)) return true;
   // Voice replacement is an input to this operation, not a reason to regenerate
   // the source footage. Keep the scenario, character and storyboard checks.

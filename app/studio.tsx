@@ -1,4 +1,7 @@
 'use client';
+import { DirectingEditor } from './directing-editor';
+import { ReviewCenter } from './review-center';
+import { selectedVideoPromptLimit,videoPromptLimit,availableForDirecting } from '@/lib/model-capabilities';
 import { CaptionEditor } from './caption-editor';
 import { VideoTiming } from './video-timing';
 import { videoDurationIssue, videoPlanIssues } from '@/lib/video-readiness';
@@ -134,7 +137,7 @@ import { audioDuration, videoDuration } from '@/lib/audio-duration';
 import { AssemblyEditor } from './assembly-editor';
 import { planFields, storyboardPrompt, storyboardBatchPlans } from '@/lib/storyboard';
 import { animaticBasis, animaticIssue, animaticApproved } from '@/lib/animatic';
-import { WORKFLOW, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
+import { WORKFLOW, projectWorkflow, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
 import {MusicEditor} from './music-editor';
 import {MUSIC_MODELS,musicSettings} from '@/lib/music';
 import {waitLimitMs,unresolvedJobBlocks} from '@/lib/job-wait';
@@ -326,17 +329,17 @@ function Workspace() {
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
   const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
-  const showCards=step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
+  const showCards=step!==12&&step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
   const staleStoryboard=!!(p&&item&&step===5&&selected&&!variantCurrent(p,item,selected));
   const storyboardReason=p&&item&&selected&&staleStoryboard?storyboardReapprovalReason(p,item.id,selected.id):'';
-  const staleVideo = !!(p && step === 7 && selected?.kind === 'video' && selected.assetId && selected.deps !== dependencies(p, 7));
+  const staleVideo = !!(p && step === 7 && selected?.kind === 'video' && selected.assetId && !variantCurrent(p,item!,selected));
   const reapprovalReason = p && item && selected && staleVideo ? videoReapprovalReason(p, item.id, selected.id) : '';
   const staleStyle=!!(p&&item&&step===2&&selected&&!variantCurrent(p,item,selected));
   const styleReason=p&&item&&selected&&staleStyle?styleReapprovalReason(p,item.id,selected.id):'';
-  const staleSpeech=!!(p&&step===6&&selected?.kind==='audio'&&selected.assetId&&selected.deps!==dependencies(p,6));
+  const staleSpeech=!!(p&&step===6&&selected?.kind==='audio'&&selected.assetId&&!variantCurrent(p,item!,selected));
   const speechReason=p&&item&&selected&&staleSpeech?speechReapprovalReason(p,item.id,selected.id):'';
   const videoScript = p ? scriptVideo(p) : undefined;
   const currentShot = p && item && [5, 7].includes(step) ? videoShot(p, item) : undefined;
@@ -409,9 +412,11 @@ function Workspace() {
     const attempts=jobAttempts.current.get(projectId)??new Map<string,number>();
     jobFlights.current.set(projectId,flights);jobAttempts.current.set(projectId,attempts);
     const checkingWait=new Set<string>();
+    let directorFlight=false;
     const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
       if(!current)return;
+      if(!directorFlight&&current.directing?.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error))){directorFlight=true;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);}).finally(()=>{directorFlight=false;});}
       for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
         checkingWait.add(job.id);
         void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait'})
@@ -461,10 +466,10 @@ function Workspace() {
       name: 'open_film_stage',
       title: 'Открыть этап фильма',
       description:
-        `Открыть этап 1–${WORKFLOW.length} в режиссерской студии; ничего не утверждает и не генерирует.`,
+        `Открыть этап 1–${projectWorkflow(p).length} в режиссерской студии; ничего не утверждает и не генерирует.`,
       inputSchema: {
         type: 'object',
-        properties: { stage: { type: 'integer', minimum: 1, maximum: WORKFLOW.length } },
+        properties: { stage: { type: 'integer', minimum: 1, maximum: projectWorkflow(p).length } },
         required: ['stage'],
         additionalProperties: false,
       },
@@ -473,16 +478,16 @@ function Workspace() {
         if (
           !Number.isInteger(input?.stage) ||
           input.stage < 1 ||
-          input.stage > WORKFLOW.length
+          input.stage > projectWorkflow(p).length
         )
-          throw new Error(`Этап должен быть от 1 до ${WORKFLOW.length}.`);
-        setStep(WORKFLOW[input.stage-1].id);
+          throw new Error(`Этап должен быть от 1 до ${projectWorkflow(p).length}.`);
+        setStep(projectWorkflow(p)[input.stage-1].id);
         setPanel('stage');
-        return { stage: input.stage, title: WORKFLOW[input.stage - 1].title };
+        return { stage: input.stage, title: projectWorkflow(p)[input.stage - 1].title };
       },
     });
     return () => life.abort();
-  }, [projectId, qc]);
+  }, [projectId, qc, p?.productionOrder]);
   async function upload(file: File, progress?: (text: string) => void, signal?: AbortSignal) {
     if (!projectId || activeProject.current !== projectId) throw new Error('Откройте проект перед загрузкой.');
     const epoch = projectEpoch.current;
@@ -565,7 +570,6 @@ function Workspace() {
             </span>
           </div>
           <div className="workspace-label">РЕЖИССЕРСКАЯ СТУДИЯ</div>
-          <form action="/api/auth/logout" method="post"><Button type="submit" variant="ghost" size="sm">Выйти</Button></form>
           <Button
             variant="outline"
             className="project-button"
@@ -580,7 +584,7 @@ function Workspace() {
           <SidebarGroup>
             <div className="nav-heading">ПРОИЗВОДСТВО</div>
             <SidebarMenu>
-              {WORKFLOW.map(({title:label,id:i},index) => {
+              {projectWorkflow(p).map(({title:label,id:i},index) => {
                 const done = p && stageComplete(p,i);
                 return (
                   <SidebarMenuItem key={label}>
@@ -739,7 +743,7 @@ function Workspace() {
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">
-                    ЭТАП {String(WORKFLOW.findIndex(s=>s.id===step) + 1).padStart(2, '0')} / {WORKFLOW.length}
+                    ЭТАП {String(projectWorkflow(p).findIndex(s=>s.id===step) + 1).padStart(2, '0')} / {projectWorkflow(p).length}
                   </div>
                   <h1>{stageTitle(step)}</h1>
                   <p className="muted">
@@ -775,6 +779,8 @@ function Workspace() {
                   )}
                 </div>}
               </div>
+              {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
+              {[5,6,7,8,9].includes(step)&&<ReviewCenter p={p} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>
                 {voiceView==='casting'&&<VoiceComparisonPanel p={p} connections={cq.data} busy={busy} perform={perform} action={action} replace={replace} onContinue={()=>setVoiceView('plans')}/>}
@@ -1328,7 +1334,7 @@ function Workspace() {
                             variant="ghost"
                             className="full-width"
                             onClick={() => {
-                              setStep(nextStage(step)??8);
+                              setStep(nextStage(step,p)??8);
                               setItemId('');
                             }}
                           >
@@ -1925,7 +1931,7 @@ function GenerateDialog({
     }
   }, [open, p.id, item.id]);
   const source = chosen(item);
-  const choices = MODELS.filter((m) => m.kind === kind);
+  const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter((m) => m.kind === kind);
   const selected = choices.filter((m) => models.includes(m.id));
   const selectableRefs=kind==='image';
   const excludedRefs=hiddenReferences(p);
@@ -2091,7 +2097,7 @@ function GenerateDialog({
               ? 'Режиссерская задача (сохраняется в истории)'
               : kind === 'video' ? 'Действие, камера и монтаж' : 'Задача и правки для моделей'
           }
-          hint={kind === 'text' ? 'Напишите, что улучшить или изменить. Исходный текст сюда копировать не нужно.' : kind === 'video' ? `${prompt.trim().length} / ${VIDEO_PROMPT_LIMIT} символов. Действие, камера и монтаж взяты из сценария. Можно исправить перед отправкой.` : undefined}
+          hint={kind === 'text' ? 'Напишите, что улучшить или изменить. Исходный текст сюда копировать не нужно.' : kind === 'video' ? `${prompt.trim().length} / ${selectedVideoPromptLimit(models)} символов. Действие, камера и монтаж взяты из сценария. Можно исправить перед отправкой.` : undefined}
         >
           <Textarea
             aria-label={kind === 'video' ? 'Видеопромпт' : 'Задача и правки для моделей'}
@@ -2237,9 +2243,9 @@ function GenerateDialog({
             {selected.some(m=>m.id===GOOGLE_OMNI)&&<p>Gemini Omni: длительность задаётся просьбой в промпте, результат может длиться 3–10 секунд. После генерации проверьте хронометраж. Ориентир $1.05 за попытку включает 10 секунд 720p и запас на вход; фактические расходы зависят от токенов.</p>}
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
-            <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {VIDEO_PROMPT_LIMIT} символов.</p>
+            <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {selectedVideoPromptLimit(models)} символов.</p>
             <details><summary>Полный промпт для модели</summary><p className="whitespace-pre-wrap">{effectivePrompt}</p></details>
-            {effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: общий видеопромпт с героями должен быть до {VIDEO_PROMPT_LIMIT} символов. Запрос пока не запускается.</p>}
+            {effectivePrompt.trim().length > selectedVideoPromptLimit(models) && <p role="alert">Сократите задачу: общий видеопромпт с героями должен быть до {selectedVideoPromptLimit(models)} символов. Запрос пока не запускается.</p>}
             {shot&&selected.length>0&&<VideoTiming p={p} item={item} planSeconds={shot.duration} videoSeconds={Math.min(...selected.map(m=>generationSeconds(m.id)))}/>}
             {!shot && <p role="alert">Для этой карточки не найден план в утверждённом сценарии. Подтяните планы и выберите нужную карточку.</p>}
           </div>
@@ -2273,7 +2279,7 @@ function GenerateDialog({
               prompt.trim().length>20000 || !!imagePromptError ||
               count < 1 ||
               count > 4 ||
-              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > VIDEO_PROMPT_LIMIT || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
+              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > selectedVideoPromptLimit(models) || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
               (kind === 'audio' && (!voice.trim() || !spoken || speech.length > 9500 || models.length > 1))
             }
             onClick={() =>
@@ -2334,7 +2340,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
   const blockReasons=[...(videoCharacterRefs(snapshot,m.provider,characterIds).length>7?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
-    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',VIDEO_PROMPT_LIMIT,[m.id]))];
+    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',videoPromptLimit(m.id),[m.id]))];
   const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
   return (
@@ -2388,11 +2394,11 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
               </div>
               <PlanSpeechNote p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!}/>
               <VideoTiming p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} planSeconds={r.duration} videoSeconds={generationSeconds(m.id)}/>
-              <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length} / {VIDEO_PROMPT_LIMIT}</summary>
+              <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length} / {videoPromptLimit(m.id)}</summary>
                 <Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })} />
                 <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds)}</p>
               </details>
-              {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > VIDEO_PROMPT_LIMIT && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {VIDEO_PROMPT_LIMIT} символов.</p>}
+              {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > videoPromptLimit(m.id) && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {videoPromptLimit(m.id)} символов.</p>}
               {videoDurationIssue(r.title,r.duration,[m.id])&&<p role="alert">{videoDurationIssue(r.title,r.duration,[m.id])}</p>}
             </>}
           </section>
@@ -2649,7 +2655,7 @@ function AnimaticPanel({p,busy,perform,action,onContinue}:any) {
 }
 function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any) {
   const [snapshot] = useState<Project>(p);
-  const choices = MODELS.filter(m => m.kind === 'audio' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
+  const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter(m => m.kind === 'audio' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
   const previous = snapshot.items.filter(i => i.stage === 6&&!i.planArchive).flatMap(i => i.variants).filter(v => v.kind === 'audio' && v.voiceId).at(-1);
   const preferred=choices.some(m=>m.id===p.preferredVoice?.model)?p.preferredVoice:undefined;
   const [modelId, setModelId] = useState(preferred?.model ?? choices.find(m => m.id === previous?.model)?.id ?? choices.find(m => m.id === 'speech-2.8-hd')?.id ?? choices[0]?.id ?? '');
@@ -2657,8 +2663,8 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
   const [estimate, setEstimate] = useState('');
   const [batch] = useState(() => crypto.randomUUID());
   const [parsed] = useState(() => { try { return { rows: speechPlans(snapshot), error: '' }; } catch(e) { return { rows: [], error: (e as Error).message }; } });
-  const [rows, setRows] = useState(() => parsed.rows.map(r => ({ ...r, include: !r.hasAudio && !r.blocked })));
-  const included = rows.filter(r => r.include && !r.blocked);
+  const [rows, setRows] = useState(() => parsed.rows.map(r => ({ ...r, include: !r.hasAudio && !r.blocked && !r.timingIssue })));
+  const included = rows.filter(r => r.include && !r.blocked && !r.timingIssue);
   let perAttempt: string | null = null, error = parsed.error;
   try { if (estimate.trim()) perAttempt = ticks(estimate.trim()); } catch { error = 'Укажите оценку в USD, например 0.02.'; }
   const total = perAttempt === null ? null : (BigInt(perAttempt) * BigInt(included.length)).toString();
@@ -2674,12 +2680,12 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
       onChange={value => { setModelId(value); setVoice(''); }} /></Field>
     {!choices.length && <p role="alert">Добавьте ключ модели озвучки в «Подключениях».</p>}
     <VoiceSelector provider={choices.find(m => m.id === modelId)?.provider} value={voice} onChange={setVoice} />
-    <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked})))}>Выбрать все планы</Button>
-      <Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked && !r.hasAudio})))}>Только без озвучки</Button></div>
+    <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked && !r.timingIssue})))}>Выбрать все планы</Button>
+      <Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked && !r.timingIssue && !r.hasAudio})))}>Только без озвучки</Button></div>
     {rows.map((r,index) => <section className="editor-surface p-4" key={r.frameId}>
-      <label className="row"><Checkbox disabled={r.blocked} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.frameId === r.frameId ? {...x,include:!!v} : x))} />
+      <label className="row"><Checkbox disabled={r.blocked||!!r.timingIssue} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.frameId === r.frameId ? {...x,include:!!v} : x))} />
         <strong>{r.title} · {r.duration} сек · начало {r.offset} сек</strong></label>
-      <small>{r.blocked ? 'Есть незавершённая попытка или неизвестный исход; повтор заблокирован.' : r.hasAudio ? 'Запись уже есть. При включении создастся дополнительный вариант.' : 'Будет создана отдельная запись.'}</small>
+      <small>{r.timingIssue || (r.blocked ? 'Есть незавершённая попытка или неизвестный исход; повтор заблокирован.' : r.hasAudio ? 'Запись уже есть. При включении создастся дополнительный вариант.' : 'Будет создана отдельная запись.')}</small>
       {r.include && <><SpeechModeFields value={r} allowNone={false} onChange={info=>setRows(rs=>rs.map(x=>x.frameId===r.frameId?{...x,...info}:x))}/>
         <Field label={r.speechType==='character'?'Реплика героя в кадре':'Закадровый текст'}><Textarea aria-label={`Реплика плана ${index+1}`} className="mt-3" value={r.dialogue} onChange={e => setRows(rs => rs.map(x => x.frameId === r.frameId ? {...x,dialogue:e.target.value} : x))} /></Field></>}
     </section>)}
@@ -2695,7 +2701,7 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
 }
 function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, submit, referenceAction }: any) {
   const [snapshot, setSnapshot] = useState<Project>(p);
-  const choices = MODELS.filter(m => m.kind === 'image' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
+  const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter(m => m.kind === 'image' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
   const [modelId, setModelId] = useState(choices[0]?.id ?? '');
   const m = choices.find(x => x.id === modelId);
   const [batch] = useState(() => crypto.randomUUID());

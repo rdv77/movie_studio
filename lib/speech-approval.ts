@@ -1,3 +1,4 @@
+import { materialBasis } from './material-basis';
 import { approve, chosen, dependencies, getItem, participates, stageReady, type Project } from './domain';
 import { assertSpeech, speechInfo } from './speech-mode';
 import { spokenText } from './spoken-text';
@@ -66,6 +67,7 @@ export function reapproveSpeech(p:Project,itemId:string,variantId:string) {
   // The director reviews the existing recording. Do not rewrite its words,
   // speaker, timings, file or generation receipt to match a newer script.
   chosen(item)!.deps=dependencies(copy,6);
+  if(chosen(item)!.reviewBasis)chosen(item)!.reviewBasis=materialBasis(copy,item,chosen(item));
   approve(copy,itemId);
   Object.assign(getItem(p,itemId),item);
 }

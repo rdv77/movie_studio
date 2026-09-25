@@ -1,6 +1,7 @@
 import { assertBudget, dependencies, getItem, stageReady, type Job, type Project } from './domain';
 import { selectedReferences } from './reference-selection';
 import {unresolvedJobBlocks} from './job-wait';
+import {materialBasis} from './material-basis';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
@@ -35,7 +36,7 @@ export function storyboardAdmissionIssue(p:Project,itemId:string) {
 // runner. Image/video provider tasks occupy a slot until saved or failed, even
 // between HTTP polls. Enforce the same bound atomically when dispatching.
 export function runnableJobs(p:Project,inputFlights:ReadonlySet<string>,attempted:ReadonlyMap<string,number>) {
-  const active=p.jobs.filter(activeGeneration);
+  const active=p.jobs.filter(j=>j.purpose!=='directing'&&activeGeneration(j));
   const inFlight=new Set([...inputFlights].filter(id=>active.some(j=>j.id===id)));
   const parallel=active.length>0&&active.every(j=>parallelJob(p,j));
   if(!parallel) return inFlight.size ? [] : active.filter(j=>j.status!=='queued').slice(0,1).concat(active.filter(j=>j.status==='queued')).slice(0,1);
@@ -62,6 +63,7 @@ export async function enqueueStoryboard(snapshot:Project,jobs:Job[],load:()=>Pro
   return enqueuePlanJobs(snapshot,jobs,load,save);
 }
 export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promise<Project>,save:(p:Project,revision:number)=>Promise<Project>,sourceItemId?:string) {
+  if(snapshot.directing)for(const job of jobs)job.reviewBasis=materialBasis(snapshot,getItem(snapshot,job.itemId),job);
   const stage=getItem(snapshot,jobs[0].itemId).stage,batchId=jobs[0].batchId;
   if(![1,2,3,5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии материалов.');
   const items=[...new Set(jobs.map(j=>j.itemId))];

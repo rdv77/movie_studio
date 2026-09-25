@@ -145,6 +145,7 @@ try {
  // project import, which brings the approved variant and its exact references.
  await okJson(await patch(projectA.id,'addVariant',{title:'Основа',text:'Утверждённый сценарий',kind:'text',refs:[]},projectA.items[0].id));
  await okJson(await patch(projectA.id,'approve',undefined,projectA.items[0].id));
+ for(const stage of [2,3]){await okJson(await patch(projectA.id,'addVariant',{title:'Основа',text:'Утверждённый стиль и локации',kind:'text',refs:[]},projectA.items[stage].id));await okJson(await patch(projectA.id,'approve',undefined,projectA.items[stage].id));}
  await okJson(await patch(projectA.id,'saveCharacter',{profile:{name:'Герой A',description:'Утверждённый персонаж',refs:[photosA[1].id]},imageId:photosA[0].id},projectA.items[1].id));
  await okJson(await patch(projectA.id,'approve',undefined,projectA.items[1].id));
  await okJson(await patch(projectB.id,'importLibrary',{projectId:projectA.id,itemId:projectA.items[1].id}));

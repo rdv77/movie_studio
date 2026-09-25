@@ -1,3 +1,4 @@
+import {materialBasis} from '@/lib/material-basis';
 import { prepareFalJobs } from '@/lib/fal-models';
 import { assertSelectedReferences } from '@/lib/reference-selection';
 import { prepareZenJobs } from '@/lib/zencreator-models';
@@ -15,7 +16,7 @@ const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(8), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
-  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000) })).min(1).max(20),
+  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000) })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
@@ -60,6 +61,7 @@ export const POST = api(async (req, ctx) => {
   prepareFalJobs(jobs, imageAssets);
   prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
+  if(p.directing)for(const job of jobs)job.reviewBasis=materialBasis(p,p.items.find(i=>i.id===job.itemId)!,job);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
 });

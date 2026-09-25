@@ -15,16 +15,20 @@ export function speechPlans(p: Project) {
     if (!shot || (frame.sourceShot && frame.sourceShot.scriptId !== script.source!.id))
       throw new Error('Обновите карточки раскадровки из текущего сценария.');
     const image = frame.variants.find(v => v.id === frame.approvedId);
-    const duration = image?.duration ?? shot.duration;
+    const video=p.items.find(i=>i.stage===7&&!i.planArchive&&i.sourceShot?.scriptId===frame.sourceShot?.scriptId&&i.sourceShot?.title===title);
+    const clip=video&&chosen(video),measured=clip?.assetId?p.mediaDurations?.[clip.assetId]:undefined;
+    const cut=video&&p.assemblyCuts?.find(c=>c.itemId===video.id&&c.variantId===clip?.id);
+    const duration = p.productionOrder==='video-first'&&measured&&clip ? cut?.duration??Math.max(.2,measured-(cut?.trim??clip.trim)) : image?.duration ?? shot.duration;
     const start = offset; offset += duration;
     const item = p.items.find(i => i.stage === 6 && !i.planArchive && i.sourceShot?.scriptId === script.source!.id && i.sourceShot.title === title);
     const blocked = !!item && p.jobs.some(j => j.itemId === item.id && ['queued','dispatching','pending','saving','unknown'].includes(j.status));
     const current=item ? chosen(item) : undefined;
-    const edited=current?.kind==='audio'&&!!current.dialogue.trim()?current:undefined;
+    const edited=current?.kind==='audio'&&!!current.dialogue.trim()&&(!p.directing||current.shotSource===script.variant!.id)?current:undefined;
     const info=edited?speechInfo(edited):planSpeech(p,frame,image);
-    const text=edited?edited.dialogue:image?.speechType ? image.dialogue : shot.dialogue;
-    return { frameId: frame.id, title, ...info, dialogue: info.speechType==='none'?'':spokenText(text, [...speechCharacters(p),info.speaker]), duration,
-      offset: start, scriptId: script.source!.id, scriptVersion: script.variant!.id, item,
+    const text=edited?edited.dialogue:image?.speechType&&(!p.directing||image.shotSource===script.variant!.id) ? image.dialogue : shot.dialogue;
+    const timingIssue=p.productionOrder==='video-first'?(!clip?.assetId?'Сначала выберите готовое видео этого плана.':!measured?'Проверьте фактическую длительность видео в разделе «Проверка и быстрое утверждение».':''):'';
+    return { frameId: frame.id, title, ...info, dialogue: info.speechType==='none'?'':spokenText(text, [...speechCharacters(p),info.speaker]), duration,timingIssue,
+      offset: start, scriptId: script.source!.id, scriptVersion: script.variant!.id, shotId:shot.id,sceneId:shot.sceneId,item,
       hasAudio: !!item?.variants.some(v => v.kind === 'audio' && v.assetId), blocked };
   }).filter(row => row.dialogue);
 }

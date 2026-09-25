@@ -1,3 +1,4 @@
+import { materialBasis } from './material-basis';
 import { approve, chosen, dependencies, getItem, stageReady, type Project } from './domain';
 
 export function videoReapprovalReason(p: Project, itemId: string, variantId: string) {
@@ -22,6 +23,7 @@ export function reapproveVideo(p: Project, itemId: string, variantId: string) {
   const copy = structuredClone(p), item = getItem(copy, itemId), source = chosen(item)!;
   // Explicit review updates the existing card; generation records retain their original basis.
   source.deps = dependencies(copy, 7);
+  if(source.reviewBasis)source.reviewBasis=materialBasis(copy,item,source);
   approve(copy, itemId);
   Object.assign(getItem(p, itemId), item);
 }

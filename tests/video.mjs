@@ -161,7 +161,7 @@ for (const changes of [
   { plans: [bulkPayload.plans[0], bulkPayload.plans[0]] },
   { plans: [{ ...bulkPayload.plans[0], itemId: source.id }] },
   { plans: [{ ...bulkPayload.plans[0], itemId: videoItems[3].id }] },
-  { plans: [{ ...bulkPayload.plans[0], prompt: 'x'.repeat(2001) }] },
+  { plans: [{ ...bulkPayload.plans[0], prompt: 'x'.repeat(5001) }] },
   { plans: [{ ...bulkPayload.plans[0], ref: '' }] },
 ]) {
   globalThis.videoProject = structuredClone(bulk);

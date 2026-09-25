@@ -39,6 +39,7 @@ export const POST = api(async (req, ctx) => {
   let p = await loadProject(user, id);
   let j = p.jobs.find((j) => j.id === jobId);
   if (!j) throw new Error('Попытка не найдена.');
+  if(j.purpose==='directing')return Response.json(p);
   const recoveryAction=((await req.json().catch(()=>null)) as {action?:unknown}|null)?.action;
   if(j.waitStoppedAt&&j.status==='unknown'&&recoveryAction==='resume-wait'){
     p=await mutate(user,id,p=>resumeJobWait(p.jobs.find(x=>x.id===jobId)!));
@@ -218,6 +219,7 @@ export const POST = api(async (req, ctx) => {
       if (!item.variants.some((v) => v.jobId === jobId)) {
         const v = makeVariant(p, item, {
           id: jobId,
+          reviewBasis:job.reviewBasis,
           title: model(job.model).name + (job.lipsync?.inputType === 'image' ? ' · из кадра' : '') + ' · ' + (item.variants.length + 1),
           text: result.text ?? job.brief,
           kind: job.kind,

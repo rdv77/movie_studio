@@ -49,7 +49,7 @@ export function miniMaxImageRequest(p:Project,item:Item,instruction:string,refs:
 export function compactImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,limit=MINIMAX_IMAGE_PROMPT_LIMIT) {
   const fields=planFields(p,item,chosen(item)),shot=videoShot(p,item);
   const speech=fields.speechType==='character'
-    ? `Говорит ${fields.speaker}; лицо этого героя видно, остальные молчат.`
+    ? `Говорит ${fields.speaker}; лицо видно; у всех остальных рты закрыты весь план, без артикуляции.`
     : 'У всех героев закрыты рты; речь только за кадром или отсутствует.';
   const character=item.stage===1?(item.character??chosen(item)?.character):undefined;
   const fixed=character
@@ -71,7 +71,8 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
       if(at>=0)add('Дополнение режиссёра',defaultTask.slice(at+ending.length),3);
     }
     add('Камера',fields.camera,1);
-    add('Стыковка',fields.continuity,1);
+    add('Стыковка',fields.continuity,3);
+    if(shot?.productionDesign)add('Художественное решение',shot.productionDesign,3);
   }
   if(task!==defaultTask) add('Задача режиссёра',task,5);
   if(character) {

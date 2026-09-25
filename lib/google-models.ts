@@ -20,7 +20,7 @@ export function prepareGoogleJobs(jobs:Job[],assets:{mime:string;size:number}[]=
     if(!isGoogleVideo(j.model))continue;
     if(j.kind!=='video'||j.refs.length!==1||!Number.isFinite(j.duration)||j.duration<=0||j.duration>googleSeconds(j.model)!)
       throw new Error(`Google: выберите один первый кадр и план до ${googleSeconds(j.model)} сек. Запрос не отправлен.`);
-    if(!j.prompt.trim()||j.prompt.length>2000)throw new Error('Google: видеопромпт должен содержать от 1 до 2000 символов. Запрос не отправлен.');
+    if(!j.prompt.trim()||j.prompt.length>5000)throw new Error('Google: видеопромпт должен содержать от 1 до 5000 символов (бюджет студии). Запрос не отправлен.');
     if(assets.some(a=>!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024))
       throw new Error('Google: первый кадр PNG, JPEG или WebP до 10 МБ. Запрос не отправлен.');
     // A client may raise the estimate, but cannot bypass the known reservation.

@@ -1,3 +1,4 @@
+import {videoPromptLimit} from '@/lib/model-capabilities';
 import { prepareZenJobs } from '@/lib/zencreator-models';
 import { prepareGoogleJobs } from '@/lib/google-models';
 import { enqueuePlanJobs, videoAdmissionIssue } from '@/lib/generation-queue';
@@ -18,8 +19,8 @@ const input = z.object({
   estimate: z.string().regex(/^\d+$/).nullable(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), ref: z.string().uuid(),
-    prompt: z.string().trim().min(1).max(VIDEO_PROMPT_LIMIT),
-  })).min(1).max(20),
+    prompt: z.string().trim().min(1).max(32000),
+  })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
@@ -46,7 +47,7 @@ export const POST = api(async (req, ctx) => {
     const shot = videoShot(p, item)!;
     const info=planSpeech(p,item);assertSpeech(info,'');
     const prompt=videoGenerationPrompt(p,item,row.prompt,s.characterIds);
-    if(prompt.length>VIDEO_PROMPT_LIMIT)throw new Error(`${item.title}: вместе с героями промпт содержит ${prompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}.`);
+    if(prompt.length>videoPromptLimit(m.id))throw new Error(`${item.title}: вместе с героями промпт содержит ${prompt.length} символов. Сократите задачу до общего лимита ${videoPromptLimit(m.id)}.`);
     if (videoDurationIssue(item.title,shot.duration,[m.id])) throw new Error(videoDurationIssue(item.title,shot.duration,[m.id]));
     const frame = await asset(user, row.ref, p);
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(frame.mime))

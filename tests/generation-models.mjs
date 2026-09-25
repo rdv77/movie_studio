@@ -72,6 +72,7 @@ try {
   const script = globalThis.generationState.items[0];
   D.addVariant(globalThis.generationState, script.id, { text: 'Лена ищет дорогу домой.' });
   D.approve(globalThis.generationState, script.id);
+  for(const stage of [2,3]){const item=globalThis.generationState.items.find(i=>i.stage===stage);D.addVariant(globalThis.generationState,item.id,{text:'Утверждённый стиль и локации'});D.approve(globalThis.generationState,item.id);}
   const ready = structuredClone(globalThis.generationState);
   const input = (models = imageModels, count = 2) => ({
     revision: globalThis.generationState.revision, batchId: D.id(), itemId: hero.id, models, count,

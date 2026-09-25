@@ -14,7 +14,7 @@ export function planSpeech(p: Project, item: Item, value?: Partial<Variant>): Sp
     (i.sourceShot ? i.sourceShot.scriptId===(item.sourceShot?.scriptId ?? script?.id) : true);
   const frame = p.items.find(i=>i.stage===5&&matches(i)&&isApproved(p,i));
   const image = frame?.variants.find(v=>v.id===frame.approvedId);
-  if (image?.speechType) result=speechInfo(image);
+  if (image?.speechType&&(!p.directing||image.shotSource===scriptVariant?.id)) result=speechInfo(image);
   if (item.stage===7) {
     const activeAudio=p.items.filter(i=>i.stage===6&&participates(p,i)&&isApproved(p,i));
     if (p.speechMode!=='plans' && activeAudio.some(i=>i.variants.some(v=>v.id===i.approvedId&&v.kind==='audio'&&v.assetId)))
@@ -25,7 +25,7 @@ export function planSpeech(p: Project, item: Item, value?: Partial<Variant>): Sp
     // off-screen until its purpose is explicitly reviewed and approved.
     if (audio) return speechInfo({...audio,dialogue:audio.dialogue||audio.text});
   }
-  if (value?.speechType && !(item.stage===5&&value.kind==='image'&&value.jobId&&value.shotSource&&scriptVariant&&value.shotSource!==scriptVariant.id)) return speechInfo(value);
+  if (value?.speechType && !(item.stage===5&&value.kind==='image'&&(p.directing||value.jobId)&&scriptVariant&&value.shotSource!==scriptVariant.id)) return speechInfo(value);
   if (item.stage===6 && value?.kind==='audio') return speechInfo({...value,dialogue:value.dialogue||value.text});
   return result;
 }

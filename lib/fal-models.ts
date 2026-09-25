@@ -34,8 +34,8 @@ export function prepareFalJobs(jobs: Job[], refs: {mime:string;size:number}[]) {
     const issue = video ? falVideoRefIssue(refs) : falRefIssue(refs);
     if (issue) throw new Error(issue);
     if (video) {
-      if (j.kind !== 'video' || !j.prompt.trim() || j.prompt.length > 2000)
-        throw new Error('fal.ai: для видеоплана нужен промпт от 1 до 2000 символов. Запрос не отправлен.');
+      if (j.kind !== 'video' || !j.prompt.trim() || j.prompt.length > 5000)
+        throw new Error('fal.ai: для видеоплана нужен промпт от 1 до 5000 символов (бюджет студии). Запрос не отправлен.');
       if (!Number.isFinite(j.duration) || j.duration! <= 0 || j.duration! > 6)
         throw new Error('fal.ai: длительность плана должна быть до 6 секунд. Запрос не отправлен.');
     } else if (j.kind !== 'image' || !j.prompt.trim() || j.prompt.length > FAL_PROMPT_BUDGET)

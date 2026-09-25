@@ -11,6 +11,8 @@ import { isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from './zencreator-models';
 // Image models need the current shot and approved visual decisions, not the
 // whole screenplay or serialized Variant/Job/dependency histories.
 export function storyboardImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,modelId='') {
+  const compiled=videoShot(p,item)?.imagePrompt;
+  if(compiled&&instruction.trim()===compiled.trim())return {prompt:compiled,length:compiled.length,sections:[{label:'Утверждённый режиссёрский промпт',length:compiled.length}]};
   if(isFalImage(modelId))return compactImageRequest(p,item,instruction,refs,index,count,FAL_PROMPT_BUDGET);
   if(isMiniMaxImage(modelId))return miniMaxImageRequest(p,item,instruction,refs,index,count);
   if(isZenCreatorImage(modelId))return compactImageRequest(p,item,instruction,refs,index,count,ZEN_IMAGE_PROMPT_LIMIT);
@@ -36,6 +38,7 @@ export function storyboardImageRequest(p:Project,item:Item,instruction:string,re
     const action=value?.text&&(value.kind==='text'||!value.jobId)?value.text:shot?.description??'';
     add('Основа текущего плана',`${shot?.title??item.title}\nДействие: ${action}\nДлительность: ${fields.duration} сек\nКамера: ${fields.camera}\nСтыковка: ${fields.continuity}`);
   }
+  if(shot?.productionDesign)add('Художественное решение',shot.productionDesign);
   add('Задача режиссёра',task);
   add('Прикреплённые изображения',characterReferenceNote(p,refs));
   add('Речь и выражение лица',speechDirection(fields));

@@ -1,3 +1,4 @@
+import { approveReview } from '@/lib/review-center';
 import { syncVideoPlans } from '@/lib/video';
 import {stopJobWait,allowNewSeries} from '@/lib/job-wait';
 import { moveStoryboardPlan } from '@/lib/plan-order';
@@ -71,6 +72,16 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive&&body.action!=='restorePlan')throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'saveMediaDurations': {
+      const {durations}=z.object({durations:z.record(z.string().uuid(),z.number().positive().max(3600))}).parse(d);
+      for(const assetId of Object.keys(durations)){const a=await asset(user,assetId,p);if(!a.mime.startsWith('audio/')&&!a.mime.startsWith('video/'))throw Error('Нужен аудио- или видеофайл.');}
+      p.mediaDurations={...p.mediaDurations,...durations};break;
+    }
+    case 'approveReview': {
+      const {selections}=z.object({selections:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),reviewed:z.boolean().optional()})).min(1).max(120)}).parse(d);
+      for(const s of selections){const v=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);if(v?.assetId)await asset(user,v.assetId,p);}
+      approveReview(p,selections);break;
+    }
     case 'removePlan':setPlanExcluded(p,body.itemId!,true);break;
     case 'restorePlan':setPlanExcluded(p,body.itemId!,false);break;
     case 'moveStoryboardPlan': {

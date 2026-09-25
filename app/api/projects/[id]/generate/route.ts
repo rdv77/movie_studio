@@ -1,3 +1,5 @@
+import {materialBasis} from '@/lib/material-basis';
+import {selectedVideoPromptLimit,availableForDirecting} from '@/lib/model-capabilities';
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { prepareGoogleJobs } from '@/lib/google-models';
 import { enqueuePlanJobs, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
@@ -24,9 +26,9 @@ import {
   type Job,
 } from '@/lib/domain';
 import { model, MODELS } from '@/lib/models';
-import { resolveSpeechSource, speechCharacters } from '@/lib/speech';
+import { resolveSpeechSource, speechCharacters,speechPlans } from '@/lib/speech';
 import { spokenText } from '@/lib/spoken-text';
-import { videoShot, videoGenerationPrompt, VIDEO_PROMPT_LIMIT } from '@/lib/video';
+import { videoShot, videoGenerationPrompt, VIDEO_PROMPT_LIMIT,scriptVideo } from '@/lib/video';
 import { planFields } from '@/lib/storyboard';
 import { z } from 'zod';
 import { characterPrompt, characterImageRefs, characterReferenceNote, withCharacterIdentity, videoCharacterRefs, assertCharacterRefLimit } from '@/lib/characters';
@@ -66,6 +68,7 @@ export const POST = api(async (req, ctx) => {
   if (!stageReady(p, item.stage))
     throw new Error('Утвердите предыдущие этапы.');
   const ms = [...new Set(s.models)].map(model);
+  if(p.directing&&s.models.some(id=>!availableForDirecting(id)))throw Error('Эта модель имеет короткий промпт и исключена из режиссёрского процесса. Выберите другую.');
   const parallelStoryboard=item.stage===5&&ms.every(m=>m.kind==='image');
   const parallelVideo=item.stage===7&&ms.every(m=>m.kind==='video'&&m.provider!=='sync');
   const parallelConcept=[1,2,3].includes(item.stage)&&ms.every(m=>m.kind==='image');
@@ -104,8 +107,8 @@ export const POST = api(async (req, ctx) => {
   const shot = ['image', 'video'].includes(kind) && [5, 7].includes(item.stage) ? videoShot(p, item) : undefined;
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
   if (kind === 'video') {
-    if (motionPrompt.length > VIDEO_PROMPT_LIMIT)
-      throw new Error(`Видеопромпт вместе с описаниями героев содержит ${motionPrompt.length} символов. Сократите задачу до общего лимита ${VIDEO_PROMPT_LIMIT}; запрос не отправлен.`);
+    if (motionPrompt.length > selectedVideoPromptLimit(s.models))
+      throw new Error(`Видеопромпт вместе с описаниями героев содержит ${motionPrompt.length} символов. Сократите задачу до общего лимита ${selectedVideoPromptLimit(s.models)}; запрос не отправлен.`);
     if (item.stage === 7 && !shot)
       throw new Error('Подтяните планы из утверждённого подробного сценария и выберите нужный план.');
     if (shot && videoDurationIssue(item.title,shot.duration,s.models))
@@ -115,6 +118,7 @@ export const POST = api(async (req, ctx) => {
   const info = kind==='audio' ? (s.speechType ? speechInfo(s) : speechSource ? speechInfo(speechSource) : planSpeech(p,item,chosen(item))) : planSpeech(p,item,kind==='video'?undefined:chosen(item));
   const dialogue = kind === 'audio' ? spokenText(s.dialogue, [...speechCharacters(p),info.speaker]) : fields?.dialogue ?? s.dialogue;
   if (kind==='audio') assertSpeech(info,dialogue);
+  if(kind==='audio'&&p.productionOrder==='video-first'&&item.sourceShot){const target=speechPlans(p).find(r=>r.item?.id===item.id);if(target?.timingIssue)throw Error(target.timingIssue);}
   if (kind==='audio'&&info.speechType==='character'&&!item.sourceShot) throw new Error('Для реплик героев сначала нажмите «Подготовить озвучку по планам». Общая дорожка предназначена для закадрового текста.');
   if (kind==='video') assertSpeech(info,'');
   if (kind === 'video' && s.refs.length !== 1)
@@ -138,7 +142,7 @@ export const POST = api(async (req, ctx) => {
       batchId: s.batchId,
       itemId: item.id,
       model: m.id,
-      shotSource: fields?.shotSource,
+      shotSource: fields?.shotSource??(kind==='audio'?scriptVideo(p).variant?.id:undefined),
       kind,
       ...(['audio','image','video'].includes(kind)&&item.stage>=5?info:{}),
       brief: s.prompt,
@@ -177,6 +181,7 @@ export const POST = api(async (req, ctx) => {
   prepareZenJobs(jobs, imageAssets);
   if(parallelConcept||parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
   assertBudget(p, jobs);
+  if(p.directing)for(const job of jobs)job.reviewBasis=materialBasis(p,p.items.find(i=>i.id===job.itemId)!,job);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
 });

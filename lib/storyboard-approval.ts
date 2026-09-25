@@ -1,3 +1,4 @@
+import { materialBasis } from './material-basis';
 import { approve, chosen, dependencies, getItem, isApproved, participates, stageReady, type Project, type Item } from './domain';
 import { scriptVideo, videoShot } from './video';
 import { shotSchema } from './shots';
@@ -21,6 +22,7 @@ export function reapproveStoryboard(p:Project,itemId:string,variantId:string) {
   // Explicit director review, without duplicating media or rewriting the
   // original generation record. Derived stages retain their existing basis.
   chosen(item)!.deps=dependencies(copy,5);
+  if(chosen(item)!.reviewBasis)chosen(item)!.reviewBasis=materialBasis(copy,item,chosen(item));
   approve(copy,itemId);
   Object.assign(getItem(p,itemId),item);
 }

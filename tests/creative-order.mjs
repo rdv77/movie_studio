@@ -2,7 +2,7 @@ import {build} from 'esbuild';import {strict as assert} from 'node:assert';
 await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as W from './lib/workflow';export * as I from './lib/minimax-image';export * as C from './lib/characters';export * as B from './lib/approval-blockers';export * as M from './lib/models';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/creative-order.mjs',external:['@ffmpeg/ffmpeg']});
 const {D,W,I,C,B,M}=await import('../work/tests/creative-order.mjs');
 const p=D.newProject('Мир фильма'),card=s=>p.items.find(i=>i.stage===s),approve=(s,text)=>{D.addVariant(p,card(s).id,{text});D.approve(p,card(s).id);};
-assert.deepEqual(W.WORKFLOW.slice(0,7).map(x=>x.id),[0,2,3,1,4,5,6]);assert.equal(W.nextStage(3),1);assert.equal(W.nextStage(1),4);
+assert.deepEqual(W.WORKFLOW.filter(s=>s.id!==12).slice(0,7).map(x=>x.id),[0,2,3,1,4,5,6]);assert.equal(W.nextStage(3),1);assert.equal(W.nextStage(1),4);
 approve(0,'СЦЕНАРИЙ_НЕ_КОПИРОВАТЬ '.repeat(5000));assert(D.stageReady(p,2));assert(!D.stageReady(p,1));
 approve(2,'АКВАРЕЛЬ, приглушённая охра, мягкий свет. '.repeat(2000));assert(D.stageReady(p,3));assert(!D.stageReady(p,1));
 // An image location with no photo selected must still contribute its text.

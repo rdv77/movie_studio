@@ -1,4 +1,4 @@
-import { approve, chosen, dependencies, isApproved, participates, stageReady, type Project } from './domain';
+import { approve, chosen, dependencies, variantCurrent, isApproved, participates, stageReady, type Project } from './domain';
 import { reapproveSpeech, unchangedSpeechReason } from './speech-approval';
 
 export function approvalBatch(p: Project, stage: number) {
@@ -8,7 +8,7 @@ export function approvalBatch(p: Project, stage: number) {
     const v = chosen(i);
     const reason = !stageReady(p, stage) ? 'Сначала утвердите предыдущие этапы.'
       : !v ? 'Выберите вариант.'
-      : v.deps !== dependencies(p, stage) ? stage===6 ? unchangedSpeechReason(p,i.id,v.id) : 'Основа изменилась. Сохраните актуальную версию через «Правки» и проверьте её.'
+      : !variantCurrent(p,i,v) ? stage===6 ? unchangedSpeechReason(p,i.id,v.id) : 'Основа изменилась. Сохраните актуальную версию через «Правки» и проверьте её.'
       : v.kind !== kind || !v.assetId ? `Выберите готовый ${stage === 5 ? 'кадр' : stage === 6 ? 'аудиофайл' : 'видеоролик'}.`
       : p.jobs.some(j => j.itemId === i.id && ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)) ? 'Дождитесь завершения генерации.'
       : '';
@@ -29,7 +29,7 @@ export function approveBatch(p: Project, stage: number, selections: {itemId: str
   const copy=structuredClone(p);
   for (const s of selections) {
     const item=copy.items.find(i=>i.id===s.itemId)!;
-    if(stage===6&&chosen(item)!.deps!==dependencies(copy,6))reapproveSpeech(copy,s.itemId,s.variantId);
+    if(stage===6&&!variantCurrent(copy,item,chosen(item)!))reapproveSpeech(copy,s.itemId,s.variantId);
     else approve(copy,s.itemId);
   }
   for(const s of selections)Object.assign(p.items.find(i=>i.id===s.itemId)!,copy.items.find(i=>i.id===s.itemId)!);
@@ -44,7 +44,7 @@ export function approveSelectedSpeech(p: Project, selections: {itemId: string; v
   for (const row of selections) {
     const item = candidates.find(i => i.id === row.itemId && i.selectedId === row.variantId);
     if (!item || !chosen(item)?.assetId) throw new Error('Выбор голосов изменился. Обновите проект.');
-    if(chosen(item)!.deps!==dependencies(p,6))throw new Error(`«${item.title}»: Основа изменилась. Прослушайте запись в карточке и нажмите «Утвердить эту запись для текущей версии».`);
+    if(!variantCurrent(p,item,chosen(item)!))throw new Error(`«${item.title}»: Основа изменилась. Прослушайте запись в карточке и нажмите «Утвердить эту запись для текущей версии».`);
     if (p.jobs.some(j => j.itemId === item.id && ['queued','dispatching','pending','saving'].includes(j.status))) throw new Error('Дождитесь завершения озвучки.');
     approve(copy,item.id);
   }

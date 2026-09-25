@@ -29,7 +29,7 @@ try {
   };
   const result=await P.generate(job,key,[ref],'9:16');assert(result.pending);assert.equal(result.requestId,id);assert.equal(result.actual,null);
   const before=calls.length;
-  for(const [j,refs] of [[job,[]],[job,[ref,ref]],[job,['https://foreign.test/x.png']],[{...job,duration:7},[ref]],[{...job,prompt:'x'.repeat(2001)},[ref]],[{...job,kind:'image'},[ref]]])
+  for(const [j,refs] of [[job,[]],[job,[ref,ref]],[job,['https://foreign.test/x.png']],[{...job,duration:7},[ref]],[{...job,prompt:'x'.repeat(5001)},[ref]],[{...job,kind:'image'},[ref]]])
    await assert.rejects(()=>P.generate(j,key,refs,'9:16'),e=>e.notSent);
   assert.equal(calls.length,before);
   assert.throws(()=>M.prepareFalJobs([job],[{mime:'image/png',size:21*1024*1024}]),/20 МБ/);

@@ -1,0 +1,34 @@
+import {build} from 'esbuild';import {strict as A} from 'node:assert';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as S from './lib/storyboard';export * as V from './lib/video';export * as W from './lib/workflow';export * as P from './lib/production-order';export * as C from './lib/review-center';export * as B from './lib/material-basis';export * as M from './lib/model-capabilities';export * as SH from './lib/shots';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/directing.mjs',external:['@ffmpeg/ffmpeg']});
+const {D,R,S,V,W,P,C,B,M,SH}=await import('../work/tests/directing.mjs');
+const p=D.newProject('Тест режиссёрской группы');
+for(const stage of [0,2,3,1]){const i=p.items.find(i=>i.stage===stage);D.addVariant(p,i.id,{text:'Утверждённая основа '+stage});D.approve(p,i.id);}
+const d=R.ensureDirecting(p);d.brief.targetSeconds=120;
+const scene={id:D.id(),title:'Письмо',purpose:'Герой узнаёт правду',location:'Комната',conflict:'Страх',turn:'Решение',stateIn:'За столом',stateOut:'В дверях',continuity:[{character:'Анна',outfit:'Синий плащ',props:'Письмо в правой руке'}],shots:[]};
+d.scenes=[scene];d.scenesApproved=R.scenesBasis(p);
+const run=R.newDirectorRun(p,'grok-4.6','develop');A.equal(run.tasks.length,5);A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['story']);
+const shot={id:'new',title:'Решение',duration:5,cast:['Анна'],story:'Анна читает письмо',stateIn:'Письмо в правой руке',stateOut:'Письмо сложено',cinematography:'Крупный план',productionDesign:'Синий плащ, тёплый свет',dialogue:{speechType:'character',speaker:'Анна',text:'Я вернусь.',delivery:'Тихо'},continuityChanges:''};
+R.applyDirectorResult(p,run,run.tasks[0],{shots:[shot]});A.equal(scene.shots.length,1);const sid=scene.shots[0].id;A.notEqual(sid,'new');
+A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['camera','art','dialogue']);
+for(const t of run.tasks.filter(t=>['camera','art','dialogue'].includes(t.role))){const field=t.role==='camera'?'cinematography':t.role==='art'?'productionDesign':'dialogue';R.applyDirectorResult(p,run,t,{shots:[{id:sid,[field]:shot[field]}]});}
+A.equal(R.taskReady(run,run.tasks.at(-1)),true);R.applyDirectorResult(p,run,run.tasks.at(-1),{issues:[],patches:[]});
+scene.shots[0].approved=R.shotApproval(scene,scene.shots[0]);scene.shots[0].approvedFoundation=R.directorBasis(p);A(R.shotApproved(scene,scene.shots[0]));
+scene.continuity[0].outfit='Красный плащ';A(!R.shotApproved(scene,scene.shots[0]));scene.continuity[0].outfit='Синий плащ';
+const comp=R.newDirectorRun(p,'grok-4.6','compress');R.applyDirectorResult(p,comp,comp.tasks[0],{shots:[{id:sid,imagePrompt:'Анна за столом. Крупный план. Тёплый свет.',videoPrompt:'Анна складывает письмо. Статичная камера.'}]});
+A(R.shotApproved(scene,scene.shots[0]));const published=R.publishDirectorScript(p);const parsed=SH.parseShots(published.text,p.seconds);A.equal(parsed.length,1);A.equal(parsed[0].id,sid);A(parsed[0].videoPrompt.includes('Синий плащ'));A(parsed[0].videoPrompt.includes('Письмо в правой руке'));A(parsed[0].videoPrompt.includes('У всех остальных персонажей рты закрыты'));
+S.preparePlanCards(p);const frame=p.items.find(i=>i.stage===5&&!i.planArchive),video=p.items.find(i=>i.stage===7&&!i.planArchive);
+A.equal(frame.sourceShot.shotId,sid);
+const fv=D.makeVariant(p,frame,{kind:'image',assetId:D.id(),text:'Кадр',speechType:'character',speaker:'Анна',dialogue:'Я вернусь.'});frame.variants.push(fv);frame.selectedId=fv.id;D.approve(p,frame.id);
+P.setProductionOrder(p,'video-first');A(D.stageReady(p,7));A(!D.dependencies(p,7).includes(p.items.find(i=>i.stage===6).id));A(W.projectWorkflow(p).findIndex(s=>s.id===7)<W.projectWorkflow(p).findIndex(s=>s.id===6));
+const vp=V.videoGenerationPrompt(p,video,V.videoPrompt(p,video));A.equal((vp.match(/Правило речи для этого плана:/g)||[]).length,1);A(vp.length<=5000);
+D.addVariant(p,video.id,{kind:'video',text:'Видео',assetId:D.id(),duration:5});D.approve(p,video.id);const vv=D.chosen(video);
+const voice={id:D.id(),stage:6,title:frame.title,sourceShot:{...frame.sourceShot},variants:[]};p.items.push(voice);p.speechMode='plans';const av=D.makeVariant(p,voice,{kind:'audio',assetId:D.id(),dialogue:'Я вернусь.',speechType:'character',speaker:'Анна',text:'Речь'});voice.variants.push(av);voice.selectedId=av.id;
+p.mediaDurations={[vv.assetId]:5,[av.assetId]:6.23};A.match(C.timingConflict(p,voice),/1.23/);const before=structuredClone(p);A.throws(()=>C.approveReview(p,[{itemId:voice.id,variantId:av.id}]),/превышение/);A.deepEqual(p,before);
+p.mediaDurations[av.assetId]=4.9;C.approveReview(p,[{itemId:voice.id,variantId:av.id}]);A(D.isApproved(p,p.items.find(i=>i.id===voice.id)));
+const audioBasis=B.materialBasis(p,voice);p.items.find(i=>i.stage===1).variants[0].text='Новый костюм';A.equal(B.materialBasis(p,voice),audioBasis);A.notEqual(B.materialBasis(p,frame),fv.reviewBasis);
+A.equal(M.videoPromptLimit('MiniMax-H3'),7000);A(!M.availableForDirecting('image-01'));
+const continuityScene=structuredClone(scene),first=continuityScene.shots[0];first.continuityChanges='Анна кладёт письмо на стол';
+const second={...structuredClone(first),id:D.id(),continuityChanges:'',stateIn:'Письмо на столе'};continuityScene.shots.push(second);
+second.approved=R.shotApproval(continuityScene,second);A(R.shotApproved(continuityScene,second));A.equal(R.precedingChanges(continuityScene,second)[0].changes,first.continuityChanges);
+first.continuityChanges='Анна кладёт письмо в карман';A(!R.shotApproved(continuityScene,second),'Earlier prop changes invalidate dependent later plans');
+console.log('PASS directing DAG, four-part approval, scene wardrobe continuity, prompt compilation, video-first gates, stable shot IDs, semantic voice basis, conflict detection and atomic bulk approval.');

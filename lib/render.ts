@@ -1,7 +1,7 @@
 import { wasmUrl } from './wasm';
 import { captionForPlan, captionPng } from './captions';
 import type { Project, Variant } from './domain';
-import { chosen, dependencies, stageReady, isApproved, participates } from './domain';
+import { chosen, dependencies, stageReady, isApproved, participates,variantCurrent } from './domain';
 import { scriptSpeech, speechPlans } from './speech';
 import {musicIssue,musicSettings,musicEnvelope,type MusicSettings} from './music';
 type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
@@ -42,7 +42,7 @@ export function editPlan(p: Project, animatic = false) {
     const selected = chosen(item);
     if (animatic) {
       if (selected?.kind !== 'audio' || !selected.assetId) throw new Error(`Выберите аудиозапись для аниматика: «${item.title}». Выбор видео аниматика не заменяет выбор голоса.`);
-      if (selected.deps !== dependencies(p,6) || !stageReady(p,6)) throw new Error(`Выбранная озвучка «${item.title}» относится к прежней раскадровке. Сохраните актуальную версию через «Правки» и проверьте её.`);
+      if (!variantCurrent(p,item,selected) || !stageReady(p,6)) throw new Error(`Выбранная озвучка «${item.title}» относится к прежней раскадровке. Откройте «Проверка и быстрое утверждение» и проверьте запись.`);
       continue;
     }
     if (selected?.kind === 'audio' && selected.id !== item.approvedId)
