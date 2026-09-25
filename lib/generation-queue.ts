@@ -1,5 +1,6 @@
 import { assertBudget, dependencies, getItem, stageReady, type Job, type Project } from './domain';
 import { selectedReferences } from './reference-selection';
+import {unresolvedJobBlocks} from './job-wait';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
@@ -9,21 +10,21 @@ export const parallelJob = (p:Project,j:Job) => conceptImageJob(p,j)||storyboard
 export const PARALLEL_GENERATIONS = 3;
 export const generationInProgress = (j:Job) => ['dispatching','pending','saving'].includes(j.status);
 export function conceptImageAdmissionIssue(p:Project,itemId:string) {
-  if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
+  if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||unresolvedJobBlocks(j))))
     return 'Для этой карточки уже есть текущая попытка или запрос с неизвестным исходом. Откройте другого героя или материал либо проверьте журнал.';
   if(p.jobs.some(j=>activeGeneration(j)&&!conceptImageJob(p,j)))
     return 'Дождитесь задач другого этапа. Образы героев, визуальный стиль и локации можно генерировать параллельно.';
   return '';
 }
 export function videoAdmissionIssue(p:Project,itemId?:string) {
-  if(itemId&&p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
+  if(itemId&&p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||unresolvedJobBlocks(j))))
     return 'Для этого плана уже есть текущая попытка или запрос с неизвестным исходом. Выберите другой план либо проверьте журнал.';
   if(p.jobs.some(j=>activeGeneration(j)&&!videoJob(p,j)))
     return 'Дождитесь задач другого этапа или синхронизации губ. Видеопланы можно создавать параллельно друг с другом.';
   return '';
 }
 export function storyboardAdmissionIssue(p:Project,itemId:string) {
-  if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||j.status==='unknown')))
+  if(p.jobs.some(j=>j.itemId===itemId&&(activeGeneration(j)||unresolvedJobBlocks(j))))
     return 'Для этого плана уже есть текущая попытка или запрос с неизвестным исходом. Выберите другой план либо проверьте журнал.';
   if(p.jobs.some(j=>activeGeneration(j)&&!storyboardJob(p,j)))
     return 'Дождитесь текущей серии другого этапа. Параллельно можно создавать изображения разных планов раскадровки.';

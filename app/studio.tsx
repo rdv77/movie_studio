@@ -99,6 +99,7 @@ import {
   money,
   ticks,
   type Project,
+  type Job,
   type Variant,
   type Item,
   type Kind,
@@ -135,7 +136,7 @@ import { animaticBasis, animaticIssue, animaticApproved } from '@/lib/animatic';
 import { WORKFLOW, stageTitle, nextStage, workflowReady, stageComplete } from '@/lib/workflow';
 import {MusicEditor} from './music-editor';
 import {MUSIC_MODELS,musicSettings} from '@/lib/music';
-import {waitLimitMs} from '@/lib/job-wait';
+import {waitLimitMs,unresolvedJobBlocks} from '@/lib/job-wait';
 type Asset = { id: string; name: string; mime: string; size: number };
 type Summary = { id: string; title: string; updated: string };
 async function request(
@@ -1443,6 +1444,7 @@ function Workspace() {
       )}
       {p && item && dialog === 'generate' && (
         <GenerateDialog key={`${p.id}:${item.id}`}
+          allowNewSeries={(jobId:string)=>action('allowNewSeries',{jobId})}
           referenceAction={(assetId:string,restore=false)=>action(restore?'restoreReference':'hideReference',{assetId})}
           open={dialog === 'generate'}
           close={closeDialog}
@@ -1839,6 +1841,7 @@ function VariantEditor({
   );
 }
 function GenerateDialog({
+  allowNewSeries,
   referenceAction,
   open,
   close,
@@ -1865,6 +1868,7 @@ function GenerateDialog({
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [batch, setBatch] = useState('');
   const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
+  const unresolved=p.jobs.filter((j:Job)=>j.itemId===item.id&&unresolvedJobBlocks(j));
   const allScriptAudio = scriptSpeech(p);
   const scriptAudio = {...allScriptAudio,sources:item.sourceShot?allScriptAudio.sources:allScriptAudio.sources.filter(s=>s.speechType==='voiceover')};
   const characters = speechCharacters(p);
@@ -2248,6 +2252,7 @@ function GenerateDialog({
           </div>
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
+        {queueIssue&&unresolved.length>0&&<section className="note" aria-label="Запросы с неизвестным исходом"><strong>Запуск блокирует прежняя попытка, а не фотография</strong><p>Провайдер мог выполнить запрос и списать оплату. Разрешение новой серии сохранит прежнюю попытку и расходы в журнале. Само разрешение ничего не генерирует; новая серия оплачивается отдельно.</p>{unresolved.map((j:Job)=><div key={j.id}><p>{[...MODELS,...SYNC_MODELS].find(m=>m.id===j.model)?.name??j.model} · {new Date(j.created).toLocaleString('ru-RU')} · {j.error}</p><Button variant="outline" disabled={busy} onClick={()=>perform(()=>allowNewSeries(j.id))}>Разрешить новую серию после этой попытки</Button></div>)}</section>}
         {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
         <p className="muted small">
           {([1,2,3,5].includes(item.stage)&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другую карточку и запустить её. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
@@ -3034,6 +3039,7 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
                   {['dispatching','pending','saving'].includes(j.status)&&<small>Начало: {new Date(j.waitStartedAt??j.started??j.created).toLocaleTimeString('ru-RU')} · автоостановка через {waitLimitMs(j)/60000} мин ожидания</small>}
                   {j.waitStoppedAt&&<small>Очередь освобождена. Остановка ожидания не отменяет запрос и возможное списание у провайдера.</small>}
+                  {j.newSeriesAllowedAt&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
                   {j.error && <small className="warning-text">{j.error}</small>}
                 </TableCell>
                 <TableCell>{money(j.estimate)}{j.zenCreditsEstimate!==undefined&&<small>≈ {j.zenCreditsEstimate} кредитов ZenCreator</small>}</TableCell>

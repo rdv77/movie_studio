@@ -67,6 +67,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  newSeriesAllowedAt?: string;
   waitStartedAt?: string;
   waitStoppedAt?: string;
   waitStopReason?: 'manual'|'timeout'|'saving';

@@ -1,6 +1,11 @@
 import type {Job} from './domain';
 
 export const waitLimitMs=(j:Job)=>(j.kind==='video'?45:15)*60*1000;
+export const unresolvedJobBlocks=(j:Job)=>j.status==='unknown'&&!j.newSeriesAllowedAt;
+export function allowNewSeries(j:Job) {
+  if(j.status!=='unknown')throw Error('Разрешить новую серию можно только для запроса с неизвестным исходом.');
+  j.newSeriesAllowedAt??=new Date().toISOString();
+}
 export function waitExpired(j:Job,time=Date.now()) {
   const start=Date.parse(j.waitStartedAt??j.started??'');
   return ['dispatching','pending','saving'].includes(j.status)&&Number.isFinite(start)&&time-start>=waitLimitMs(j);
@@ -14,5 +19,5 @@ export function stopJobWait(j:Job,reason:'manual'|'timeout'|'saving',time=new Da
 export function resumeJobWait(j:Job) {
   if(!j.waitStoppedAt||j.status!=='unknown'||!j.resumeStatus)throw Error('Нет сохранённой ссылки или запроса для безопасной проверки. Проверьте исход в кабинете провайдера; новая генерация не отправлена.');
   if(j.resumeStatus==='saving'?!j.output?.url:!j.requestId)throw Error('Не найден адрес результата или идентификатор запроса.');
-  j.status=j.resumeStatus;j.waitStartedAt=new Date().toISOString();j.waitStoppedAt=undefined;j.waitStopReason=undefined;j.saveFailures=0;j.error=undefined;
+  j.status=j.resumeStatus;j.waitStartedAt=new Date().toISOString();j.waitStoppedAt=undefined;j.waitStopReason=undefined;j.newSeriesAllowedAt=undefined;j.saveFailures=0;j.error=undefined;
 }

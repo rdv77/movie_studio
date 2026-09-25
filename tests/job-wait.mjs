@@ -23,4 +23,14 @@ state=fixture('pending');let release,started;const entered=new Promise(r=>starte
 state=fixture('queued');await run('check-wait');assert.equal(state.jobs[0].status,'queued');assert.equal(generated,0);
 state=fixture('dispatching');state.jobs[0].started=new Date(Date.now()-16*60000).toISOString();await run('check-wait');assert.equal(state.jobs[0].waitStopReason,'timeout');assert.equal(generated,0);
 state=fixture();await assert.rejects(()=>stop(-1));globalThis.denied=true;await assert.rejects(()=>stop(),/Unauthorized/);globalThis.denied=false;
+const permit=(revision=state.revision,jobId=state.jobs[0].id)=>PATCH(new Request('http://test',{method:'PATCH',body:JSON.stringify({revision,action:'allowNewSeries',data:{jobId}})}),{params:Promise.resolve({id:state.id})});
+await assert.rejects(()=>permit(),/неизвестным исходом/);
+await stop();const prior=structuredClone(state.jobs[0]);assert(Q.conceptImageAdmissionIssue(state,prior.itemId));
+await assert.rejects(()=>permit(-1));await assert.rejects(()=>permit(state.revision,D.id()),/не найдена/);
+globalThis.denied=true;await assert.rejects(()=>permit(),/Unauthorized/);globalThis.denied=false;
+await permit();assert(state.jobs[0].newSeriesAllowedAt);assert.equal(Q.conceptImageAdmissionIssue(state,prior.itemId),'');
+assert.equal(state.jobs[0].status,'unknown');assert.equal(state.jobs[0].actual,prior.actual);assert.deepEqual(state.jobs[0].output,prior.output);assert.equal(state.jobs[0].requestId,prior.requestId);assert.equal(generated,0);assert.equal(state.jobs.length,1);
+await permit();assert.equal(state.jobs.length,1);assert.equal(generated,0);
+const unacknowledged={...state.jobs[0],id:D.id(),newSeriesAllowedAt:undefined};state.jobs.push(unacknowledged);assert(Q.conceptImageAdmissionIssue(state,prior.itemId));state.jobs.pop();
+W.resumeJobWait(state.jobs[0]);assert(!state.jobs[0].newSeriesAllowedAt);assert(Q.conceptImageAdmissionIssue(state,prior.itemId));
 console.log('PASS job waiting: HTTPS-only MiniMax recovery, blocked unsafe URLs, ownership/revision, manual stop, timeout, bounded save failures, preserved billing, safe result-only resume, released in-flight slot and late-response race. No paid generation.');
