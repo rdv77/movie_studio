@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { Tabs,TabsList,TabsTrigger,TabsContent } from '@/components/ui/tabs';
 import type { Project } from '@/lib/domain';
 import { money } from '@/lib/domain';
@@ -55,9 +56,11 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       <div className="row wrap"><Button disabled={locked} onClick={()=>generate('scenes',{replaceScenes:!!scenes.length})}>{scenes.length?'Заново разделить сценарий на сцены':'Создать весь этап · разделить на сцены'}</Button><Button variant="outline" disabled={locked} onClick={()=>editScene({id:'new',title:'Новая сцена',purpose:'',location:'',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[]})}>Добавить сцену вручную</Button><Button disabled={locked||!scenes.length} variant="outline" onClick={()=>call('approveScenes')}>{d?.scenesApproved===scenesBasis(p)?'✓ Структура сцен утверждена':'Утвердить структуру сцен'}</Button></div>
       {scenes.length>0&&<p className="muted">Повторное разбиение создаёт новую структуру для проработки. Опубликованный сценарий и готовые файлы остаются в истории проекта.</p>}
       {scenes.map((s,n)=><article key={s.id} className="border rounded p-4 space-y-2"><strong>{n+1}. {s.title}</strong><p>{s.purpose}</p><p><b>Локация:</b> {s.location}</p><p><b>Конфликт:</b> {s.conflict} <b>Поворот:</b> {s.turn}</p><p><b>Начало:</b> {s.stateIn} <b>Конец:</b> {s.stateOut}</p>{s.continuity.map((c,n)=><p key={n}><b>{c.character}:</b> {c.outfit} · {c.props}</p>)}<div className="row"><Button size="sm" variant="outline" disabled={locked} onClick={()=>editScene(s)}>Правки</Button><Button size="sm" variant="ghost" disabled={locked} onClick={()=>call('removeScene',{sceneId:s.id})}>Удалить сцену</Button></div></article>)}
-      {editing&&<div className="border rounded p-4 space-y-3"><h3>Правки сцены</h3>{(['title','purpose','location','conflict','turn','stateIn','stateOut'] as const).map((key,n)=><F key={key} label={['Название','Задача сцены','Локация','Конфликт','Поворот','Состояние в начале','Состояние в конце'][n]}><Textarea value={editing[key]} onChange={e=>setEditing({...editing,[key]:e.target.value})}/></F>)}
+      <Dialog open={!!editing} onOpenChange={value=>{if(!value)setEditing(undefined);}}><DialogContent className="sm:max-w-3xl max-h-[90dvh] overflow-y-auto" aria-describedby={undefined}>
+      {editing&&<><DialogHeader><DialogTitle>Правки сцены: {editing.title}</DialogTitle></DialogHeader>{(['title','purpose','location','conflict','turn','stateIn','stateOut'] as const).map((key,n)=><F key={key} label={['Название','Задача сцены','Локация','Конфликт','Поворот','Состояние в начале','Состояние в конце'][n]}><Textarea value={editing[key]} onChange={e=>setEditing({...editing,[key]:e.target.value})}/></F>)}
         <F label="Постоянные одежда и реквизит — строка на героя: имя | одежда | предметы"><Textarea rows={5} value={continuityText} onChange={e=>setContinuityText(e.target.value)}/></F>
-        <div className="row"><Button disabled={locked} onClick={async()=>{await call('saveScene',{scene:{...editing,continuity:continuityText.split('\n').filter(line=>line.trim()).map(line=>{const [character='',outfit='',...props]=line.split('|');return {character:character.trim(),outfit:outfit.trim(),props:props.join('|').trim()};})}});setEditing(undefined);}}>Сохранить сцену</Button><Button variant="ghost" onClick={()=>setEditing(undefined)}>Закрыть</Button></div></div>}
+        <div className="row sticky bottom-0 bg-popover py-3"><Button disabled={locked} onClick={async()=>{await call('saveScene',{scene:{...editing,continuity:continuityText.split('\n').filter(line=>line.trim()).map(line=>{const [character='',outfit='',...props]=line.split('|');return {character:character.trim(),outfit:outfit.trim(),props:props.join('|').trim()};})}});setEditing(undefined);}}>Сохранить сцену</Button><Button variant="ghost" onClick={()=>setEditing(undefined)}>Закрыть</Button></div></>}
+      </DialogContent></Dialog>
       <Button variant="outline" onClick={()=>open(2)}>Перейти к визуальному стилю</Button>
     </>}
     {stage===4&&<>
