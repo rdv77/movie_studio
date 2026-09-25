@@ -17,7 +17,7 @@ await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib
  b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='server'?server:provider}));
 }}]});
 const {D,Q,generate,tick}=await import('../work/tests/parallel-concepts.mjs');
-function fixture(stage=1){const p=D.newProject('Образы');for(const i of p.items.filter(i=>i.stage<stage)){D.addVariant(p,i.id,{text:'Основа'});D.approve(p,i.id);}const a=p.items.find(i=>i.stage===stage),b={id:D.id(),title:'Второй герой',stage,variants:[]};p.items.push(b);return {p,a,b};}
+function fixture(stage=1){const p=D.newProject('Образы');for(const i of p.items.filter(i=>D.precedesStage(i.stage,stage)).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:'Основа'});D.approve(p,i.id);}const a=p.items.find(i=>i.stage===stage),b={id:D.id(),title:'Второй герой',stage,variants:[]};p.items.push(b);return {p,a,b};}
 const req=x=>new Request('http://test',{method:'POST',body:JSON.stringify(x)});
 const body=(i,models=['grok-imagine-image-2.0'],count=1)=>({revision:state.revision,batchId:D.id(),itemId:i.id,models,count,prompt:'Анимационный персонаж на нейтральном фоне',refs:[],referenceMode:'selected',dialogue:'',voiceId:'',estimates:Object.fromEntries(models.map(m=>[m,'100']))});
 const run=x=>generate(req(x),{params:Promise.resolve({id:state.id})});

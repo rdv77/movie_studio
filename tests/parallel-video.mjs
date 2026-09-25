@@ -22,7 +22,7 @@ await build({entryPoints:['lib/domain.ts','lib/generation-queue.ts','app/api/pro
 const root='../work/tests/parallel-video/',D=await import(root+'lib/domain.mjs'),Q=await import(root+'lib/generation-queue.mjs');
 const {POST:generate}=await import(root+'app/api/projects/[id]/generate/route.mjs'),{POST:remaining}=await import(root+'app/api/projects/[id]/generate-remaining/route.mjs'),{POST:tick}=await import(root+'app/api/projects/[id]/jobs/[jobId]/route.mjs');
 const p=D.newProject('Parallel video'),shots=Array.from({length:10},(_,n)=>({title:'Plan '+n,description:'Лес',duration:5,camera:'Общий план',dialogue:'',continuity:'Склейка',speechType:'none'}));
-for(const i of p.items.filter(i=>i.stage<7)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа',kind:i.stage===5?'image':'text',assetId:i.stage===5?D.id():undefined});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа',kind:i.stage===5?'image':'text',assetId:i.stage===5?D.id():undefined});D.approve(p,i.id);}
 const a=p.items.find(i=>i.stage===7);a.sourceShot={scriptId:p.items[4].id,title:'Plan 0'};
 const b={id:D.id(),stage:7,title:'Plan 1',sourceShot:{scriptId:p.items[4].id,title:'Plan 1'},variants:[]};p.items.push(b);
 const c={...structuredClone(b),id:D.id(),title:'Plan 2',sourceShot:{scriptId:p.items[4].id,title:'Plan 2'}};p.items.push(c);

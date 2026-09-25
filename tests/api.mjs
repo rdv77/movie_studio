@@ -162,7 +162,7 @@ const response = await fetch(origin + '/api/assets/' + a.id, { headers: auth });
 assert.equal(response.status, 200);
 assert((await response.arrayBuffer()).byteLength > 30);
 assert.equal((await fetch(origin + '/api/assets/' + a.id)).status, 401);
-for(let stage=1;stage<=4;stage++){
+for(const stage of [2,3,1,4]){
  const i=p.items.find(x=>x.stage===stage);
  const text=stage===4?JSON.stringify({shots:Array.from({length:10},(_,n)=>({title:'План '+(n+1),description:'Действие',duration:5,camera:'Наезд',dialogue:'',continuity:'Прямая склейка'}))}):'Актуальный материал';
  await act('addVariant',{title:'Актуально',text,kind:'text'},i.id);

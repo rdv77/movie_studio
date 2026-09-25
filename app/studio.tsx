@@ -89,6 +89,7 @@ import {
 } from '@/components/ui/sidebar';
 import {
   STAGES,
+  precedesStage,
   chosen,
   dependencies,
   variantCurrent,
@@ -117,7 +118,7 @@ import { styleReapprovalReason } from '@/lib/style-approval';
 import { speechReapprovalReason } from '@/lib/speech-approval';
 import { planCardsNeedSync } from '@/lib/plan-sync';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
-import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
+import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, characterImageRequest, miniMaxImageRefIssue } from '@/lib/minimax-image';
 import { canArchiveJob, journalArchived, newestJobs } from '@/lib/journal';
 import { isOpenAIImage, openAIImageTariff } from '@/lib/openai-image';
 import { readableText } from '@/lib/shots';
@@ -1341,7 +1342,7 @@ function Workspace() {
                   <TabsContent value="context">
                     <div className="context-list">
                       {p.items
-                        .filter((i) => i.stage < step && isApproved(p, i))
+                        .filter((i) => precedesStage(i.stage,step) && isApproved(p, i))
                         .map((i) => {
                           const v = i.variants.find(
                             (v) => v.id === i.approvedId,
@@ -1932,9 +1933,10 @@ function GenerateDialog({
   const effectiveCharacters=characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt,effectiveCharacters):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
-  const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
-  const falRequest=kind==='image'&&selected.some(m=>isFalImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,FAL_PROMPT_BUDGET):undefined;
-  const zenRequest=kind==='image'&&selected.some(m=>isZenCreatorImage(m.id))?compactImageRequest(p,item,prompt,effectiveRefs,1,count,ZEN_IMAGE_PROMPT_LIMIT):undefined;
+  const heroRequests=kind==='image'&&item.stage===1?selected.map(m=>({model:m,...characterImageRequest(p,item,prompt,effectiveRefs,1,count,m.id)})):[];
+  const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count,'image-01'):miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count)):undefined;
+  const falRequest=kind==='image'&&selected.some(m=>isFalImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count):compactImageRequest(p,item,prompt,effectiveRefs,1,count,FAL_PROMPT_BUDGET)):undefined;
+  const zenRequest=kind==='image'&&selected.some(m=>isZenCreatorImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count):compactImageRequest(p,item,prompt,effectiveRefs,1,count,ZEN_IMAGE_PROMPT_LIMIT)):undefined;
   const imagePromptError=falRequest&&falRequest.length>FAL_PROMPT_BUDGET?'Qwen Image Edit: сократите задачу и описания до бюджета студии — 5000 символов.':zenRequest&&zenRequest.length>ZEN_IMAGE_PROMPT_LIMIT?'ZenCreator: сократите задачу, имена и описания до общего лимита 5000 символов.':miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
   const miniRefError=falRequest&&falRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a))|| (miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'');
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
@@ -2213,14 +2215,15 @@ function GenerateDialog({
             </Field>
           )
         )}
-        {item.stage>1&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
-        {referenceError&&<p role="alert">{referenceError}</p>}
-        {falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
-        {zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
+        {item.stage>=4&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
+        {heroRequests.length>0&&<section className="note"><strong>Герой в визуальном мире фильма</strong><p>В каждый запрос включены краткие описания утверждённого стиля и локаций. Исходные карточки сохраняются целиком. Перед запуском можно раскрыть точный промпт каждой модели.</p>{heroRequests.map(r=><details key={r.model.id}><summary>{r.model.name} · {r.length} / {r.limit} символов</summary><p className="whitespace-pre-wrap">{r.prompt}</p></details>)}</section>}
+        {referenceError&&<p role="alert">{referenceError}</p>}{item.stage===1&&miniRefError&&<p role="alert">{miniRefError}</p>}
+        {item.stage!==1&&falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
+        {item.stage!==1&&zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
           <details><summary>Промпт для ZenCreator{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{zenRequest.prompt}</p></details>
           {imagePromptError&&<p role="alert">{imagePromptError}</p>}
         </div>}
-        {miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
+        {item.stage!==1&&miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
         {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id))&&<div className="note">
           <p>Полный промпт кадра: {imageRequest.length}{selected.some(m=>isOpenAIImage(m.id))?' / 32000':''} символов. Учтены стиль, герои, референсы и правило речи.</p>
           <details><summary>Промпт для модели{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{imageRequest.prompt}</p></details>

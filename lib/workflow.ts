@@ -4,7 +4,7 @@ import { musicSettings, musicIssue } from './music';
 
 // UI order is separate from persisted stage IDs: existing video dependencies
 // and projects keep their original IDs when the animatic page is added.
-export const WORKFLOW=[...STAGES.slice(0,7).map((title,id)=>({id,title})),{id:9,title:'Аниматик'},{id:7,title:STAGES[7]},{id:11,title:'Музыка'},{id:10,title:'Титры'},{id:8,title:STAGES[8]}];
+export const WORKFLOW=[...[0,2,3,1,4,5,6].map(id=>({id,title:STAGES[id]})),{id:9,title:'Аниматик'},{id:7,title:STAGES[7]},{id:11,title:'Музыка'},{id:10,title:'Титры'},{id:8,title:STAGES[8]}];
 export const stageTitle=(stage:number)=>WORKFLOW.find(s=>s.id===stage)?.title??'';
 export const nextStage=(stage:number)=>WORKFLOW[WORKFLOW.findIndex(s=>s.id===stage)+1]?.id;
 export const workflowReady=(p:Project,stage:number)=>stage===11?true:stage===10?p.items.some(i=>i.stage===5&&participates(p,i)):stageReady(p,stage===9?6:stage);

@@ -21,7 +21,7 @@ const shots=Array.from({length:10},(_,n)=>({title:`План ${n+1}`,description:
   ...(n===1?{speechType:'character',speaker:'Петя'}:n===2?{speechType:'none',speaker:''}:{})}));
 assert.match(SH.readableText(JSON.stringify({shots})),/Герой в кадре · Петя/);
 assert.throws(()=>SH.parseShots(JSON.stringify({shots:shots.map((s,n)=>n===1?{...s,speaker:''}:s)}),50),/какой герой/);
-for(const item of p.items.filter(i=>i.stage<=4)){D.addVariant(p,item.id,{kind:'text',text:item.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,item.id);}
+for(const item of p.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{kind:'text',text:item.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,item.id);}
 SB.preparePlanCards(p);
 const frames=p.items.filter(i=>i.stage===5),videos=p.items.filter(i=>i.stage===7);
 assert.equal(D.chosen(frames[1]).speechType,'character');assert.equal(D.chosen(frames[1]).speaker,'Петя');

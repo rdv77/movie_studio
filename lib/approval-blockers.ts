@@ -1,4 +1,5 @@
 import { STAGES, chosen, dependencies, approvalCurrent, variantCurrent, participates, silentFilm, type Project } from './domain';
+import {precedesStage,stagePosition} from './stage-order';
 
 export type ApprovalBlocker = { itemId?: string; stage: number; title: string; reason: string };
 
@@ -7,7 +8,7 @@ export function approvalBlockers(p: Project, stage: number): ApprovalBlocker[] {
   if (stage > 6 && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) {
     result.push({ stage: 6, title: 'Озвучка по планам', reason: 'Карточки реплик ещё не подготовлены. Откройте «Голоса» и нажмите «Подготовить озвучку по планам».' });
   }
-  for (const item of p.items.filter(i => i.stage < stage && participates(p, i))) {
+  for (const item of p.items.filter(i => precedesStage(i.stage,stage) && participates(p, i))) {
     const approved = item.variants.find(v => v.id === item.approvedId);
     const selected = chosen(item);
     const current = dependencies(p, item.stage);
@@ -43,5 +44,5 @@ export function approvalBlockers(p: Project, stage: number): ApprovalBlocker[] {
     }
     result.push({ itemId: item.id, stage: item.stage, title: item.title, reason });
   }
-  return result.sort((a, b) => a.stage - b.stage);
+  return result.sort((a, b) => stagePosition(a.stage) - stagePosition(b.stage));
 }

@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 await build({entryPoints:['lib/domain.ts','lib/bulk-approval.ts','lib/render.ts'],bundle:true,platform:'node',format:'esm',outdir:'work/tests/bulk-approval',outExtension:{'.js':'.mjs'},external:['@ffmpeg/ffmpeg']});
 const D=await import('../work/tests/bulk-approval/domain.mjs'), B=await import('../work/tests/bulk-approval/bulk-approval.mjs'), R=await import('../work/tests/bulk-approval/render.mjs');
 const p=D.newProject('Batch');
-for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:'Основа'});D.approve(p,i.id);}
 const first=p.items.find(i=>i.stage===5);
 D.addVariant(p,first.id,{kind:'image',assetId:D.id(),duration:25});D.approve(p,first.id);
 const approvedId=first.approvedId;

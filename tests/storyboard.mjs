@@ -9,7 +9,7 @@ const p = D.newProject('Existing project');
 const durations = [6,4,4,5,4,5,6,4,4,4,4];
 const shots = durations.map((duration, n) => ({ title: `План ${n+1}`, duration, description: `Действие ${n+1}`,
   camera: `Камера ${n+1}`, dialogue: `Реплика ${n+1}`, continuity: `Стыковка ${n+1}` }));
-for (const item of p.items.filter(i => i.stage <= 4)) {
+for (const item of p.items.filter(i => i.stage <= 4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
   D.addVariant(p, item.id, { text: item.stage === 4 ? JSON.stringify({ shots }) : 'Материал' });
   D.approve(p, item.id);
 }

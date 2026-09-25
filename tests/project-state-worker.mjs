@@ -17,7 +17,7 @@ const bundled=await build({stdin:{resolveDir:process.cwd(),contents:`
   import * as batch from './app/api/projects/[id]/generate-storyboard/route';
   import * as media from './app/api/assets/[id]/route';
   import {runtime,setKey,api,mutate} from './lib/server';
-  import {newProject,addVariant,approve,id,now} from './lib/domain';
+  import {newProject,addVariant,approve,id,now,stagePosition} from './lib/domain';
   import {preparePlanCards,storyboardPrompt} from './lib/storyboard';
   export {runtime} from './lib/storage';
   export default {async fetch(req){
@@ -26,7 +26,7 @@ const bundled=await build({stdin:{resolveDir:process.cwd(),contents:`
       const p=newProject('Большой проект'),shots=Array.from({length:11},(_,n)=>({title:'План '+(n+1),duration:n===0?5:4.5,
         description:'Герои идут вдоль моря. '.repeat(60),camera:'Общий план, медленный наезд',
         continuity:'Переход по движению',dialogue:'Мы встретились у моря.',speechType:'voiceover',speaker:'Катя'}));
-      for(const item of p.items.filter(i=>i.stage<=4)){
+      for(const item of p.items.filter(i=>i.stage<=4).sort((a,b)=>stagePosition(a.stage)-stagePosition(b.stage))){
         addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Утверждённая основа: тёплая рисованная анимация. '.repeat(10)});
         approve(p,item.id);
       }

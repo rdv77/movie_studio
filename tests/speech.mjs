@@ -35,7 +35,7 @@ const shots = Array.from({ length: 10 }, (_, n) => ({
   dialogue: n === 1 ? technical : n === 4 ? 'Мы ещё вернёмся.' : '',
 }));
 assert.equal(S.scriptSpeech(p).sources.length, 0);
-for (const item of p.items.filter(i => i.stage <= 5)) {
+for (const item of p.items.filter(i => i.stage <= 5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
   D.addVariant(p, item.id, { text: item.stage === 4 ? JSON.stringify({ shots }) : 'Материал' });
   D.approve(p, item.id);
 }

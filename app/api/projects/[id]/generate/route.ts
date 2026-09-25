@@ -34,7 +34,7 @@ import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, assertSpeech, withSpeechDirection } from '@/lib/speech-mode';
 import { isOpenAIImage, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from '@/lib/openai-image';
 import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
-import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from '@/lib/minimax-image';
+import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, characterImageRequest, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from '@/lib/minimax-image';
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
   const p = await loadProject(user, (await ctx.params).id);
@@ -149,12 +149,12 @@ export const POST = api(async (req, ctx) => {
       character: item.stage===1 ? item.character : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
       characterIds: kind==='video'?s.characterIds:undefined,
-      prompt: isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
+      prompt: kind==='image'&&item.stage===1 ? characterImageRequest(p,item,s.prompt,refs,n+1,s.count,m.id).prompt : isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
         p,
         item,
         (item.character ? characterPrompt(item.character)+'\n\nПравки к этой попытке: ' : '')+s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`,
         basis,
-      ) + (kind==='image'&&item.stage>1?characterReferenceNote(p,refs):'') + (kind==='image'&&item.stage===5?'\n\n'+withSpeechDirection('',info):'')),
+      ) + (kind==='image'&&item.stage>=4?characterReferenceNote(p,refs):'') + (kind==='image'&&item.stage===5?'\n\n'+withSpeechDirection('',info):'')),
       refs,
       dialogue,
       voiceId: s.voiceId,

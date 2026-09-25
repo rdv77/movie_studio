@@ -4,7 +4,7 @@ await build({entryPoints:['lib/domain.ts','lib/approval-blockers.ts'],bundle:tru
 const D=await import('../work/tests/approval-blockers/domain.mjs');
 const {approvalBlockers}=await import('../work/tests/approval-blockers/approval-blockers.mjs');
 const p=D.newProject('Film');p.speechMode='plans';
-for (const i of p.items.filter(i=>i.stage<8)) {
+for (const i of p.items.filter(i=>i.stage<8).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
   if(i.stage===6)i.sourceShot={scriptId:p.items[4].id,title:'Plan 1'};
   D.addVariant(p,i.id,{text:'Basis',kind:i.stage===6?'audio':i.stage===7?'video':'text',assetId:D.id()});D.approve(p,i.id);
 }

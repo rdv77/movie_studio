@@ -10,7 +10,7 @@ const durations = [6,4,4,5,4,5,6,4,4,4,4];
 const shots = durations.map((duration, n) => ({ title: `План ${n+1}`, duration,
   description: `Действие ${n+1}: ` + 'Дети идут по горной тропе. '.repeat(15), camera: 'Камера следует слева направо.',
   continuity: 'Сохрани флаг в правой руке.', dialogue: 'КАТЯ: Привет!' }));
-for (const item of p.items.filter(i => i.stage <= 6)) {
+for (const item of p.items.filter(i => i.stage <= 6).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
   D.addVariant(p, item.id, { text: item.stage === 4 ? JSON.stringify({ shots }) : 'Лишний контекст. '.repeat(3000) });
   D.approve(p, item.id);
 }

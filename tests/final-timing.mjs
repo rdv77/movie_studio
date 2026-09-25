@@ -41,7 +41,7 @@ globalThis.fetch=async url=>{const bytes=files.get(String(url).split('/').pop())
 const D=await import('../work/tests/final-timing/domain.mjs'),R=await import('../work/tests/final-timing/render.mjs');
 const p=D.newProject('Финальный монтаж');p.speechMode='plans';p.seconds=49;
 const shots=Array.from({length:10},(_,n)=>({title:`План ${n+1}`,description:'Дети идут',duration:n===1?4:5,camera:'Статичная',continuity:'Прямая склейка',dialogue:n===1||n===2?'КАТЯ: Привет.':''}));
-for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
 p.items=p.items.filter(i=>![5,6,7].includes(i.stage));
 for(const stage of [5,6,7])for(const [n,shot] of shots.entries()){
  if(stage===6&&!shot.dialogue)continue;

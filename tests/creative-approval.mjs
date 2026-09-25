@@ -39,7 +39,7 @@ function baseline() {
   const p = D.newProject('Creative decisions and production dependencies');
   const hero = p.items[1];
   hero.character = { name: 'Лена', appearance: 'Рыжие волосы, зелёная куртка', description: 'Любопытная путешественница', instructions: 'Сохранить внешность', refs: [D.id(), D.id()] };
-  for (const item of p.items) {
+  for (const item of [...p.items].sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
     const media = item.stage === 1 || item.stage === 5 ? 'image' : item.stage === 6 ? 'audio' : item.stage >= 7 ? 'video' : 'text';
     D.addVariant(p, item.id, {
       title: `Approved stage ${item.stage}`, text: item.stage === 4
@@ -135,7 +135,7 @@ test('creative completion survives a temporary missing upstream approval, but ge
   const withNewHero = baseline();
   const newHero = { id: D.id(), stage: 1, title: 'Новый герой', variants: [] };
   withNewHero.items.push(newHero);
-  assert(!D.stageReady(withNewHero, 2));
+  assert(D.stageReady(withNewHero, 2)); assert(!D.stageReady(withNewHero, 4));
   assert(!W.stageComplete(withNewHero, 1));
   assert(W.stageComplete(withNewHero, 2));
   assert(W.stageComplete(withNewHero, 3));
@@ -196,7 +196,7 @@ test('deleting and restoring content never recreates selection or approval', () 
   assert.equal(hero.approvedId, undefined);
   assert.equal(hero.selectedId, undefined);
   assert(!W.stageComplete(p, 1));
-  assert(!D.stageReady(p, 2));
+  assert(D.stageReady(p, 2)); assert(!D.stageReady(p, 4));
   snapshots.push(structuredClone(p));
   hero.selectedId = approvedId;
   D.approve(p, hero.id);
@@ -206,7 +206,7 @@ test('deleting and restoring content never recreates selection or approval', () 
   R.restoreCharacter(p, hero.id);
   assert.equal(hero.approvedId, undefined);
   assert(!D.isApproved(p, hero));
-  assert(!D.stageReady(p, 2));
+  assert(D.stageReady(p, 2)); assert(!D.stageReady(p, 4));
   snapshots.push(p);
 });
 

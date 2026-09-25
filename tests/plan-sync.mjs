@@ -5,7 +5,7 @@ const root='../work/tests/plan-sync/',D=await import(root+'domain.mjs'),S=await 
 const p=D.newProject('11 планов после правок');
 const durations=[6,4,4,5,4,5,6,4,4,4,4];
 const shots=durations.map((duration,n)=>({title:`План ${String(n+1).padStart(2,'0')} — История ${n+1}`,duration,description:`Действие ${n+1}`,camera:'Наезд',continuity:'Склейка',speechType:'voiceover',speaker:'Катя',dialogue:`Рассказ ${n+1}`}));
-for(const i of p.items.filter(i=>i.stage<=4)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
 S.preparePlanCards(p);
 const active=stage=>p.items.filter(i=>i.stage===stage&&D.participates(p,i));
 const script=p.items.find(i=>i.stage===4),oldVersion=script.approvedId;
@@ -47,7 +47,7 @@ assert(D.stageReady(p,6));assert.equal(A.speechPlans(p).length,11);assert.equal(
 const audio=p.items.find(i=>i.stage===6&&!i.sourceShot);D.addVariant(p,audio.id,{kind:'audio',assetId:D.id(),duration:50});D.approve(p,audio.id);
 assert.equal(R.editPlan(p,true).clips.length,11);
 // Updating only speech, with no title changes, still refreshes system drafts.
-const clean=D.newProject('Только речь');for(const i of clean.items.filter(i=>i.stage<=4)){D.addVariant(clean,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(clean,i.id);}S.preparePlanCards(clean);
+const clean=D.newProject('Только речь');for(const i of clean.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(clean,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(clean,i.id);}S.preparePlanCards(clean);
 const simpleSource=clean.items.find(i=>i.stage===4),sameTitles=structuredClone(shots);sameTitles[9].speechType='character';sameTitles[9].speaker='Петя';
 D.addVariant(clean,simpleSource.id,{text:JSON.stringify({shots:sameTitles})});D.approve(clean,simpleSource.id);
 assert(P.planCardsNeedSync(clean,5,V.scriptVideo(clean)));S.preparePlanCards(clean);assert.equal(clean.items.filter(i=>i.stage===5&&!i.planArchive).length,11);assert.equal(D.chosen(clean.items.filter(i=>i.stage===5&&!i.planArchive)[9]).speechType,'character');

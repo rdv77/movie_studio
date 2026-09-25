@@ -24,7 +24,7 @@ const {POST:tick}=await import('../work/tests/lipsync/app/api/projects/[id]/jobs
 function fixture(){
  const p=D.newProject('Test');p.speechMode='plans';
  const script=p.items[4].id;
- for(const item of p.items.filter(i=>i.stage<8)){
+ for(const item of p.items.filter(i=>i.stage<8).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){
   if(item.stage>=5)item.sourceShot={scriptId:script,title:'План 1'};
   D.addVariant(p,item.id,{text:'Реплика',dialogue:'Привет',speechType:'character',speaker:'Катя',duration:4,kind:item.stage===5?'image':item.stage===6?'audio':item.stage===7?'video':'text',assetId:item.stage>=5?D.id():undefined});D.approve(p,item.id);
  }

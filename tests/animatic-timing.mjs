@@ -32,7 +32,7 @@ assert(R.fitAnimaticToSpeech(exactMinute,[6,...Array(10).fill(1)]).seconds>60,'E
 function project(durations){
  const D=R.D,p=D.newProject('Проверка длительности');p.speechMode='plans';
  const shots=durations.map((_,n)=>({title:'План '+(n+1),description:'Море',duration:p.seconds/durations.length,camera:'Статичная камера',continuity:'Склейка',dialogue:'Привет!',speechType:'voiceover',speaker:'Катя'}));
- for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+ for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
  p.items=p.items.filter(i=>![5,7].includes(i.stage));const scriptId=p.items.find(i=>i.stage===4).id;
  for(const stage of [5,6])for(const [n,shot] of shots.entries()){const i={id:D.id(),stage,title:shot.title,sourceShot:{scriptId,title:shot.title},variants:[]};p.items.push(i);D.addVariant(p,i.id,{kind:stage===5?'image':'audio',assetId:D.id(),duration:durations[n],text:'Вариант',dialogue:shot.dialogue});D.approve(p,i.id);}
  return p;

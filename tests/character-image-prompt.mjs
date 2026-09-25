@@ -5,13 +5,15 @@ await build({entryPoints:['lib/domain.ts','lib/models.ts','lib/minimax-image.ts'
 const base='../work/tests/character-image-prompt/',D=await import(base+'lib/domain.mjs'),I=await import(base+'lib/minimax-image.mjs'),M=await import(base+'lib/models.mjs'),Z=await import(base+'lib/zencreator-models.mjs'),G=await import(base+'app/api/projects/[id]/generate/route.mjs');
 const p=D.newProject('Проверка портрета'),hero=p.items.find(i=>i.stage===1),script=p.items.find(i=>i.stage===0),style=p.items.find(i=>i.stage===2);
 D.addVariant(p,script.id,{text:'СЦЕНАРИЙ_НЕ_ОТПРАВЛЯТЬ '+('Сюжет большого фильма. '.repeat(5000))});D.approve(p,script.id);
+D.addVariant(p,style.id,{text:'УТВЕРЖДЁННЫЙ_СТИЛЬ: гуашь, тёплая палитра.'});D.approve(p,style.id);
+D.addVariant(p,p.items[3].id,{text:'ЛОКАЦИЯ: лесная деревня.'});D.approve(p,p.items[3].id);
 hero.character={name:'Лена',appearance:'Рыжие волосы, зелёные глаза, синяя куртка.',description:'Добрая, любознательная.',instructions:'Сохрани лицо первого прообраза, причёску второго.',refs:[D.id(),D.id()]};
 D.addVariant(p,hero.id,{kind:'image',assetId:D.id(),text:'СЛУЖЕБНАЯ_ИСТОРИЯ',character:structuredClone(hero.character)});D.approve(p,hero.id);
-D.addVariant(p,style.id,{text:'УТВЕРЖДЁННЫЙ_СТИЛЬ: гуашь, тёплая палитра.'});D.approve(p,style.id);
+
 const other={...hero,id:D.id(),title:'ЧУЖОЙ_ГЕРОЙ',character:{...hero.character,name:'ЧУЖОЙ_ГЕРОЙ'},variants:[],approvedId:undefined,selectedId:undefined};p.items.push(other);
 D.addVariant(p,other.id,{kind:'image',assetId:D.id(),text:'ЧУЖОЙ_ГЕРОЙ',character:other.character});D.approve(p,other.id);
 const task='Создай один образ героя на простом фоне.',refs=hero.character.refs;
-const preview=I.compactImageRequest(p,hero,task,refs,1,2,Z.ZEN_IMAGE_PROMPT_LIMIT);
+const preview=I.characterImageRequest(p,hero,task,refs,1,2);
 assert(preview.length<5000);assert(!preview.shortened);
 for(const text of ['Лена','Рыжие волосы','Добрая','Сохрани лицо первого','УТВЕРЖДЁННЫЙ_СТИЛЬ',task,'только этого героя'])assert(preview.prompt.includes(text),text);
 for(const absent of ['СЦЕНАРИЙ_НЕ_ОТПРАВЛЯТЬ','СЛУЖЕБНАЯ_ИСТОРИЯ','ЧУЖОЙ_ГЕРОЙ',hero.approvedId,...refs,'"deps"'])assert(!preview.prompt.includes(absent),absent);
@@ -28,4 +30,12 @@ for(const j of state.jobs){assert(j.prompt.length<=5000);assert.deepEqual(j.refs
 response=await G.POST(req(payload),ctx);assert.equal(response.status,200);assert.equal(state.jobs.length,models.length*2,'Repeated batch does not add more paid jobs');
 globalThis.state=structuredClone(long);response=await G.POST(req({...payload,batchId:D.id()}),ctx);assert.equal(response.status,200);assert(state.jobs.every(j=>j.prompt.length<=5000));assert.deepEqual(state.items,long.items);
 globalThis.state=structuredClone(p);state.limit='1';response=await G.POST(req({...payload,estimates:Object.fromEntries(models.map(m=>[m,'2']))}),ctx);assert.equal(response.status,400);assert.equal(state.jobs.length,0,'Large selections still respect the budget atomically');
-console.log('PASS character image prompts: >100k script excluded, correct hero/style/photo instructions, visible 5000-char compaction, all 8 Zen image models × 2 variants, deduplication, immutable approvals/ref order, idempotency and budget protection.');
+for(const m of M.MODELS.filter(m=>m.kind==='image')){
+ globalThis.state=structuredClone(long);
+ const request={...payload,batchId:D.id(),models:[m.id],count:1};
+ const response=await G.POST(req(request),ctx);assert.equal(response.status,200,m.id+': '+await response.clone().text());
+ const actual=state.jobs[0],expected=I.characterImageRequest(long,long.items.find(i=>i.id===hero.id),task,refs,1,1,m.id);
+ assert.equal(actual.prompt,expected.prompt,m.id+' preview and queued prompt differ');assert(actual.prompt.length<=expected.limit,m.id);
+ assert(actual.prompt.includes('ЛОКАЦИЯ'));assert(actual.prompt.includes('УТВЕРЖДЁННЫЙ_СТИЛЬ'));assert.deepEqual(state.items,long.items);
+}
+console.log('PASS character image prompts: huge script excluded, approved style/location included for every image model, preview equals API jobs, bounded compaction, immutable cards/references, idempotency and budget protection.');

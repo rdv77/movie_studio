@@ -1,4 +1,6 @@
 import type { SpeechType } from './speech-mode';
+import {precedesStage} from './stage-order';
+export {precedesStage,stagePosition,CREATIVE_STAGE_ORDER} from './stage-order';
 import type { PlanCaption } from './captions';
 import { speechInfo } from './speech-mode';
 import { parseShots } from './shots';
@@ -190,7 +192,7 @@ export function dependencies(p: Project, stage: number): string {
   return JSON.stringify([
     p.configVersion,
     ...p.items
-      .filter((i) => i.stage < stage && participates(p, i))
+      .filter((i) => precedesStage(i.stage,stage) && participates(p, i))
       .map((i) => [i.id, i.approvedId ?? null]),
     ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
     ...(stage===8&&p.assemblyCuts?.length ? [['assemblyCuts',p.assemblyCuts]] : []),
@@ -201,7 +203,7 @@ export function stageReady(p: Project, stage: number): boolean {
   if(stage===8&&musicIssue(p))return false;
   if (stage > 6 && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items
-    .filter((i) => i.stage < stage && participates(p, i))
+    .filter((i) => precedesStage(i.stage,stage) && participates(p, i))
     .every((i) => approvalCurrent(p, i));
 }
 // Creative decisions survive upstream edits. Generation requests still use the
@@ -281,7 +283,7 @@ export function deleteVariant(p: Project, itemId: string, variantId: string) {
   if (!variant) throw new Error('Вариант уже удалён или не найден. Обновите карточку.');
   const active = p.jobs.filter(j => ['queued','dispatching','pending','saving'].includes(j.status));
   if (active.some(j => j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId ||
-    (j.purpose !== 'voice-test' && item.approvedId === variantId && getItem(p,j.itemId).stage > item.stage)))
+    (j.purpose !== 'voice-test' && item.approvedId === variantId && precedesStage(item.stage,getItem(p,j.itemId).stage))))
     throw new Error('Этот вариант используется текущей генерацией. Дождитесь её завершения или отмените неотправленные попытки.');
   p.removedVariants ??= [];
   p.removedVariants.push({itemId,variant,removedAt:now()});
@@ -391,7 +393,7 @@ export function promptFor(
 ) {
   if (item.stage === 4) instruction += '\nРаздели закадровый рассказ и реплики видимых героев. Для каждого плана явно заполни speechType: voiceover (закадровый голос, внутренний монолог), character (герой говорит в кадре) или none (без речи). speaker — имя рассказчика или одного говорящего героя; для none пустая строка. В dialogue записывай только произносимые слова, без имени и ремарок. Один план — один вид речи и один говорящий. Если рассказчик сменяется героем или меняется говорящий, раздели действие на последовательные планы, сохранив общий хронометраж. Для none dialogue пустой. Не задавай артикуляцию персонажей при voiceover или none.';
   const context = p.items
-    .filter((i) => i.stage < item.stage && isApproved(p, i))
+    .filter((i) => precedesStage(i.stage,item.stage) && isApproved(p, i))
     .map((i) => ({
       stage: STAGES[i.stage],
       material: i.variants.find(v=>v.id===i.approvedId)?.character?.name ?? i.title,

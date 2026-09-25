@@ -47,7 +47,7 @@ try {
  assert.equal(R.videoDurationIssue('План',10,[M.GOOGLE_OMNI]),'');assert(R.videoDurationIssue('План',7,[M.GOOGLE_OMNI,'grok-imagine-video-1.5']));
  // Both entry points admit a 7-second plan, enforce budget and preserve idempotency.
  const p=D.newProject('Google'),shots=Array.from({length:10},(_,n)=>({title:'План '+n,description:'Лес',duration:n===0?7:n===1?3:5,camera:'Наезд',dialogue:'',speechType:'none',continuity:'Склейка'}));
- for(const i of p.items.filter(i=>i.stage<7)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+ for(const i of p.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
  const item=p.items.find(i=>i.stage===7);item.title='План 0';item.sourceShot={scriptId:p.items.find(i=>i.stage===4).id,title:'План 0'};
  const ctx={params:Promise.resolve({id:p.id})},req=b=>new Request('https://test/api',{method:'POST',body:JSON.stringify(b)});
  const body={revision:p.revision,batchId:D.id(),itemId:item.id,models:['veo-3.1-fast-generate-preview'],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{'veo-3.1-fast-generate-preview':'1'}};

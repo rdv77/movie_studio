@@ -4,7 +4,7 @@ await build({entryPoints:['lib/domain.ts','lib/render.ts','lib/bulk-approval.ts'
 const D=await import('../work/tests/selected-speech/domain.mjs'), R=await import('../work/tests/selected-speech/render.mjs'),B=await import('../work/tests/selected-speech/bulk-approval.mjs');
 const p=D.newProject('Voice choice');p.speechMode='plans';
 const shots=Array.from({length:10},(_,n)=>({title:`Plan ${n}`,description:'Scene',duration:5,camera:'Still',continuity:'Cut',dialogue:'Hello'}));
-for(const item of p.items.filter(i=>i.stage<5)){D.addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Base'});D.approve(p,item.id)}
+for(const item of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Base'});D.approve(p,item.id)}
 const scriptId=p.items[4].id;p.items=p.items.filter(i=>![5,6,7].includes(i.stage));
 for(const stage of [5,6,7])for(const shot of shots){
  const item={id:D.id(),stage,title:shot.title,sourceShot:{scriptId,title:shot.title},variants:[]};p.items.push(item);

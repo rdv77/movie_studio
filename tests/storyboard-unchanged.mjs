@@ -4,7 +4,7 @@ const base='../work/tests/storyboard-approval/',D=await import(base+'lib/domain.
 const p=D.newProject('Unchanged plans');
 const shots=Array.from({length:10},(_,n)=>({title:'План '+(n+1),description:'Сцена '+n,duration:5,camera:'Общий план',dialogue:'',continuity:'Прямая склейка',speechType:'none'}));
 const script=p.items.find(i=>i.stage===4);
-for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
 const oldId=script.approvedId;
 const frames=[];
 for(const [n,shot] of shots.entries()){

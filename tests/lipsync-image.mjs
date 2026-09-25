@@ -20,7 +20,7 @@ const D=await import('../work/tests/lipsync-image/lib/domain.mjs'),L=await impor
 const {POST:queue}=await import('../work/tests/lipsync-image/app/api/projects/[id]/generate-lipsync/route.mjs');
 const {POST:tick}=await import('../work/tests/lipsync-image/app/api/projects/[id]/jobs/[jobId]/route.mjs');
 const p=D.newProject('Image test');p.speechMode='plans';
-for(const item of p.items.filter(i=>i.stage<7)){
+for(const item of p.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){
  if(item.stage>=5)item.sourceShot={scriptId:p.items[4].id,title:'План 1'};
  D.addVariant(p,item.id,{text:'Основа',dialogue:'Привет',speechType:'character',speaker:'Петя',duration:4,kind:item.stage===5?'image':item.stage===6?'audio':'text',assetId:item.stage>=5?D.id():undefined});D.approve(p,item.id);
 }

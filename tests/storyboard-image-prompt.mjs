@@ -6,7 +6,7 @@ const root='../work/tests/storyboard-image-prompt/',D=await import(root+'lib/dom
 const p=D.newProject('Компактная раскадровка'),durations=[6,4,4,5,4,5,6,4,4,4,4];
 const shots=durations.map((duration,n)=>({title:`План ${n+1}`,duration,description:`ДЕЙСТВИЕ_${n}: `+'Прогулка у моря. '.repeat(190),camera:'Крупный план, наезд',continuity:'Переход на стоящего справа героя',dialogue:n===0?'Привет!':'Закадровая речь',speechType:n===0?'character':'voiceover',speaker:n===0?'Петя':'Катя'}));
 const hero={name:'Петя',appearance:'Рыжие волосы, зелёная рубашка',description:'Смелый и любопытный',instructions:'Сохрани веснушки',refs:[D.id()]};
-for(const item of p.items.filter(i=>i.stage<=4)){
+for(const item of p.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){
   const data=item.stage===0?{text:'ОБЩИЙ_СЦЕНАРИЙ '+'Длинный сюжет. '.repeat(5000)}:item.stage===1?{kind:'image',assetId:D.id(),text:'Образ',character:structuredClone(hero)}:item.stage===2?{text:'УТВЕРЖДЁННЫЙ_СТИЛЬ: тёплая гуашь, мягкий вечерний свет.'}:item.stage===3?{kind:'image',assetId:D.id(),text:'НЕВЫБРАННАЯ_ЛОКАЦИЯ'}:{text:JSON.stringify({shots})};
   D.addVariant(p,item.id,data);D.approve(p,item.id);
 }

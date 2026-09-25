@@ -8,7 +8,7 @@ export const asset=async()=>{throw new Error('No media needed')};`}));}};
 await build({entryPoints:['lib/domain.ts','lib/script-approval.ts','lib/approval-blockers.ts','app/api/projects/[id]/route.ts'],bundle:true,platform:'node',format:'esm',outbase:'.',outdir:'work/tests/script-approval',outExtension:{'.js':'.mjs'},plugins:[mock]});
 const base='../work/tests/script-approval/',D=await import(base+'lib/domain.mjs'),S=await import(base+'lib/script-approval.mjs'),B=await import(base+'lib/approval-blockers.mjs'),{PATCH}=await import(base+'app/api/projects/[id]/route.mjs');
 const p=D.newProject('Reviewed script');
-for(const item of p.items.filter(i=>i.stage<=5)){D.addVariant(p,item.id,{text:'Сохранённый текст'});D.approve(p,item.id);}
+for(const item of p.items.filter(i=>i.stage<=5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{text:'Сохранённый текст'});D.approve(p,item.id);}
 const script=p.items[4],source=structuredClone(D.chosen(script)),board=structuredClone(p.items[5]);
 p.jobs.push({id:D.id(),status:'done',itemId:script.id,model:'test',deps:source.deps,actual:'123',refs:[]});
 D.addVariant(p,p.items[0].id,{text:'Изменённая основа'});D.approve(p,p.items[0].id);

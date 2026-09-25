@@ -12,7 +12,7 @@ export function characterPrompt(c: CharacterBrief) {
 }
 export function characterImageRefs(p: Project, item: Item, extra: string[]) {
   const fixed = item.character && item.stage === 1 ? item.character.refs
-    : item.stage > 1 ? approvedCharacters(p).map(c=>c.assetId) : [];
+    : item.stage >= 4 ? approvedCharacters(p).map(c=>c.assetId) : [];
   return [...new Set([...fixed,...extra])];
 }
 export function characterReferenceNote(p: Project, refs: string[]) {

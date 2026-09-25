@@ -30,7 +30,7 @@ const {D,A,W,R,compare,tick,patch,characterRemovalReason}=await import('../work/
 function fixture(){
  const p=D.newProject('Раздельная озвучка');p.speechMode='plans';
  const shots=Array.from({length:10},(_,n)=>({title:'План '+n,description:'У моря',duration:5,camera:'Наезд',continuity:'Склейка',dialogue:'Привет, мир!',speechType:'voiceover',speaker:'Катя'}));
- for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+ for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
  p.items=p.items.filter(i=>![5,7].includes(i.stage));const scriptId=p.items.find(i=>i.stage===4).id;
  for(const stage of [5,6,7])for(const shot of shots){const i={id:D.id(),stage,title:shot.title,sourceShot:{scriptId,title:shot.title},variants:[]};p.items.push(i);D.addVariant(p,i.id,{kind:stage===5?'image':stage===6?'audio':'video',assetId:D.id(),duration:5,text:'Вариант',dialogue:shot.dialogue,voiceId:'old'});D.approve(p,i.id);}
  return p;

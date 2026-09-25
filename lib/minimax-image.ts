@@ -22,6 +22,25 @@ const shorten = (s: string, n: number) => {
   return (space>n*0.7?cut.slice(0,space):cut).trimEnd()+'…';
 };
 
+// Separate quotas keep both style and locations present even with many cards.
+// Only approved descriptions are included; never embed serialized variants.
+export function characterVisualContext(p:Project) {
+  const summary=(stage:number)=>{
+    const cards=p.items.filter(i=>i.stage===stage&&isApproved(p,i));
+    const perCard=Math.max(1,Math.floor(900/Math.max(1,cards.length))-3);
+    return shorten(cards.map(card=>{
+      const v=card.variants.find(v=>v.id===card.approvedId)!;
+      const brief=v.kind==='text'?v.text:p.jobs.find(j=>j.id===v.jobId)?.brief||v.text;
+      return shorten(clean(`${card.title}: ${brief||'визуальный образ по утверждённому референсу'}`),perCard);
+    }).join('; '),900);
+  };
+  return {style:summary(2),locations:summary(3)};
+}
+export function characterImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,modelId='') {
+  const limit=isMiniMaxImage(modelId)?MINIMAX_IMAGE_PROMPT_LIMIT:4000;
+  return {...compactImageRequest(p,item,instruction,refs,index,count,limit),limit};
+}
+
 // A separate, visible compact prompt. Never trim a serialized screenplay or
 // mutate the director's source cards. Preview and queued jobs use this function.
 export function miniMaxImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1) {
@@ -60,9 +79,15 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
     add('Характер',character.description,2);
     add('Работа с исходными изображениями',character.instructions,5);
   }
-  for(const c of item.stage===1?[]:approvedCharacters(p))
+  for(const c of item.stage<4?[]:approvedCharacters(p))
     add(`Герой ${c.profile.name}`,`${refs.includes(c.assetId)?`Референс ${refs.indexOf(c.assetId)+1}. `:''}${c.profile.appearance||c.profile.description}`,2);
-  for(const card of p.items.filter(i=>[2,3].includes(i.stage)&&isApproved(p,i))) {
+  if(item.stage===1){
+    const context=characterVisualContext(p);
+    add('Стиль',context.style,3);
+    add('Локации и мир',context.locations,3);
+    add('Единство образа','Согласуй рисунок, фактуры, палитру, свет и костюм героя с утверждённым стилем и миром. Локации задают окружение истории, а портрет остаётся на простом фоне.',2);
+  }
+  for(const card of p.items.filter(i=>item.stage!==1&&[2,3].includes(i.stage)&&i.stage<item.stage&&isApproved(p,i))) {
     const v=card.variants.find(v=>v.id===card.approvedId)!;
     if(card.stage===3&&v.kind!=='text'&&!refs.includes(v.assetId??''))continue;
     add(card.stage===2?'Стиль':'Локация',v.text,2);

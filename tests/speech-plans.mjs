@@ -4,7 +4,7 @@ await build({entryPoints:['lib/domain.ts','lib/speech.ts','lib/render.ts'],bundl
 const D=await import('../work/tests/speech-plans/domain.mjs'), S=await import('../work/tests/speech-plans/speech.mjs'), R=await import('../work/tests/speech-plans/render.mjs');
 const p=D.newProject('По планам');
 const shots=Array.from({length:10},(_,n)=>({title:`План ${n+1}`,description:'Действие',duration:5,camera:'Наезд',continuity:'Склейка',dialogue:n===9?'':'КАТЯ, ЗА КАДРОМ: Реплика '+n+'.'}));
-for(const i of p.items.filter(i=>i.stage<=4)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
 const script=p.items[4];
 p.items=p.items.filter(i=>i.stage!==5);
 for(const s of shots){const i={id:D.id(),stage:5,title:s.title,sourceShot:{scriptId:script.id,title:s.title},variants:[]};p.items.push(i);D.addVariant(p,i.id,{kind:'image',assetId:D.id(),duration:5});D.approve(p,i.id);}

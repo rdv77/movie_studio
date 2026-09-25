@@ -16,7 +16,7 @@ globalThis.fetch=async url=>{const data=files.get(String(url).split('/').pop());
 const D=await import('../work/tests/music-render/domain.mjs'),R=await import('../work/tests/music-render/render.mjs'),M=await import('../work/tests/music-render/music.mjs');
 const p=D.newProject('Музыка и речь');p.speechMode='plans';p.seconds=12;
 const shots=Array.from({length:3},(_,n)=>({title:'План '+n,description:'Сцена',duration:4,camera:'Статичная',continuity:'Склейка',dialogue:n===1?'Реплика':'',speechType:n===1?'voiceover':'none'}));
-for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id)}
+for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id)}
 p.items=p.items.filter(i=>![5,6,7].includes(i.stage));
 for(const stage of [5,6,7])for(const [n,shot] of shots.entries()){if(stage===6&&n!==1)continue;const i={id:D.id(),stage,title:shot.title,sourceShot:{scriptId:p.items.find(i=>i.stage===4).id,title:shot.title},variants:[]};p.items.push(i);D.addVariant(p,i.id,{kind:stage===5?'image':stage===6?'audio':'video',assetId:stage===6?'voice':'video',duration:4,speechType:shot.speechType,dialogue:shot.dialogue});D.approve(p,i.id)}
 const music=D.makeVariant(p,p.items[0],{kind:'audio',assetId:'music',duration:3});p.music={variants:[music],selectedId:music.id,approvedId:music.id,settings:{...M.DEFAULT_MUSIC,enabled:true,fade:0}};p.music.approvedSettings=JSON.stringify(p.music.settings);

@@ -4,7 +4,7 @@ await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib
 const {D,R,A,PATCH}=await import('../work/tests/assembly-cuts.mjs');
 const p=D.newProject('Монтаж');p.speechMode='plans';p.seconds=15;
 const shots=Array.from({length:3},(_,n)=>({title:'План '+n,description:'Цех',duration:5,camera:'Статичная',continuity:'Склейка',dialogue:'Привет',speechType:'voiceover'}));
-for(const i of p.items.filter(i=>i.stage<5)){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
+for(const i of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}
 p.items=p.items.filter(i=>![5,6,7].includes(i.stage));
 const scriptId=p.items.find(i=>i.stage===4).id;
 for(const stage of [5,6,7])for(const [n,s] of shots.entries()){

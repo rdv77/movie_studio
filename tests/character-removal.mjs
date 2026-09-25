@@ -4,11 +4,11 @@ await build({entryPoints:['lib/domain.ts','lib/characters.ts','lib/character-rem
 const root='../work/tests/character-removal/',D=await import(root+'lib/domain.mjs'),C=await import(root+'lib/characters.mjs'),R=await import(root+'lib/character-removal.mjs'),S=await import(root+'lib/style-approval.mjs'),B=await import(root+'lib/approval-blockers.mjs');
 const api=await import(root+'app/api/projects/[id]/route.mjs'),G=await import(root+'app/api/projects/[id]/generate/route.mjs');
 const p=D.newProject('Стиль и герои');
-for(const item of p.items.filter(i=>i.stage<=3)){D.addVariant(p,item.id,{text:'Утверждённая основа'});D.approve(p,item.id);}
-const legacy=p.items[1],style=p.items[2],styleId=style.approvedId;
+for(const item of p.items.filter(i=>i.stage<=3).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{text:'Утверждённая основа'});D.approve(p,item.id);}
+const legacy=p.items[1],style=p.items[2],styleId=style.approvedId; D.chosen(style).deps='legacy-style-basis';
 const hero={id:D.id(),stage:1,title:'Петя',character:{name:'Петя',appearance:'Рыжий мальчик',description:'Смелый',instructions:'',refs:[]},variants:[]};p.items.push(hero);
-assert(!D.stageReady(p,2));assert.match(S.styleReapprovalReason(p,style.id,styleId),/все нужные карточки героев/);
-assert.throws(()=>S.reapproveStyle(p,style.id,styleId));
+assert(D.stageReady(p,2));assert.equal(S.styleReapprovalReason(p,style.id,styleId),'');
+assert(D.stageReady(p,1));
 D.addVariant(p,hero.id,{kind:'image',assetId:D.id(),character:hero.character});D.approve(p,hero.id);
 assert(D.stageReady(p,2));assert(D.isApproved(p,style));assert.equal(S.styleReapprovalReason(p,style.id,styleId),'');
 const before=structuredClone(style),history={id:D.id(),itemId:style.id,status:'done',deps:style.variants[0].deps,actual:'25',refs:[],model:'old',prompt:'old'};p.jobs.push(history);
@@ -20,7 +20,7 @@ const beforeRemoval=structuredClone(p);R.removeCharacter(p,legacy.id);assert(!D.
 S.reapproveStyle(p,style.id,styleId);assert(D.isApproved(p,style));assert.equal(style.variants.length,2,'Reapproval does not create a version');
 assert.equal(C.approvedCharacters(p).length,1);const assetId=D.chosen(hero).assetId;R.removeCharacter(p,hero.id);assert.equal(C.approvedCharacters(p).length,0);assert(!D.promptFor(p,p.items[4],'Сценарий').includes('Рыжий мальчик'));assert.equal(D.chosen(hero).assetId,assetId,'Files and variants are retained');
 assert.throws(()=>D.addVariant(p,hero.id,{text:'new'}),/восстановите/);assert.throws(()=>D.approve(p,hero.id),/восстановите/);
-R.restoreCharacter(p,hero.id);assert(!hero.removedAt);assert.equal(hero.approvedId,undefined);assert(!D.stageReady(p,2));assert.equal(D.chosen(hero).assetId,assetId);
+R.restoreCharacter(p,hero.id);assert(!hero.removedAt);assert.equal(hero.approvedId,undefined);assert(D.stageReady(p,2));assert(!D.stageReady(p,4));assert.equal(D.chosen(hero).assetId,assetId);
 globalThis.state=structuredClone(beforeRemoval);const ctx={params:Promise.resolve({id:p.id})};const req=b=>new Request('http://localhost',{method:'PATCH',body:JSON.stringify(b)});
 let response=await api.PATCH(req({revision:state.revision,action:'removeCharacter',itemId:hero.id}),ctx);assert.equal(response.status,200);assert(state.items.find(i=>i.id===hero.id).removedAt);
 response=await api.PATCH(req({revision:state.revision,action:'renameItem',itemId:hero.id,data:{title:'Недоступно'}}),ctx);assert.equal(response.status,400);

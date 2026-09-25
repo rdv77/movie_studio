@@ -36,7 +36,7 @@ assert.equal((await patch(req(save),ctx)).status,200);
 assert.equal(state.items.length,9,'Empty character placeholder is reused');assert.deepEqual(state.items[1].character,profile);
 assert.equal(state.items[1].approvedId,undefined);assert.equal(state.items[1].variants.length,0,'Draft can be saved before screenplay approval');
 const shots=Array.from({length:10},(_,n)=>({title:'План '+(n+1),description:'Катя помогает другу.',duration:5,camera:'Средний план',continuity:'Прямая склейка',dialogue:'Привет'}));
-for(const item of state.items.filter(i=>i.stage<7)) {
+for(const item of state.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
  if(item.stage>=5)item.sourceShot={scriptId:state.items[4].id,title:'План 1'};
  D.addVariant(state,item.id,{kind:[1,3,5].includes(item.stage)?'image':item.stage===6?'audio':'text',assetId:item.stage===1?approvedImage:item.stage>=3&&item.stage!==4?firstFrame:undefined,
   text:item.stage===4?JSON.stringify({shots}):'Утверждённая основа',character:item.stage===1?structuredClone(profile):undefined,duration:5});

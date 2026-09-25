@@ -5,7 +5,7 @@ const D=await import('../work/tests/video-approval/domain.mjs');
 const V=await import('../work/tests/video-approval/video-approval.mjs');
 const B=await import('../work/tests/video-approval/approval-blockers.mjs');
 const p=D.newProject('Film');
-for(const item of p.items.filter(i=>i.stage<8)) {
+for(const item of p.items.filter(i=>i.stage<8).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
   D.addVariant(p,item.id,{text:'Reviewed',kind:item.stage===6?'audio':item.stage===7?'video':'text',assetId:D.id(),trim:.2});D.approve(p,item.id);
 }
 const video=p.items[7],audio=p.items[6],source=structuredClone(D.chosen(video));

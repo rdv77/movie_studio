@@ -9,7 +9,7 @@ await build({entryPoints:['lib/domain.ts','lib/reference-selection.ts','lib/stor
 const root='../work/tests/reference-selection/',D=await import(root+'lib/domain.mjs'),R=await import(root+'lib/reference-selection.mjs'),S=await import(root+'lib/storyboard.mjs'),A=await import(root+'app/api/projects/[id]/route.mjs'),G=await import(root+'app/api/projects/[id]/generate/route.mjs'),B=await import(root+'app/api/projects/[id]/generate-storyboard/route.mjs');
 const p=D.newProject('References'),hero=D.id(),extra=D.id(),deleted=D.id();
 const script=JSON.stringify({shots:Array.from({length:10},(_,n)=>({title:'Plan '+n,description:'Герой у окна',duration:5,camera:'Общий план',dialogue:'',continuity:'Прямая склейка',speechType:'none'}))});
-for(const item of p.items.filter(i=>i.stage<=4)){D.addVariant(p,item.id,item.stage===1?{kind:'image',assetId:hero,character:{name:'Герой',appearance:'Рыжий',description:'Смелый',instructions:'',refs:[]}}:{text:item.stage===4?script:'Основа'});D.approve(p,item.id);}
+for(const item of p.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,item.stage===1?{kind:'image',assetId:hero,character:{name:'Герой',appearance:'Рыжий',description:'Смелый',instructions:'',refs:[]}}:{text:item.stage===4?script:'Основа'});D.approve(p,item.id);}
 S.preparePlanCards(p);const frame=p.items.find(i=>i.stage===5&&!i.planArchive);
 const dead=D.addVariant(p,frame.id,{kind:'image',assetId:deleted,text:'Удалённый вариант'});D.deleteVariant(p,frame.id,dead.id);frame.selectedId=frame.variants[0].id;
 assert(R.hiddenReferences(p).has(deleted));assert(!R.hiddenReferences(p).has(hero));

@@ -21,7 +21,7 @@ assert.match(R.speechTimingMessage(4,0,4,6),/Речь помещается/);
 assert.match(R.speechTimingMessage(4,5,4,6),/за концом/);
 assert.match(R.speechTimingMessage(NaN,0,4,6),/не определена/);
 const p=D.newProject('Timing'),shots=Array.from({length:10},(_,n)=>({title:'План '+n,description:'Лес',duration:n===0?6.5:n===1?3.5:5,camera:'Наезд',dialogue:'Рассказ',speechType:'voiceover',continuity:'Склейка'}));
-for(const item of p.items.filter(i=>i.stage<7)){D.addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Основа',kind:item.stage===6?'audio':'text',assetId:item.stage===6?D.id():undefined});D.approve(p,item.id);}
+for(const item of p.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{text:item.stage===4?JSON.stringify({shots}):'Основа',kind:item.stage===6?'audio':'text',assetId:item.stage===6?D.id():undefined});D.approve(p,item.id);}
 const video=p.items.find(i=>i.stage===7),voice=p.items.find(i=>i.stage===6),script=p.items.find(i=>i.stage===4);
 video.title='План 0';video.sourceShot={scriptId:script.id,title:'План 0'};voice.sourceShot={...video.sourceShot};p.speechMode='plans';
 const approved=D.chosen(voice);D.addVariant(p,voice.id,{kind:'audio',assetId:D.id(),duration:99});

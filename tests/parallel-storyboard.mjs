@@ -9,7 +9,7 @@ await build({entryPoints:['lib/domain.ts','lib/generation-queue.ts','app/api/pro
 const base='../work/tests/parallel-storyboard/',D=await import(base+'lib/domain.mjs'),Q=await import(base+'lib/generation-queue.mjs'),{POST}=await import(base+'app/api/projects/[id]/generate/route.mjs');
 const p=D.newProject('Parallel');
 const script=JSON.stringify({shots:Array.from({length:10},(_,n)=>({title:'Plan '+n,description:'Герой у окна',duration:5,camera:'Общий план',dialogue:'',continuity:'Прямая склейка',speechType:'none'}))});
-for(const item of p.items.filter(i=>i.stage<5)){D.addVariant(p,item.id,{text:item.stage===4?script:'Основа'});D.approve(p,item.id);}
+for(const item of p.items.filter(i=>i.stage<5).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,item.id,{text:item.stage===4?script:'Основа'});D.approve(p,item.id);}
 const a=p.items[5],b={id:D.id(),title:'Plan B',stage:5,variants:[]};p.items.push(b);
 a.sourceShot={scriptId:p.items[4].id,title:'Plan 0'};b.sourceShot={scriptId:p.items[4].id,title:'Plan 1'};
 D.addVariant(p,a.id,{text:'Кадр A'});D.addVariant(p,b.id,{text:'Кадр B'});

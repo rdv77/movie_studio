@@ -9,7 +9,7 @@ await build({entryPoints:['lib/domain.ts','lib/storyboard-approval.ts','lib/appr
 const base='../work/tests/storyboard-approval/',D=await import(base+'lib/domain.mjs'),S=await import(base+'lib/storyboard-approval.mjs'),B=await import(base+'lib/approval-blockers.mjs'),{PATCH}=await import(base+'app/api/projects/[id]/route.mjs');
 const p=D.newProject('Storyboard');
 const scriptText=JSON.stringify({shots:Array.from({length:10},(_,n)=>({title:'План '+(n+1),description:'Герой у окна',duration:5,camera:'Общий план',dialogue:'',continuity:'Прямая склейка',speechType:'none'}))});
-for(const item of p.items.filter(i=>i.stage<=6)) {
+for(const item of p.items.filter(i=>i.stage<=6).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))) {
  D.addVariant(p,item.id,{text:item.stage===4?scriptText:'Сохранённый текст',kind:item.stage===5?'image':item.stage===6?'audio':'text',assetId:item.stage>=5?D.id():undefined});
  D.approve(p,item.id);
 }
