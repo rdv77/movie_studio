@@ -1,3 +1,5 @@
+import { planReferenceIds } from './plan-references';
+import { selectedReferences } from './reference-selection';
 import { isApproved, type Project, type Item, type CharacterBrief } from './domain';
 
 export function approvedCharacters(p: Project) {
@@ -12,7 +14,7 @@ export function characterPrompt(c: CharacterBrief) {
 }
 export function characterImageRefs(p: Project, item: Item, extra: string[]) {
   const fixed = item.character && item.stage === 1 ? item.character.refs
-    : item.stage >= 4 ? approvedCharacters(p).map(c=>c.assetId) : [];
+    : [5,7].includes(item.stage) ? planReferenceIds(p,item) : item.stage >= 4 ? approvedCharacters(p).map(c=>c.assetId) : [];
   return [...new Set([...fixed,...extra])];
 }
 export function characterReferenceNote(p: Project, refs: string[]) {
@@ -32,7 +34,7 @@ export function withCharacterIdentity(p: Project, prompt: string, characterIds?:
 }
 export function videoCharacterRefs(p: Project, provider: string, characterIds?:string[]) {
   const heroes=videoCharacters(p,characterIds);
-  return provider === 'xai' ? [...new Set(heroes.map(c=>c.assetId))] : [];
+  return provider === 'xai' ? selectedReferences(p,heroes.map(c=>c.assetId)) : [];
 }
 export function assertCharacterRefLimit(refs: string[], limit: number) {
   if (refs.length > limit) throw new Error(`С учётом утверждённых героев нужно ${refs.length} референсов, а модель принимает до ${limit}. Уберите дополнительные изображения или выберите модель с большим лимитом. Образы героев не исключаются автоматически.`);

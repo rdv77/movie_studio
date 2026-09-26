@@ -1,3 +1,4 @@
+import { filterPlanReferences } from '@/lib/plan-references';
 import {materialBasis} from '@/lib/material-basis';
 import { prepareFalJobs } from '@/lib/fal-models';
 import { assertSelectedReferences } from '@/lib/reference-selection';
@@ -14,9 +15,9 @@ import { isMiniMaxImage, miniMaxImageRefIssue } from '@/lib/minimax-image';
 
 const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
-  refs: z.array(z.string().uuid()).max(8), estimate: z.string().regex(/^\d+$/).nullable(),
+  refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
-  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000) })).min(1).max(120),
+  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
@@ -28,38 +29,30 @@ export const POST = api(async (req, ctx) => {
   if (p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
     throw new Error('Дождитесь текущей серии или отмените неотправленные попытки.');
   const m = model(s.model);
-  const refs = s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,{stage:5} as any,s.refs);
-  assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   if (m.kind !== 'image') throw new Error('Выберите одну модель изображений.');
-  if (m.provider === 'xai' && s.refs.length > 5) throw new Error('Grok принимает до пяти референсов.');
-  if (new Set(s.plans.map(x => x.itemId)).size !== s.plans.length) throw new Error('Один план можно включить в серию только один раз.');
-  if (new Set(s.refs).size !== s.refs.length) throw new Error('Удалите повторяющиеся референсы.');
-  let imageBytes=0;
-  const imageAssets:{mime:string;size:number}[]=[];
-  for (const ref of refs) {
-    const a = await asset(user, ref, p);
-    imageAssets.push(a);
-    if(isOpenAIImage(m.id)&&a.size>10*1024*1024)throw new Error('GPT Image: каждый референс должен быть до 10 МБ.');
-    imageBytes+=a.size;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)) throw new Error('Референс должен быть изображением PNG, JPEG или WebP.');
-  }
-  if(isOpenAIImage(m.id)&&imageBytes>OPENAI_IMAGE_REFS_BYTES)throw new Error('GPT Image: выберите референсы суммарно до 20 МБ. Запрос не отправлен.');
-  if(isMiniMaxImage(m.id)){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw new Error(issue);}
+  if(new Set(s.plans.map(x=>x.itemId)).size!==s.plans.length)throw new Error('Один план указан дважды.');
+  assertSelectedReferences(p,s.refs);
   const available = storyboardBatchPlans(p);
-  const jobs: Job[] = s.plans.map(row => {
+  const jobs: Job[] = [];
+  for (const row of s.plans) {
     const entry = available.find(x => x.item.id === row.itemId);
     if (!entry || entry.blocked) throw new Error(entry?.blocked || 'План не найден в раскадровке утверждённого сценария.');
+    const refs=filterPlanReferences(p,entry.item,row.refs!==undefined?assertSelectedReferences(p,row.refs):s.referenceMode==='selected'?s.refs:characterImageRefs(p,entry.item,s.refs));
+    assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
+    const imageAssets=[];
+    for(const ref of refs){const a=await asset(user,ref,p);if(!['image/png','image/jpeg','image/webp'].includes(a.mime))throw Error('Референс должен быть изображением PNG, JPEG или WebP.');imageAssets.push(a);}
+    if(isOpenAIImage(m.id)&&(imageAssets.some(a=>a.size>10*1024*1024)||imageAssets.reduce((n,a)=>n+a.size,0)>OPENAI_IMAGE_REFS_BYTES))throw Error('GPT Image: каждый референс до 10 МБ, суммарно до 20 МБ на план.');
+    if(isMiniMaxImage(m.id)){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw Error(issue);}
     const basis = chosen(entry.item), fields = planFields(p, entry.item, basis);
     const request=storyboardImageRequest(p,entry.item,row.prompt,refs,1,1,m.id);
     const issue=storyboardImagePromptIssue(request,m.id,entry.item.title);if(issue)throw new Error(issue);
-    return { id: id(), batchId: s.batchId, itemId: entry.item.id, model: m.id, kind: 'image',
+    const job:Job={ id: id(), batchId: s.batchId, itemId: entry.item.id, model: m.id, kind: 'image',
       brief: row.prompt, prompt: request.prompt, refs,
       ...fields, offset: 0, volume: 1, voiceId: '', deps: dependencies(p, 5), created: now(),
       status: 'queued', transportVersion: 2, estimate: s.estimate, actual: null };
-  });
+    prepareFalJobs([job],imageAssets);prepareZenJobs([job],imageAssets);jobs.push(job);
+  }
   await getKey(user, m.provider);
-  prepareFalJobs(jobs, imageAssets);
-  prepareZenJobs(jobs, imageAssets);
   assertBudget(p, jobs);
   if(p.directing)for(const job of jobs)job.reviewBasis=materialBasis(p,p.items.find(i=>i.id===job.itemId)!,job);
   p.jobs.push(...jobs);

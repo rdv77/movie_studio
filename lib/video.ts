@@ -1,3 +1,4 @@
+import { planCharacterIds } from './plan-references';
 import { id, isApproved, excludedShot, type Item, type Project } from './domain';
 import { parseShots } from './shots';
 import { MODELS } from './models';
@@ -71,7 +72,7 @@ export function videoPrompt(p: Project, item: Item) {
 export function videoGenerationPrompt(p: Project, item: Item, prompt: string, characterIds?:string[]) {
   const shot=videoShot(p,item);
   if(shot?.videoPrompt&&prompt.trim()===shot.videoPrompt.trim())return withSpeechDirection(prompt,planSpeech(p,item));
-  return withSpeechDirection(withCharacterIdentity(p,prompt,characterIds),planSpeech(p,item));
+  return withSpeechDirection(withCharacterIdentity(p,prompt,planCharacterIds(p,item,characterIds)),planSpeech(p,item));
 }
 export function videoFrame(p: Project, item: Item) {
   const title = item.sourceShot?.title ?? item.title;

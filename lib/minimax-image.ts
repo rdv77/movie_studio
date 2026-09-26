@@ -1,4 +1,5 @@
 import { chosen, isApproved, type Project, type Item } from './domain';
+import { planCharacterIds } from './plan-references';
 import { approvedCharacters } from './characters';
 import { planFields, storyboardPrompt } from './storyboard';
 import { videoShot } from './video';
@@ -80,7 +81,7 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
     add('Характер',character.description,2);
     add('Работа с исходными изображениями',character.instructions,5);
   }
-  for(const c of item.stage<4?[]:approvedCharacters(p))
+  for(const c of item.stage<4?[]:approvedCharacters(p).filter(c=>![5,7].includes(item.stage)||planCharacterIds(p,item).includes(c.itemId)))
     add(`Герой ${c.profile.name}`,`${refs.includes(c.assetId)?`Референс ${refs.indexOf(c.assetId)+1}. `:''}${c.profile.appearance||c.profile.description}`,2);
   if(item.stage===1){
     const context=characterVisualContext(p);

@@ -10,6 +10,7 @@ import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
 import { runnableJobs, newestProject, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
+import { planCharacterIds, planReferenceIds, planFrameIds, filterPlanReferences } from '@/lib/plan-references';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
 import { useEffect, useRef, useState } from 'react';
@@ -1606,8 +1607,8 @@ function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save
     <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button><Button variant="outline" disabled={busy||!valid} onClick={()=>submit()}>Сохранить карточку</Button><Button disabled={busy||!valid||!canGenerate} onClick={()=>submit(true)}><Sparkles/>Сохранить и создать образы с ИИ</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
-function CharacterReferences({p,mode='image',selectedIds,onChange,disabled=false}:{p:Project;mode?:'image'|'video'|'sync';selectedIds?:string[];onChange?:(ids:string[])=>void;disabled?:boolean}) {
-  const heroes=approvedCharacters(p);if(!heroes.length)return null;
+function CharacterReferences({p,item,mode='image',selectedIds,onChange,disabled=false}:{p:Project;item?:Item;mode?:'image'|'video'|'sync';selectedIds?:string[];onChange?:(ids:string[])=>void;disabled?:boolean}) {
+  const heroes=approvedCharacters(p).filter(c=>!item||planCharacterIds(p,item).includes(c.itemId));if(!heroes.length)return <p className="muted">В этом плане нет распознанных участников с утверждёнными образами. Портреты других героев не добавляются.</p>;
   return <section className="note" aria-label="Постоянные герои"><strong>Утверждённые герои · {heroes.length}</strong>
     {onChange&&<div className="row mt-2"><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>onChange(heroes.map(c=>c.itemId))}>Выбрать всех</Button><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>onChange([])}>Снять все галочки</Button><span>Выбрано: {(selectedIds??[]).length}</span></div>}
     <div className="reference-grid">{heroes.map(c=>{const active=!onChange||(selectedIds??[]).includes(c.itemId);return <label className={'reference '+(active?'active':'')} key={c.itemId}><img loading="lazy" src={'/api/assets/'+c.assetId} alt={`Утверждённый образ ${c.profile.name}`}/><span>{onChange?<Checkbox aria-label={`Использовать героя: ${c.profile.name}`} checked={active} disabled={disabled} onCheckedChange={checked=>onChange(checked?[...new Set([...(selectedIds??[]),c.itemId])]:(selectedIds??[]).filter(id=>id!==c.itemId))}/>:<Check size={14}/>} {c.profile.name}</span></label>;})}</div>
@@ -1894,7 +1895,7 @@ function GenerateDialog({
   useEffect(() => {
     if (open) {
       const v = chosen(item);
-      const heroes=approvedCharacters(p).map(c=>c.itemId);
+      const heroes=[5,7].includes(item.stage)?planCharacterIds(p,item):approvedCharacters(p).map(c=>c.itemId);
       setCharacterIds(v?.characterIds?.filter(id=>heroes.includes(id))??heroes);
       const k: Kind = item.character || [3, 5].includes(item.stage)
         ? 'image'
@@ -1919,7 +1920,7 @@ function GenerateDialog({
           : k === 'video' ? videoPrompt(p, item) : k === 'image' && item.stage === 5 && videoShot(p, item)
             ? storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.',
       );
-      const imageDefaults = item.character ? [] : v?.refs?.length ? v.refs
+      const imageDefaults = [5,7].includes(item.stage)?planReferenceIds(p,item):item.character ? [] : v?.refs?.length ? v.refs
         : approvedCharacters(p).length ? [] : p.items
           .filter((i: Item) => i.stage === 3 && isApproved(p, i))
           .flatMap((i: Item) => i.variants
@@ -1928,7 +1929,7 @@ function GenerateDialog({
       setRefs(k === 'image'
         ? selectedReferences(p, characterImageRefs(p, item, imageDefaults))
         : k === 'video'
-          ? (videoFrame(p, item) ? [videoFrame(p, item)!] : v?.refs?.slice(0, 1) ?? [])
+          ? (videoFrame(p, item) ? [videoFrame(p, item)!] : planFrameIds(p,item).slice(0,1))
           : v?.refs ?? []);
       const initial = initialSpeech(item, scriptAudio.sources, characters);
       setSpeech(k === 'audio' ? initial.dialogue : v?.dialogue ?? '');
@@ -1944,8 +1945,9 @@ function GenerateDialog({
   const selected = choices.filter((m) => models.includes(m.id));
   const selectableRefs=kind==='image';
   const excludedRefs=hiddenReferences(p);
-  const effectiveRefs=selectableRefs?selectedReferences(p,refs):refs;
-  const effectiveCharacters=characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
+  const effectiveRefs=selectableRefs?filterPlanReferences(p,item,refs):refs;
+  const visibleReferenceIds=[5,7].includes(item.stage)?new Set([...(kind==='video'?planFrameIds(p,item):[...planReferenceIds(p,item),...planFrameIds(p,item)]),...effectiveRefs]):undefined;
+  const effectiveCharacters=[5,7].includes(item.stage)?planCharacterIds(p,item,characterIds):characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
   const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt,effectiveCharacters):prompt;
   const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
   const heroRequests=kind==='image'&&item.stage===1?selected.map(m=>({model:m,...characterImageRequest(p,item,prompt,effectiveRefs,1,count,m.id)})):[];
@@ -2186,7 +2188,7 @@ function GenerateDialog({
             >
               <div className="reference-grid">
                 {assets
-                  .filter((a: Asset) => a.mime.startsWith('image/')&&(!selectableRefs||!excludedRefs.has(a.id)))
+                  .filter((a: Asset) => a.mime.startsWith('image/')&&(!visibleReferenceIds||visibleReferenceIds.has(a.id))&&(!selectableRefs||!excludedRefs.has(a.id)))
                   .map((a: Asset) => (
                     <div
                       className={
@@ -2230,7 +2232,7 @@ function GenerateDialog({
             </Field>
           )
         )}
-        {item.stage>=4&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
+        {item.stage>=4&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} item={item} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
         {heroRequests.length>0&&<section className="note"><strong>Герой в визуальном мире фильма</strong><p>В каждый запрос включены краткие описания утверждённого стиля и локаций. Исходные карточки сохраняются целиком. Перед запуском можно раскрыть точный промпт каждой модели.</p>{heroRequests.map(r=><details key={r.model.id}><summary>{r.model.name} · {r.length} / {r.limit} символов</summary><p className="whitespace-pre-wrap">{r.prompt}</p></details>)}</section>}
         {referenceError&&<p role="alert">{referenceError}</p>}{item.stage===1&&miniRefError&&<p role="alert">{miniRefError}</p>}
         {item.stage!==1&&falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
@@ -2327,7 +2329,7 @@ function GenerateDialog({
 function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, submit }: any) {
   const [snapshot] = useState<Project>(p);
   const [source] = useState<Item>(item);
-  const [characterIds,setCharacterIds]=useState(()=>approvedCharacters(snapshot).map(c=>c.itemId));
+  const [characterIds,setCharacterIds]=useState(()=>[...new Set(remainingVideoPlans(snapshot).flatMap(i=>planCharacterIds(snapshot,i)))]);
   const m = selectedVideoModel(snapshot, source)!;
   const [batch] = useState(() => crypto.randomUUID());
   const [rows, setRows] = useState(() => remainingVideoPlans(snapshot).map(i => ({
@@ -2348,7 +2350,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
-  const blockReasons=[...(videoCharacterRefs(snapshot,m.provider,characterIds).length>7?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
+  const blockReasons=[...(included.some(r=>videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).length>7)?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
     ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',videoPromptLimit(m.id),[m.id]))];
   const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
@@ -2366,14 +2368,13 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <ZenCost modelId={m.id} refs={1} count={included.length}/>
         <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. В монтаж войдёт длительность соответствующего плана.</p>
         {m.provider==='google'&&<p className="muted">Один первый кадр и текстовые описания выбранных героев. Оценку можно увеличить, но нельзя уменьшить ниже расчётной. Списание сверяйте в Google AI Studio; встроенный звук не заменяет утверждённые голоса.</p>}
-        <CharacterReferences p={snapshot} mode="video" selectedIds={characterIds} disabled={busy} onChange={ids=>{setCharacterIds(ids);if(m.id==='grok-imagine-video-1.5')setEstimate((0.85+0.01*videoCharacterRefs(snapshot,'xai',ids).length).toFixed(2));}}/>
-        <p className="muted small">Этот выбор героев применяется ко всем отмеченным планам серии.</p>
-        {videoCharacterRefs(snapshot,m.provider,characterIds).length>7&&<p role="alert">Grok Video принимает до 7 отдельных образов героев.</p>}
+        <p className="muted">Каждый план получает только образы своих участников и собственный первый кадр.</p>
         {rows.map((r, index) => (
           <section key={r.itemId} className="editor-surface p-4 mb-3">
             <label className="row mb-3"><Checkbox checked={r.include} onCheckedChange={v => update(r.itemId, { include: !!v })} />
               <strong>{r.title} · {r.duration} сек</strong></label>
             {r.include && <>
+              <CharacterReferences p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} mode="video" selectedIds={planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)} disabled={busy} onChange={ids=>{const local=planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!);setCharacterIds(current=>[...current.filter(id=>!local.includes(id)),...ids]);}}/>
               <div role="group" aria-label={`Первый кадр — ${r.title}`}>
                 <strong>Первый кадр этого плана</strong>
                 <p className="muted small">Все изображения этого плана. Галочкой отмечен кадр для генерации видео. Выберите одну картинку; утверждение раскадровки при этом не меняется.</p>
@@ -2396,7 +2397,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
                 {!r.ref && <p className="muted">Отметьте один первый кадр для этого плана.</p>}
                 <details className="mt-3"><summary>Выбрать другое изображение из библиотеки</summary>
                   <Drop label={`Первый кадр из библиотеки — ${r.title}`} value={r.ref} onChange={ref => update(r.itemId, { ref })}
-                    options={images.map((a, n) => ({ value: a.id, label: `${n + 1}. ${a.name}` }))} />
+                    options={images.filter(a=>r.frames.some(f=>f.assetId===a.id)||r.ref===a.id).map((a, n) => ({ value: a.id, label: `${n + 1}. ${a.name}` }))} />
                 </details>
                 <Input aria-label={`Загрузить первый кадр — ${r.title}`} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy}
                   onChange={e => { const f = e.target.files?.[0]; if (f) perform(async () => { const a = await upload(f); update(r.itemId, { ref: a.id }); }); e.target.value = ''; }} />
@@ -2716,12 +2717,13 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   const [batch] = useState(() => crypto.randomUUID());
   const [rows, setRows] = useState(() => storyboardBatchPlans(snapshot).map(({ item, hasImage, blocked }) => ({
     itemId: item.id, title: item.title, hasImage, blocked, include: !hasImage && !blocked,
-    prompt: storyboardPrompt(snapshot, item),
+    prompt: storyboardPrompt(snapshot, item), refs:planReferenceIds(snapshot,item),
   })));
-  const [refs, setRefs] = useState<string[]>(() => selectedReferences(snapshot,characterImageRefs(snapshot,{stage:5} as Item,approvedCharacters(snapshot).length?[]:[...new Set(snapshot.items.filter(i => i.stage === 3 && isApproved(snapshot, i))
-    .flatMap(i => i.variants.filter(v => v.id === i.approvedId && v.kind === 'image' && v.assetId).map(v => v.assetId!)))].slice(0, 5))));
   const [override, setOverride] = useState<string | undefined>();
-  const effectiveRefs=selectedReferences(snapshot,refs);
+  const referenceOptions=new Map(rows.map(r=>[r.itemId,planReferenceIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!)]));
+  const referencesByPlan=new Map(rows.map(r=>[r.itemId,filterPlanReferences(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.refs)]));
+  const rowRefs=(r:(typeof rows)[number])=>referencesByPlan.get(r.itemId)??[];
+  const effectiveRefs=rows.filter(r=>r.include&&!r.blocked).map(rowRefs).sort((a,b)=>b.length-a.length)[0]??[];
   const excludedRefs=hiddenReferences(snapshot);
   const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id));
   const included = rows.filter(r => r.include && !r.blocked);
@@ -2736,8 +2738,8 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Серия превысит лимит проекта.';
   }
   const refLimit = m?.provider === 'xai' ? 5 : 8;
-  const miniRefError=isFalImage(modelId)?falRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):isMiniMaxImage(modelId)?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'';
-  const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,effectiveRefs,1,1,modelId)]));
+  const miniRefError=included.map(r=>{const media=rowRefs(r).map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a);return isFalImage(modelId)?falRefIssue(media):isMiniMaxImage(modelId)?miniMaxImageRefIssue(media):'';}).find(Boolean);
+  const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,rowRefs(r),1,1,modelId)]));
   const promptErrors=new Map(rows.map(r=>[r.itemId,storyboardImagePromptIssue(compiled.get(r.itemId)!,modelId,r.title)]));
   return <Dialog open onOpenChange={v => !v && close()}>
     <DialogContent className="sm:max-w-3xl modal-scroll">
@@ -2757,6 +2759,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       {rows.map((r, index) => <section key={r.itemId} className="editor-surface p-4">
         <label className="row"><Checkbox disabled={!!r.blocked} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, include: !!v } : x))} />
           <span><strong>{r.title}</strong><small className="block muted">{r.blocked || (r.hasImage ? 'Есть изображение · будет создан новый вариант' : 'Картинки пока нет')}</small></span></label>
+        {r.include&&!r.blocked&&<div className="mt-3"><strong>Референсы этого плана · {rowRefs(r).length}</strong><div className="reference-grid">{images.filter(a=>referenceOptions.get(r.itemId)!.includes(a.id)).map(a=><label key={a.id} className={'reference '+(rowRefs(r).includes(a.id)?'active':'')}><img loading="lazy" src={'/api/assets/'+a.id} alt={a.name}/><Checkbox aria-label={r.title+' — '+a.name} checked={rowRefs(r).includes(a.id)} onCheckedChange={v=>setRows(rs=>rs.map(x=>x.itemId===r.itemId?{...x,refs:v?[...x.refs,a.id]:x.refs.filter(id=>id!==a.id)}:x))}/><span>{a.name}</span></label>)}</div>{!rowRefs(r).length&&<p className="muted">Нет подходящих изображений: используем описание этого плана и текст визуального стиля. Свой референс можно загрузить через «Создать с ИИ» в карточке плана.</p>}</div>}
         {r.include && !r.blocked && <details className="mt-3"><summary>Проверить задачу из карточки · {r.prompt.trim().length} / 20000</summary>
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
@@ -2766,16 +2769,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
       </section>)}
-      <Field label="Общие референсы героев и стиля" hint={`Только отмеченные изображения отправятся с каждым планом. Можно снять любую галочку, включая образы героев. Всего до ${refLimit} референсов.`}>
-        <div className="reference-grid">{images.map((a, index) => <div className={'reference ' + (effectiveRefs.includes(a.id) ? 'active' : '')} key={a.id}>
-          <label><img src={'/api/assets/' + a.id} alt={a.name} />
-          <Checkbox checked={effectiveRefs.includes(a.id)} disabled={!effectiveRefs.includes(a.id) && effectiveRefs.length >= refLimit}
-            onCheckedChange={v => setRefs(current => v ? [...current, a.id] : current.filter(x => x !== a.id))} />
-          <span>{index + 1}. {a.name}</span></label>
-          <Button type="button" size="sm" variant="ghost" disabled={busy} aria-label={`Убрать из референсов: ${a.name}`} onClick={()=>perform(async()=>{setSnapshot(await referenceAction(a.id));setRefs(current=>current.filter(id=>id!==a.id));})}><Trash2 size={14}/>Убрать из списка</Button>
-        </div>)}</div>
-        {!!snapshot.hiddenReferenceIds?.length&&<details><summary>Убранные референсы</summary>{(assets as Asset[]).filter(a=>snapshot.hiddenReferenceIds!.includes(a.id)).map(a=><div className="row" key={a.id}><span>{a.name}</span><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={()=>perform(async()=>setSnapshot(await referenceAction(a.id,true)))}>Вернуть в список</Button></div>)}</details>}
-      </Field>
+      <p className="muted">Референсы подбираются отдельно для каждого плана по его участникам и локации. Снятая галочка действует только на этот план.</p>
       {effectiveRefs.length > refLimit && <p role="alert">С учётом героев выбрано {effectiveRefs.length} референсов. Уберите дополнительные изображения или выберите модель с большим лимитом (до {refLimit} у текущей модели).</p>}
       <ZenCost modelId={modelId} refs={effectiveRefs.length} count={included.length}/>
       <Field label="Оценка одной картинки, USD" hint="Оценка не равна списанию. Неизвестную стоимость можно оставить пустой при отсутствии лимита проекта.">
@@ -2787,8 +2781,8 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <p className="muted">Кадры обрабатываются параллельно. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
-          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:effectiveRefs, referenceMode:'selected', estimate,
-            plans: included.map(({ itemId, prompt }) => ({ itemId, prompt })) }); close();
+          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:[], referenceMode:'selected', estimate,
+            plans: included.map(r => ({ itemId:r.itemId, prompt:r.prompt,refs:rowRefs(r) })) }); close();
         })}><Sparkles />Сгенерировать {included.length} картинок</Button></DialogFooter>
     </DialogContent>
   </Dialog>;

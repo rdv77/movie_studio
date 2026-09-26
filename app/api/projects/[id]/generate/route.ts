@@ -1,3 +1,4 @@
+import { planCharacterIds, filterPlanReferences } from '@/lib/plan-references';
 import {materialBasis} from '@/lib/material-basis';
 import {selectedVideoPromptLimit,availableForDirecting} from '@/lib/model-capabilities';
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
@@ -31,7 +32,7 @@ import { spokenText } from '@/lib/spoken-text';
 import { videoShot, videoGenerationPrompt, VIDEO_PROMPT_LIMIT,scriptVideo } from '@/lib/video';
 import { planFields } from '@/lib/storyboard';
 import { z } from 'zod';
-import { characterPrompt, characterImageRefs, characterReferenceNote, withCharacterIdentity, videoCharacterRefs, assertCharacterRefLimit } from '@/lib/characters';
+import { characterPrompt, characterImageRefs, characterReferenceNote, withCharacterIdentity, videoCharacterRefs, videoCharacters, assertCharacterRefLimit } from '@/lib/characters';
 import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, assertSpeech, withSpeechDirection } from '@/lib/speech-mode';
 import { isOpenAIImage, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from '@/lib/openai-image';
@@ -87,8 +88,10 @@ export const POST = api(async (req, ctx) => {
   if (ms.some(m => m.provider === 'sync')) throw new Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   for (const m of ms) await getKey(user, m.provider);
   const kind = ms[0].kind;
-  const refs = kind === 'image' ? s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs) : s.refs;
-  const characterRefs = kind === 'video' ? videoCharacterRefs(p,ms.some(m=>m.provider==='xai')?'xai':'',s.characterIds) : [];
+  const refs = kind === 'image' ? filterPlanReferences(p,item,s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs)) : s.refs;
+  if(kind==='video')videoCharacters(p,s.characterIds);
+  const characterIds=kind==='video'?planCharacterIds(p,item,s.characterIds):undefined;
+  const characterRefs = kind === 'video' ? videoCharacterRefs(p,ms.some(m=>m.provider==='xai')?'xai':'',characterIds) : [];
   if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
   assertCharacterRefLimit(characterRefs,7);
   let imageBytes=0;
@@ -103,7 +106,7 @@ export const POST = api(async (req, ctx) => {
   }
   if(ms.some(m=>isOpenAIImage(m.id))&&imageBytes>OPENAI_IMAGE_REFS_BYTES)throw new Error('GPT Image: выберите референсы суммарно до 20 МБ. Запрос не отправлен.');
   if(ms.some(m=>isMiniMaxImage(m.id))){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw new Error(issue);}
-  const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt,s.characterIds) : '';
+  const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt,characterIds) : '';
   const shot = ['image', 'video'].includes(kind) && [5, 7].includes(item.stage) ? videoShot(p, item) : undefined;
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
   if (kind === 'video') {
@@ -152,7 +155,7 @@ export const POST = api(async (req, ctx) => {
       volume: basis?.volume ?? 1,
       character: item.stage===1 ? item.character : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
-      characterIds: kind==='video'?s.characterIds:undefined,
+      characterIds: kind==='video'?characterIds:undefined,
       prompt: kind==='image'&&item.stage===1 ? characterImageRequest(p,item,s.prompt,refs,n+1,s.count,m.id).prompt : isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
         p,
         item,

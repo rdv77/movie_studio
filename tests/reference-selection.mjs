@@ -43,3 +43,25 @@ await A.PATCH(req({revision:state.revision,action:'restoreReference',data:{asset
 const second=D.newProject('Другой фильм');assert(!R.hiddenReferences(second).has(hero));
 for(const flag of ['denied','foreign']){state=structuredClone(p);globalThis[flag]=true;await assert.rejects(()=>A.PATCH(req({revision:p.revision,action:'hideReference',data:{assetId:hero}}),ctx));assert.deepEqual(state,p);globalThis[flag]=false;}
 console.log('PASS reference selection: no forced images in single/batch, explicit empty selection, legacy compatibility, deleted/hidden filtering, ownership, restore, project isolation, unchanged approved assets and costs.');
+
+// Each batch row has its own cast, including an explicitly empty cast.
+const scoped=structuredClone(p),otherAsset=D.id();
+const other={id:D.id(),stage:1,title:'Второй',variants:[]};scoped.items.push(other);
+D.addVariant(scoped,other.id,{kind:'image',assetId:otherAsset,character:{name:'Второй',appearance:'Синий плащ',description:'Другой герой',instructions:'',refs:[]}});D.approve(scoped,other.id);
+const source=scoped.items.find(i=>i.stage===4),data=JSON.parse(D.chosen(source).text);
+data.shots.forEach((shot,n)=>{shot.cast=n===0?['Герой']:n===1?['Второй']:[];shot.continuity='В соседнем плане Герой и Второй';shot.dialogue='Рассказчик упоминает Героя';shot.speechType='voiceover';shot.speaker='Герой';});
+D.chosen(source).text=JSON.stringify(data);
+for(const card of scoped.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage)))D.chosen(card).deps=D.dependencies(scoped,card.stage);
+S.preparePlanCards(scoped);const frames=scoped.items.filter(i=>i.stage===5&&!i.planArchive).slice(0,3);
+for(const card of frames)D.chosen(card).deps=D.dependencies(scoped,5);
+state=structuredClone(scoped);
+await B.POST(req({...bulk,revision:state.revision,batchId:D.id(),refs:[],plans:frames.map(i=>({itemId:i.id,prompt:'Кадр',refs:[hero,otherAsset]}))}),ctx);
+assert.deepEqual(state.jobs.map(j=>j.refs),[[hero],[otherAsset],[]],'Different cast in adjacent shots and no narrator portrait in an empty shot');
+assert(!state.jobs[0].prompt.includes('Синий плащ'));
+assert(!state.jobs[2].prompt.includes('Изображение 1:'));
+state=structuredClone(scoped);await B.POST(req({...bulk,revision:state.revision,batchId:D.id(),refs:[hero,otherAsset],plans:frames.map(i=>({itemId:i.id,prompt:'Кадр',refs:[]}))}),ctx);
+assert(state.jobs.every(j=>j.refs.length===0),'Explicit per-shot empty selection wins over common references');
+for(const [index,expected] of [[0,[hero]],[1,[otherAsset]],[2,[]]]){
+ state=structuredClone(scoped);await G.POST(req({...single,revision:state.revision,batchId:D.id(),itemId:frames[index].id,refs:[hero,otherAsset]}),ctx);assert.deepEqual(state.jobs[0].refs,expected);
+}
+console.log('PASS per-plan cast isolation: single and batch requests, empty cast, voiceover, neighbouring continuity, scoped prompts, per-plan deselection.');

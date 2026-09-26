@@ -73,6 +73,8 @@ state=structuredClone(baseline);assert.equal((await storyboard(req(batch),ctx)).
 assert.match(state.jobs[0].prompt,/Катя/);
 const crowded=structuredClone(baseline);for(let n=0;n<5;n++){const item={id:D.id(),stage:1,title:'Герой '+n,character:{...profile,name:'Герой '+n},variants:[]};crowded.items.push(item);D.addVariant(crowded,item.id,{kind:'image',assetId:image(),text:'Образ',character:item.character});D.approve(crowded,item.id);}
 for(const i of crowded.items.filter(i=>i.stage>1&&i.stage<7)){D.chosen(i).deps=D.dependencies(crowded,i.stage);}
+state=structuredClone(crowded);assert.equal((await generate(req(input(frame.id,'grok-imagine-image-2.0')),ctx)).status,200);assert.deepEqual(state.jobs[0].refs,[approvedImage],'Unrelated heroes do not consume the shot reference limit');
+const crowdedScript=crowded.items.find(i=>i.stage===4),crowdedData=JSON.parse(D.chosen(crowdedScript).text);crowdedData.shots[0].cast=['Катя',...Array.from({length:5},(_,n)=>'Герой '+n)];D.chosen(crowdedScript).text=JSON.stringify(crowdedData);
 state=structuredClone(crowded);const denied=await generate(req(input(frame.id,'grok-imagine-image-2.0')),ctx);assert.equal(denied.status,400);assert.match((await denied.json()).error,/6 референсов/);assert.equal(state.jobs.length,0);
 state=structuredClone(baseline);assert.equal((await generate(req(input(video.id,'grok-imagine-video-1.5',[firstFrame])),ctx)).status,200);
 job=state.jobs[0];assert.deepEqual(job.refs,[firstFrame]);assert.deepEqual(job.characterRefs,[approvedImage]);assert.match(job.prompt,/Рыжие косы/);
@@ -119,3 +121,15 @@ await tick(req({}),{params:Promise.resolve({id:state.id,jobId:selectedJob.id})})
 assert.equal(state.jobs[0].status,'done',state.jobs[0].error);
 assert.deepEqual(state.items.find(i=>i.id===video.id).variants.at(-1).characterIds,[],'Saved result preserves explicit empty selection');
 console.log('PASS video hero selection: one/none/legacy, prompt and provider refs agree, first frame and approvals preserved, remaining batch, persistence, stale/foreign/duplicate selection validation and idempotency.');
+
+for(const bulk of [false,true]){
+ state=structuredClone(bulk?remainingBase:baseline);
+ const script=state.items.find(i=>i.stage===4),data=JSON.parse(D.chosen(script).text);
+ data.shots.forEach(s=>{s.cast=[];s.speechType='voiceover';s.speaker='Катя';s.continuity='В предыдущем плане Катя';});
+ D.chosen(script).text=JSON.stringify(data);
+ const response=bulk?await remaining(req(remainingInput()),ctx):await generate(req(input(video.id,'grok-imagine-video-1.5',[firstFrame])),ctx);
+ assert.equal(response.status,200,await response.clone().text());
+ assert.deepEqual(state.jobs[0].characterRefs??[],[]);assert.deepEqual(state.jobs[0].characterIds,[]);
+ assert(!state.jobs[0].prompt.includes('Постоянные герои:'),'An off-screen narrator is not a visible character reference');
+}
+console.log('PASS scoped video references in single and remaining-plan generation; empty cast excludes off-screen narrator.');

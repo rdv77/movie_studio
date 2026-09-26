@@ -1,3 +1,4 @@
+import { planCharacterIds } from './plan-references';
 import { isFalImage, FAL_PROMPT_BUDGET } from './fal-models';
 import { chosen, isApproved, type Item, type Project } from './domain';
 import { characterReferenceNote } from './characters';
@@ -22,6 +23,7 @@ export function storyboardImageRequest(p:Project,item:Item,instruction:string,re
   for(const card of p.items.filter(i=>[1,2,3].includes(i.stage)&&isApproved(p,i))){
     const v=card.variants.find(v=>v.id===card.approvedId)!;
     if(card.stage===3&&v.kind!=='text'&&(!v.assetId||!refs.includes(v.assetId)))continue;
+    if(card.stage===1&&!planCharacterIds(p,item).includes(card.id))continue;
     if(card.stage===1&&v.character){
       const c=v.character;
       add(`Герой: ${c.name}`,[`Неизменные черты: ${c.appearance}`,`Характер и описание: ${c.description}`,c.instructions&&`Утверждённые указания к образу: ${c.instructions}`].filter(Boolean).join('\n'));
