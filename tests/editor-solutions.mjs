@@ -20,3 +20,12 @@ const originalScenes=structuredClone(state.directing.scenes);
 res=await send('runtimePolicy',{mode:'strict'});A.equal(res.status,200);A.deepEqual(state.directing.scenes,originalScenes);res=await send('acceptRuntime',{});A.equal(res.status,400);
 res=await send('runtimePolicy',{mode:'free'});A.equal(res.status,200);res=await send('acceptRuntime',{});A.equal(res.status,200);A.equal(state.directing.acceptedRuntime.seconds,5);A.deepEqual(state.directing.scenes,originalScenes);
 console.log('PASS runtime API: mode changes preserve scenes/approvals; explicit acceptance only in free mode.');
+// Empty bulk selection is harmless both before and after actual approval.
+let snapshot=structuredClone(state);
+res=await send('approveShots',{ids:[]});A.equal(res.status,200);A.deepEqual(await res.json(),JSON.parse(JSON.stringify(snapshot)));A.deepEqual(state,snapshot);
+const approvingShot=state.directing.scenes[0].shots[0];
+res=await send('approveShots',{ids:[approvingShot.id]});A.equal(res.status,200,await res.clone().text());A(R.shotApproved(state.directing.scenes[0],state.directing.scenes[0].shots[0],state));
+snapshot=structuredClone(state);
+res=await send('approveShots',{ids:[]});A.equal(res.status,200);A.deepEqual(state,snapshot,'Repeated empty approval preserves revision, content, and approvals');
+res=await send('approveShots',{ids:'invalid'});A.equal(res.status,400);A.deepEqual(state,snapshot);
+console.log('PASS bulk shot approval: empty selection is a no-op, actual approval still works, malformed input is rejected.');

@@ -27,6 +27,8 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const editScene=(scene:Scene)=>{setEditing(structuredClone(scene));setContinuityText(scene.continuity.map(c=>`${c.character} | ${c.outfit} | ${c.props}`).join('\n'));};
   const editShot=(sceneId:string,shot:DirectingShot)=>{setShotEdit({sceneId,shot:structuredClone(shot)});setCastText(shot.cast.join(', '));};
   const scenes=d?.scenes??[],scene=scenes.find(s=>s.id===sceneId)??scenes[0];
+  const pendingShotIds=scenes.flatMap(s=>s.shots.filter(shot=>!shotApproved(s,shot,p)).map(shot=>shot.id));
+  const allShotsApproved=scenes.length>0&&scenes.every(s=>s.shots.length>0)&&pendingShotIds.length===0;
   const run=d?.runs.at(-1),running=!!run&&!run.stopped&&run.tasks.some(t=>!t.result&&!t.error);
   const locked=busy||running;
   const seconds=plannedRuntime(p),timingAccepted=d?.acceptedRuntime?.basis===runtimeAcceptanceBasis(p);
@@ -92,7 +94,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
           {(['speaker','text','delivery'] as const).map((key,n)=><F key={key} label={['Говорящий','Только произносимые слова','Подача, паузы и звуки'][n]}><Textarea value={shotEdit.shot.dialogue[key]} onChange={e=>shotField('dialogue',{...shotEdit.shot.dialogue,[key]:e.target.value})}/></F>)}
           <div className="row"><Button disabled={locked} onClick={async()=>{await call('saveShot',{...shotEdit,shot:{...shotEdit.shot,cast:castText.split(',').map(s=>s.trim()).filter(Boolean)}});setShotEdit(undefined);}}>Сохранить план</Button><Button variant="ghost" onClick={()=>setShotEdit(undefined)}>Закрыть</Button></div>
         </div>}
-        <div className="row wrap"><Button variant="outline" disabled={locked} onClick={()=>call('approveShots',{ids:scenes.flatMap(s=>s.shots.filter(shot=>!shotApproved(s,shot,p)).map(s=>s.id))})}>Утвердить все готовые планы</Button><Button disabled={locked||scenes.some(s=>!s.shots.length||s.shots.some(shot=>!shotApproved(s,shot,p)))} onClick={()=>call('publish',{model})}>Подготовить промпты и применить сценарий</Button></div>
+        <div className="row wrap"><Button variant="outline" disabled={locked||!pendingShotIds.length} onClick={()=>{if(pendingShotIds.length)return call('approveShots',{ids:pendingShotIds});}}>{allShotsApproved?'✓ Все планы утверждены':pendingShotIds.length?'Утвердить все готовые планы':'Нет планов для утверждения'}</Button><Button disabled={locked||!allShotsApproved} onClick={()=>call('publish',{model})}>Подготовить промпты и применить сценарий</Button></div>
       </>}
     </>}
     {!!d?.issues.length&&<div className="space-y-3"><h3>Проверка редактора</h3>

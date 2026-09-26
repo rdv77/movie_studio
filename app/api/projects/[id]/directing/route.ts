@@ -65,7 +65,10 @@ export const POST=api(async(req,ctx)=>{
       if(old)Object.assign(old,{...shot,approved:undefined});else scene.shots.push({...shot,id:id()});break;
     }
     case 'approveShots':{
-      const ids=z.array(z.string()).min(1).max(120).parse(v.ids);let count=0;
+      const ids=z.array(z.string()).max(120).parse(v.ids);let count=0;
+      // Older clients may submit an empty list after every shot was approved.
+      // Return the current project without modifying approvals or its revision.
+      if(!ids.length)return Response.json(p);
       for(const s of d.scenes)for(const shot of s.shots)if(ids.includes(shot.id)){
         if(!shot.story.trim()||!shot.cinematography.trim()||!shot.productionDesign.trim())throw Error('Заполните сценарий, операторскую работу и художественное решение.');
         if(shot.dialogue.speechType==='character'&&(!shot.dialogue.speaker||!shot.cast.includes(shot.dialogue.speaker)))throw Error('Укажите присутствующего в кадре говорящего.');
