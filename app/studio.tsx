@@ -751,6 +751,7 @@ function Workspace() {
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
+                      : step === 5 ? 'Создайте изображения планов, сравните варианты и утвердите по одному кадру на план.'
                       : step === 1 ? 'Создайте отдельный образ каждого героя. Утверждённые описания и изображения будут использоваться в следующих этапах.'
                       : 'Сравните варианты и утвердите направление фильма.'}
                   </p>
@@ -780,7 +781,7 @@ function Workspace() {
                 </div>}
               </div>
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
-              {[5,6,7,8,9].includes(step)&&<ReviewCenter p={p} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
+              {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>
                 {voiceView==='casting'&&<VoiceComparisonPanel p={p} connections={cq.data} busy={busy} perform={perform} action={action} replace={replace} onContinue={()=>setVoiceView('plans')}/>}
