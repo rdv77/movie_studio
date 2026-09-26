@@ -7,6 +7,7 @@ import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema,
 import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
 import {applyEditorPatches} from '@/lib/directing';
+import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -17,6 +18,18 @@ export const POST=api(async(req,ctx)=>{
   const running=d.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error));
   if(running&&!['stop','retry'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
   switch(body.action){
+    case 'runtimePolicy':{
+      const mode=z.enum(['free','strict']).parse(v.mode);
+      if(d.durationMode!==mode){d.durationMode=mode;d.editorBasis=undefined;d.acceptedRuntime=undefined;
+        for(const issue of d.issues){if(issue.category==='runtime_metadata'||issue.category==='runtime_target'&&mode==='free')issue.severity='note';if(issue.category==='runtime_target'&&mode==='strict'){issue.severity='conflict';issue.resolved=false;}}
+      }break;
+    }
+    case 'acceptRuntime':{
+      const seconds=plannedRuntime(p);if(runtimeMode(p)!=='free'||seconds<=0||d.scenes.some(s=>!s.shots.length))throw Error('Принять расчёт можно после подготовки всех сцен в свободном режиме.');
+      d.acceptedRuntime={seconds,basis:runtimeAcceptanceBasis(p)};
+      for(const issue of d.issues)if(issue.category==='runtime_target'){issue.severity='note';issue.resolved=true;issue.resolution=`Режиссёр принял расчётную длительность ${seconds} сек.`;}
+      break;
+    }
     case 'importScript':{
       const card=p.items.find(i=>i.stage===4),source=card?.variants.find(v=>v.id===(card.approvedId??card.selectedId));if(!source)throw Error('Нет подробного сценария для переноса.');
       if(d.scenes.length)throw Error('Структура сцен уже есть. Используйте её правки.');

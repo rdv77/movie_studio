@@ -8,6 +8,7 @@ import { Tabs,TabsList,TabsTrigger,TabsContent } from '@/components/ui/tabs';
 import type { Project } from '@/lib/domain';
 import { money } from '@/lib/domain';
 import { MODELS } from '@/lib/models';
+import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
 
 type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void};
@@ -28,6 +29,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const scenes=d?.scenes??[],scene=scenes.find(s=>s.id===sceneId)??scenes[0];
   const run=d?.runs.at(-1),running=!!run&&!run.stopped&&run.tasks.some(t=>!t.result&&!t.error);
   const locked=busy||running;
+  const seconds=plannedRuntime(p),timingAccepted=d?.acceptedRuntime?.basis===runtimeAcceptanceBasis(p);
   const call=(action:string,data?:unknown)=>submit(action,data);
   const generate=(mode:string,extra:Record<string,unknown>={})=>call('run',{model,mode,...extra});
   const roles:{id:DirectorRole;label:string}[]=[{id:'story',label:'Сценарий'},{id:'camera',label:'Оператор'},{id:'art',label:'Художник'},{id:'dialogue',label:'Реплики'}];
@@ -37,6 +39,12 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
     <div className="row spread wrap"><div><div className="eyebrow">РЕЖИССЁРСКАЯ ГРУППА</div><h2>{stage===0?'Творческое задание и рецензия':stage===12?'Структура сцен':'Проработка всех планов'}</h2></div>
       <F label="Модель команды"><select className="rounded border p-2 bg-background" aria-label="Модель режиссёрской группы" value={model} disabled={locked} onChange={e=>setModel(e.target.value)}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></F></div>
     <p className="muted">Один вариант по умолчанию. Специалисты работают параллельно; утверждение остаётся за вами. Стоимость каждого вызова — в журнале проекта.</p>
+    <div className="border rounded p-4 space-y-3"><F label="Режим хронометража"><select className="w-full rounded border p-2 bg-background" disabled={locked} value={runtimeMode(p)} onChange={e=>call('runtimePolicy',{mode:e.target.value})}><option value="free">Свободная длительность — ориентир без ограничения</option><option value="strict">Строгий хронометраж — не более ориентира</option></select></F>
+      <p>Желаемая длительность: <b>{d?.brief.targetSeconds??brief.targetSeconds} сек</b>. По планам команды: <b>{seconds.toFixed(2)} сек</b>{seconds>0&&<> · разница {(seconds-(d?.brief.targetSeconds??brief.targetSeconds))>0?'+':''}{(seconds-(d?.brief.targetSeconds??brief.targetSeconds)).toFixed(2)} сек</>}.</p>
+      <p className="muted">{runtimeMode(p)==='free'?'Превышение ориентира не блокирует утверждение. Фактическое время уточнится после озвучки и монтажа.':'Сценарий и готовая сборка должны укладываться в предел. Короткий фильм допустим; речь не ускоряется и не обрезается.'}</p>
+      {seconds>0&&runtimeMode(p)==='free'&&<Button variant="outline" disabled={locked||timingAccepted||scenes.some(s=>!s.shots.length)} onClick={()=>call('acceptRuntime')}>{timingAccepted?'✓ Расчётная длительность принята':'Принять расчётную длительность'}</Button>}
+      {!!d?.issues.some(i=>!i.resolved&&!i.category)&&<p className="muted">Есть замечания прежней проверки. Нажмите «Предложить решения / проверить заново», чтобы редактор оценил их с учётом выбранного режима.</p>}
+    </div>
     {stage===0&&<>
       <div className="grid gap-4 md:grid-cols-2">
         <F label="Жанр"><Input list="director-genres" value={brief.genre} onChange={e=>setBrief({...brief,genre:e.target.value})}/><datalist id="director-genres">{['Комедия','Приключение','Блокбастер','Хоррор','Драма','Неигровое кино','Сказка'].map(s=><option key={s} value={s}/>)}</datalist></F>

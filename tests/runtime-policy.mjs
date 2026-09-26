@@ -1,0 +1,15 @@
+import {build} from 'esbuild';import {strict as A} from 'node:assert';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as T from './lib/runtime-policy';export * as F from './lib/render';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/runtime-policy.mjs',external:['@ffmpeg/ffmpeg']});
+const {D,R,T,F}=await import('../work/tests/runtime-policy.mjs');const p=D.newProject('Хронометраж');const d=R.ensureDirecting(p);d.brief.targetSeconds=120;
+const shot={id:D.id(),title:'План',duration:45.75,cast:[],story:'Действие',stateIn:'Начало',stateOut:'Конец',cinematography:'Статика',productionDesign:'Свет',dialogue:{speechType:'none',speaker:'',text:'',delivery:''},continuityChanges:''};
+d.scenes=[{id:D.id(),title:'Сцена',purpose:'',location:'',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[0,1,2,3].map(()=>({...shot,id:D.id()}))}];A.equal(T.plannedRuntime(p),183);A.equal(T.runtimeMode(p),'free');A.doesNotThrow(()=>T.checkRuntime(183,T.runtimeLimit(p)));
+const result={issues:[{id:'total',category:'runtime_target',severity:'conflict',message:'183 вместо120'},{id:'old',category:'runtime_metadata',severity:'conflict',message:'50 в стиле'},{id:'speech',category:'speech_fit',severity:'conflict',message:'Речь длиннее видео'}],patches:[]};
+const run={basis:R.directorBasis(p)},task={role:'editor'};R.applyDirectorResult(p,run,task,result);A.deepEqual(d.issues.map(i=>i.severity),['note','note','conflict']);
+const basis=T.runtimeAcceptanceBasis(p);d.scenes[0].shots[0].duration++;A.notEqual(T.runtimeAcceptanceBasis(p),basis);d.scenes[0].shots[0].duration--;
+d.durationMode='strict';R.applyDirectorResult(p,run,task,result);A.deepEqual(d.issues.map(i=>i.severity),['conflict','note','conflict']);A.throws(()=>R.directorExport(p),/Строгий хронометраж/);
+A.doesNotThrow(()=>T.checkRuntime(120+1/24,120));A.throws(()=>T.checkRuntime(120.1,120),/Строгий/);A.doesNotThrow(()=>T.checkRuntime(100,120));
+const plan={clips:[{duration:5,trim:0,title:'План',assemblyMode:'full'}],audio:[{duration:5,trim:0,title:'Речь',offset:0}],audioClipIndexes:[0],seconds:5};
+A.equal(F.fitPlanToSpeech(plan,[8]).seconds,8);A.throws(()=>F.fitPlanToSpeech({...plan,runtimeLimit:6},[8]),/Строгий/);
+A.equal(F.fitFinalPlan(plan,[9],[8]).seconds,9);A.throws(()=>F.fitFinalPlan({...plan,runtimeLimit:6},[9],[8]),/Строгий/);
+A.throws(()=>F.fitFinalPlan(plan,[5],[8]),/Реплика/,'Speech overflow is blocked even in free mode');
+console.log('PASS runtime modes: legacy defaults free, 183/120 warning, metadata note, speech conflict retained, strict export/actual assembly, frame tolerance, acceptance invalidation.');

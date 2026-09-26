@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { id, now, chosen, makeVariant, dependencies, isApproved, type Project, type Job } from './domain';
 import { speechDirection } from './speech-mode';
 import { parseShots } from './shots';
+import {runtimeMode,plannedRuntime,runtimeLimit,checkRuntime,runtimeAcceptanceBasis} from './runtime-policy';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -40,9 +41,9 @@ export type DirectorTask={id:string;role:DirectorRole;sceneId?:string;shotId?:st
 export type DirectorRun={id:string;created:string;basis:string;model:string;mode:'critic'|'scenes'|'develop'|'role'|'editor'|'compress';tasks:DirectorTask[];stopped?:boolean;sceneIds:string[];published?:boolean;};
 export const EDITOR_SECTIONS=['story','cinematography','productionDesign','dialogue','stateIn','stateOut','continuityChanges'] as const;
 export const EDITOR_SECTION_NAMES:Record<typeof EDITOR_SECTIONS[number],string>={story:'Сценарий',cinematography:'Оператор',productionDesign:'Художник',dialogue:'Реплики',stateIn:'Состояние в начале',stateOut:'Состояние в конце',continuityChanges:'Изменения одежды и реквизита'};
-export type EditorIssue={id:string;sceneId?:string;shotId?:string;severity:'note'|'conflict';message:string;solution?:string;resolved?:boolean;resolution?:string;};
+export type EditorIssue={id:string;category?:'runtime_target'|'runtime_metadata'|'speech_fit'|'other';sceneId?:string;shotId?:string;severity:'note'|'conflict';message:string;solution?:string;resolved?:boolean;resolution?:string;};
 export type EditorPatch={id:string;issueId?:string;shotId:string;section:typeof EDITOR_SECTIONS[number];before:string;after:string;reason:string;applied?:boolean;};
-export type DirectingState={brief:z.infer<typeof creativeBriefSchema>;scenes:Scene[];scenesApproved?:string;editorBasis?:string;patchesBasis?:string;runs:DirectorRun[];issues:EditorIssue[];patches:EditorPatch[];critic?:{review:string;alternatives:{title:string;text:string}[]};};
+export type DirectingState={durationMode?:'free'|'strict';acceptedRuntime?:{seconds:number;basis:string};brief:z.infer<typeof creativeBriefSchema>;scenes:Scene[];scenesApproved?:string;editorBasis?:string;patchesBasis?:string;runs:DirectorRun[];issues:EditorIssue[];patches:EditorPatch[];critic?:{review:string;alternatives:{title:string;text:string}[]};};
 export const stable=(value:unknown):string=>Array.isArray(value)?'['+value.map(stable).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+stable((value as any)[k])).join(',')+'}':JSON.stringify(value)??'null';
 // Compact, deterministic content signatures. Full snapshots stay in the run's saved prompts.
 export function signature(value:unknown){let a=2166136261,b=5381;for(const c of stable(value)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
@@ -78,7 +79,7 @@ export function taskReady(run:DirectorRun,t:DirectorTask){return !run.stopped&&!
 function context(p:Project,run:DirectorRun,t:DirectorTask){
   const d=ensureDirecting(p),index=d.scenes.findIndex(s=>s.id===t.sceneId);
   const script=p.items.find(i=>i.stage===0),currentScenario=t.role==='critic'?script&&chosen(script)?.text:script?.variants.find(v=>v.id===script.approvedId)?.text;
-  return {film:p.title,brief:d.brief,currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
+  return {film:p.title,brief:d.brief,runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
     ...(t.sceneId?{previous:d.scenes[index-1],scene:d.scenes[index],next:d.scenes[index+1]}:{scenes:d.scenes}),shotId:t.shotId};
 }
 export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
@@ -93,7 +94,8 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
     editor:'Проверь весь фильм: сюжет, стиль, монтаж, длительность действий/речи, ясность. Проверь одежду, предметы, руки, положения и изменения соседних планов. Для КАЖДОГО замечания сразу предложи конкретное решение и готовые патчи всех затронутых разделов/планов. Например, при повторной остановке героя замени story на обнаружение стрелы и опускание на колено, согласуй stateIn/stateOut. Изменения реквизита записывай в continuityChanges. Не меняй утверждённый сюжет. Если решение требует творческого выбора или недостающих данных, объясни это в solution и не выдумывай патч. Каждому issue дай уникальный id, свяжи патчи через issueId. Один окончательный патч на пару shotId+section; объединяй пересекающиеся замечания. Верни {"issues":[{"id":"issue-1","sceneId":"ID","shotId":"ID","severity":"note|conflict","message":"проблема","solution":"как исправить"}],"patches":[{"issueId":"issue-1","shotId":"ID","section":"story|cinematography|productionDesign|dialogue|stateIn|stateOut|continuityChanges","after":"ПОЛНЫЙ новый текст поля; для dialogue строка JSON объекта speechType,speaker,text,delivery","reason":"почему"}]}. Обязательную неисправность отметь conflict. Патчи являются предложениями, применяет их пользователь. Пустые массивы если ошибок нет.',
     compress:'Подготовь промпты для всех планов текущей сцены по утверждённым четырём разделам. Для картинки — только начальное состояние, для видео — движение и монтажный стык. Учти утверждённые стиль, локацию, внешность героев. Сожми по смыслу, не обрывай предложения. Камера и свет должны остаться точными. Каждый промпт до 3000 символов. Имена, костюм, реквизит и правило закрытого рта будут добавлены программой отдельно. Верни {"shots":[{"id":"существующий ID","imagePrompt":"...","videoPrompt":"..."}]}.',
   };
-  return base+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
+  const timing=`Хронометраж: ${runtimeMode(p)==='free'?'СВОБОДНЫЙ. targetSeconds — пожелание, а не предел. Разница с суммой duration — только note, никогда conflict. Не сокращай действия/паузы автоматически ради ориентира.':'СТРОГИЙ. targetSeconds — верхний предел суммы duration всего фильма. Распределяй время между сценами, не выделяй весь бюджет каждой сцене. Превышение — conflict; предложи монтажное сокращение без ускорения/обрезки речи.'} Актуальный ориентир только brief.targetSeconds. Старые числа секунд в стиле, героях и других документах — устаревшие метаданные, только note; они не требуют изменения художественной основы. Нехватка времени для речи внутри конкретного видео — самостоятельный технический конфликт в обоих режимах. Каждому issues добавь category: runtime_target (только общая длина), runtime_metadata (устаревшее число секунд в документах), speech_fit (реплика не помещается), other (остальное). Не смешивай категории в одном замечании.\n`;
+  return base+timing+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
 }
 export function parseDirectorJSON(value:string){return JSON.parse(value.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));}
 function validateDialogue(s:DirectingShot){if(s.dialogue.speechType==='none'&&s.dialogue.text.trim())throw Error('У плана без речи заполнена реплика.');if(s.dialogue.speechType==='character'&&(!s.dialogue.speaker||!s.cast.includes(s.dialogue.speaker)))throw Error('Говорящий герой должен присутствовать в составе плана.');}
@@ -107,9 +109,9 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
     // Replacing a reviewed scene map is always explicit in the UI.
     d.scenes=data.scenes.map(s=>({...s,id:id(),shots:[]}));d.scenesApproved=undefined;
   }else if(t.role==='editor'){
-    const data=z.object({issues:z.array(z.object({id:z.string().optional(),sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text,solution:text.optional()})).max(150),patches:z.array(z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(EDITOR_SECTIONS),after:text,reason:text})).max(150)}).parse(result);
+    const data=z.object({issues:z.array(z.object({id:z.string().optional(),category:z.enum(['runtime_target','runtime_metadata','speech_fit','other']).optional(),sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text,solution:text.optional()})).max(150),patches:z.array(z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(EDITOR_SECTIONS),after:text,reason:text})).max(150)}).parse(result);
     const links=new Map<string,string>();
-    const issues=data.issues.map(v=>{const key=id();if(v.id){if(links.has(v.id))throw Error('Редактор повторил ID замечания.');links.set(v.id,key);}return {...v,id:key};});
+    const issues=data.issues.map(v=>{const key=id();if(v.id){if(links.has(v.id))throw Error('Редактор повторил ID замечания.');links.set(v.id,key);}return {...v,id:key,severity:v.category==='runtime_metadata'||v.category==='runtime_target'&&runtimeMode(p)==='free'?'note' as const:v.severity};});
     const fields=new Set<string>();
     const patches=data.patches.map(v=>{const shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===v.shotId);if(!shot)throw Error('Редактор указал неизвестный план.');if(v.issueId&&!links.has(v.issueId))throw Error('Правка ссылается на неизвестное замечание.');const key=v.shotId+':'+v.section;if(fields.has(key))throw Error('Редактор предложил несовместимые повторные правки одного поля.');fields.add(key);return {...v,issueId:v.issueId?links.get(v.issueId):undefined,id:id(),before:typeof shot[v.section]==='string'?shot[v.section] as string:JSON.stringify(shot[v.section])};});
     d.issues=issues;d.patches=patches;d.editorBasis=editorBasis(p);d.patchesBasis=d.editorBasis;
@@ -162,6 +164,7 @@ export function applyEditorPatches(p:Project,patchIds:string[]){
 }
 export function directorExport(p:Project){
   const d=ensureDirecting(p);
+  checkRuntime(plannedRuntime(p),runtimeLimit(p));
   if(!d.scenes.length||d.scenesApproved!==scenesBasis(p))throw Error('Утвердите структуру сцен.');
   if(d.editorBasis!==editorBasis(p))throw Error('Запустите проверку редактора для текущей версии фильма.');
   if(d.issues.some(i=>i.severity==='conflict'&&!i.resolved))throw Error('Разрешите конфликты редактора.');

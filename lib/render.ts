@@ -4,6 +4,7 @@ import type { Project, Variant } from './domain';
 import { chosen, dependencies, stageReady, isApproved, participates,variantCurrent } from './domain';
 import { scriptSpeech, speechPlans } from './speech';
 import {musicIssue,musicSettings,musicEnvelope,type MusicSettings} from './music';
+import {runtimeLimit,checkRuntime} from './runtime-policy';
 type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
   if(!animatic&&musicIssue(p))throw new Error(musicIssue(p));
@@ -67,6 +68,7 @@ export function editPlan(p: Project, animatic = false) {
     if (animatic && v.offset >= seconds) throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте «Начало в фильме, сек» через «Правки» и утвердите вариант.`);
   }
   return {
+    ...(runtimeLimit(p)!==undefined?{runtimeLimit:runtimeLimit(p)}:{}),
     music:!animatic&&musicSettings(p).enabled?p.music?.variants.find(v=>v.id===p.music?.approvedId):undefined,
     musicSettings:musicSettings(p),
     clips,
@@ -116,6 +118,7 @@ export function fitPlanToSpeech(plan: ReturnType<typeof editPlan>, sourceSeconds
   audio.forEach((v, n) => { v.offset = offsets[plan.audioClipIndexes[n]]; });
   const seconds = frames / 24;
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Не удалось рассчитать длительность сборки.');
+  checkRuntime(seconds,plan.runtimeLimit);
   return { ...plan, clips, audio, seconds };
 }
 export const fitAnimaticToSpeech = fitPlanToSpeech;
@@ -153,6 +156,7 @@ export function fitFinalPlan(plan: ReturnType<typeof editPlan>, videoSeconds: nu
   const offsets=clips.map(v=>{const start=seconds;seconds+=v.duration;return start;});
   audio.forEach((v,n)=>{if(plan.audioClipIndexes[n]>=0)v.offset=offsets[plan.audioClipIndexes[n]];});
   for(const v of audio)if(v.offset>=seconds)throw new Error(`Озвучка «${v.title}» начинается после конца фильма. Исправьте начало звуковой дорожки.`);
+  checkRuntime(seconds,plan.runtimeLimit);
   return {...plan,clips,audio,seconds};
 }
 export function validateVideoDuration(v: Variant, sourceDuration: number, title: string) {
@@ -278,6 +282,7 @@ export async function renderFilm(
       }
     }
     if (animatic && p.speechMode === 'plans') plan = fitPlanToSpeech(plan, speechSeconds);
+    if(animatic)checkRuntime(plan.seconds,plan.runtimeLimit);
     const videoSeconds: number[] = [];
     progress(`Хронометраж с озвучкой: ${plan.seconds.toFixed(2)} сек. Подготовка кадров…`);
     for (let i = 0; i < plan.clips.length; i++) {

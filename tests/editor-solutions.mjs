@@ -16,3 +16,7 @@ let res=await send('applySolution',{issueId:d.issues[0].id});A.equal(res.status,
 res=await send('applyAllSolutions',{});A.equal(res.status,200,await res.clone().text());A(state.directing.issues.every(i=>i.resolved));A.match(state.directing.scenes[0].shots[0].continuityChanges,/остаётся/);A.equal(state.jobs.length,0);
 const done=structuredClone(state);R.applyEditorPatches(state,state.directing.patches.map(v=>v.id));A.deepEqual(state,done,'Repeat apply is idempotent');A.throws(()=>R.directorExport(state),/проверку редактора/);
 console.log('PASS editor solutions: linked proposals, state/props fixes, atomic API apply-one/all, stale protection, schema validation, idempotency, mandatory recheck; no paid requests.');
+const originalScenes=structuredClone(state.directing.scenes);
+res=await send('runtimePolicy',{mode:'strict'});A.equal(res.status,200);A.deepEqual(state.directing.scenes,originalScenes);res=await send('acceptRuntime',{});A.equal(res.status,400);
+res=await send('runtimePolicy',{mode:'free'});A.equal(res.status,200);res=await send('acceptRuntime',{});A.equal(res.status,200);A.equal(state.directing.acceptedRuntime.seconds,5);A.deepEqual(state.directing.scenes,originalScenes);
+console.log('PASS runtime API: mode changes preserve scenes/approvals; explicit acceptance only in free mode.');
