@@ -94,6 +94,8 @@ import {
   STAGES,
   precedesStage,
   chosen,
+  visibleVariants,
+  isStoryboardDraft,
   dependencies,
   variantCurrent,
   isApproved,
@@ -836,7 +838,7 @@ function Workspace() {
                       }}
                     >
                       {isApproved(p, i) && <Check size={14} />} {i.title}
-                      <span className="count">{i.variants.length}</span>
+                      <span className="count">{visibleVariants(i).length}</span>
                     </Button>
                   ))}
                 </div>
@@ -950,6 +952,11 @@ function Workspace() {
                   <p className="mt-3">{speechNames[speechInfo(currentShot).speechType]}{currentShot.speaker?' · '+currentShot.speaker:''}: {currentShot.dialogue || 'Без речи'}</p>
                 </div>
               )}
+              {step===5&&item&&visibleVariants(item).length<item.variants.length&&<details className="editor-surface p-4 mb-5">
+                <summary>Исходные описания плана</summary>
+                <p className="muted small">Это задания из сценария, а не варианты изображения. Они сохранены для справки; утверждается выбранный кадр.</p>
+                {item.variants.filter(isStoryboardDraft).map(v=><p key={v.id} className="whitespace-pre-wrap mt-3">{v.text}</p>)}
+              </details>}
               {[5,7].includes(step)&&item&&<div className="mb-5">
                 <Button variant="outline" disabled={busy||active.length>0} onClick={()=>perform(async()=>{await action('removePlan',undefined,item.id);setItemId('');})}><Trash2/>Удалить план из фильма</Button>
                 <p className="muted small mt-2">План и его озвучка исключаются из раскадровки, аниматика, видеопланов и новой финальной сборки. Можно восстановить ниже.</p>
@@ -999,7 +1006,7 @@ function Workspace() {
                   <div className="section-toolbar">
                     <TabsList>
                       <TabsTrigger value="variants">
-                        Варианты · {item.variants.length}
+                        Варианты · {visibleVariants(item).length}
                       </TabsTrigger>
                       <TabsTrigger value="context">
                         Утвержденная основа
@@ -1091,7 +1098,7 @@ function Workspace() {
                           </div>
                         ) : (
                           <div className="variant-grid">
-                            {item.variants.map((v, index) => {
+                            {visibleVariants(item).map((v, index) => {
                               const approved =
                                 isApproved(p, item) && item.approvedId === v.id;
                               const stale = !variantCurrent(p, item, v);
@@ -1100,7 +1107,7 @@ function Workspace() {
                                 <article
                                   className={
                                     'variant-card ' +
-                                    (v.id === item.selectedId ? 'selected' : '')
+                                    (v.id === selected?.id ? 'selected' : '')
                                   }
                                   key={v.id}
                                 >
@@ -1120,7 +1127,7 @@ function Workspace() {
                                       </span>
                                     ) : (
                                       <span className="muted">
-                                        {v.id === item.selectedId
+                                        {v.id === selected?.id
                                           ? 'Выбран'
                                           : 'На рассмотрении'}
                                       </span>
@@ -1164,7 +1171,7 @@ function Workspace() {
                                     <div className="card-actions">
                                       <Button
                                         variant={
-                                          item.selectedId === v.id
+                                          selected?.id === v.id
                                             ? 'secondary'
                                             : 'outline'
                                         }
@@ -1178,7 +1185,7 @@ function Workspace() {
                                           )
                                         }
                                       >
-                                        {item.selectedId === v.id ? (
+                                        {selected?.id === v.id ? (
                                           <Check />
                                         ) : (
                                           <span />
@@ -1300,6 +1307,7 @@ function Workspace() {
                             !selected ||
                             !ready ||
                             busy ||
+                            (step === 5 && (selected.kind !== 'image' || !selected.assetId)) ||
                             !variantCurrent(p, item, selected) ||
                             (step === 6 && selected.kind === 'video') ||
                             (isApproved(p, item) &&
@@ -3267,10 +3275,10 @@ function BulkApproval({ p, stage, busy, action, perform }: any) {
     <strong>Утверждение выбранных вариантов</strong>
     {stage===6&&<p>Кнопка также повторно утверждает прежние выбранные голоса, если реплика, говорящий, вид речи и длительность плана не изменились. Замена изображения сама по себе не требует повторного прослушивания.</p>}
     <p>Готово к утверждению: {ready.length}. Требуют внимания: {blocked.length}. Уже утверждённые карточки сохранят свой вариант.</p>
-    <p>В каждой карточке будет утверждён вариант с пометкой «Выбран». Чтобы изменить выбор, откройте карточку перед нажатием кнопки.</p>
+    <p>{stage===5?'Будут утверждены готовые изображения с пометкой «Выбран». Если раньше было выбрано только исходное описание, картинка выбрана автоматически. Уже выбранные изображения сохраняются.':'В каждой карточке будет утверждён вариант с пометкой «Выбран». Чтобы изменить выбор, откройте карточку перед нажатием кнопки.'}</p>
     <Button className="h-auto whitespace-normal" disabled={busy || !ready.length}
       onClick={() => perform(() => action('approveBatch', {stage, selections: ready.map(({itemId, variantId}) => ({itemId, variantId}))}))}>
-      <Check />Утвердить все неутверждённые · {ready.length}
+      <Check />{stage===5?'Утвердить все готовые кадры':'Утвердить все неутверждённые'} · {ready.length}
     </Button>
     {reviewed.length>0 && <div className="mt-4">
       <p>Неизменившиеся планы с прежним утверждением: {unchanged.length}. Сравниваются описание, камера, речь, длительность, монтаж и общая основа. Новый выбор и изменённые планы нужно проверить отдельно.</p>

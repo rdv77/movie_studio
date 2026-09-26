@@ -193,8 +193,21 @@ export function newProject(title: string): Project {
     })),
   };
 }
+export function isStoryboardDraft(v: Variant) {
+  return v.kind==='text'&&!v.assetId&&!v.jobId&&(v.planDraft||v.title==='Описание плана из сценария');
+}
+export function visibleVariants(item: Item) {
+  return item.stage===5&&item.variants.some(v=>v.kind==='image'&&v.assetId)
+    ? item.variants.filter(v=>!isStoryboardDraft(v)) : item.variants;
+}
 export function chosen(item: Item) {
-  return item.variants.find((v) => v.id === item.selectedId);
+  const selected=item.variants.find((v) => v.id === item.selectedId);
+  // Old projects may still point at the automatic text brief after generation.
+  // Respect an explicit image choice; never approve anything on selection.
+  if(item.stage===5&&(!selected||isStoryboardDraft(selected)))
+    return item.variants.find(v=>v.id===item.approvedId&&v.kind==='image'&&v.assetId)
+      ?? [...item.variants].reverse().find(v=>v.kind==='image'&&v.assetId) ?? selected;
+  return selected;
 }
 export function dependencies(p: Project, stage: number): string {
   return JSON.stringify([
@@ -352,6 +365,7 @@ export function approve(p: Project, itemId: string) {
     if (audioItem?.approvedId !== v.lipsync.audioVariantId)
       throw new Error('Голос после синхронизации изменился. Повторите синхронизацию с новой утверждённой репликой.');
   }
+  i.selectedId = v.id;
   i.approvedId = v.id;
 }
 export function ticks(usd: string): string {

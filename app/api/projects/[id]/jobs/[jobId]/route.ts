@@ -15,6 +15,7 @@ import {
 import { parallelJob, generationInProgress, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
 import {
   dependencies,
+  isStoryboardDraft,
   stageReady,
   getItem,
   makeVariant,
@@ -246,7 +247,8 @@ export const POST = api(async (req, ctx) => {
             : { videoVariantId: job.lipsync.videoVariantId, audioVariantId: job.lipsync.audioVariantId, audioItemId: job.lipsync.audioItemId }) : undefined,
         });
         item.variants.push(v);
-        if (!item.selectedId) item.selectedId = v.id;
+        const previousSelection=item.variants.find(value=>value.id===item.selectedId);
+        if (!item.selectedId || (item.stage===5&&v.kind==='image'&&v.assetId&&previousSelection&&isStoryboardDraft(previousSelection))) item.selectedId = v.id;
       }
       job.status = 'done';
       job.error = undefined;

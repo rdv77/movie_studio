@@ -39,3 +39,22 @@ globalThis.current=structuredClone(pending);await run(payload);assert.equal(glob
 const saved=structuredClone(globalThis.current);await assert.rejects(()=>run(payload),/Проект изменился/);assert.deepEqual(globalThis.current,saved);
 globalThis.current=structuredClone(pending);globalThis.denied=true;await assert.rejects(()=>run(payload),/Unauthorized/);assert.deepEqual(globalThis.current,pending);globalThis.denied=false;
 console.log('PASS bulk approvals: selected variants, preserved approvals, all-or-nothing validation, stage/media/dependency guards, inactive narration, animatic readiness, owner auth and stale revision rejection.');
+// Existing storyboard cards must not require selecting every generated image
+// just because the automatic source brief is still stored as selectedId.
+const auto=structuredClone(pending),card=auto.items.find(i=>i.id===second.id);
+const image=card.variants[0],draft=D.makeVariant(auto,card,{kind:'text',title:'Описание плана из сценария',text:'Исходное действие',planDraft:true});
+card.variants.unshift(draft);card.selectedId=draft.id;
+const latest=D.makeVariant(auto,card,{kind:'image',assetId:D.id(),text:'Другой готовый кадр'});card.variants.push(latest);
+const snapshot=structuredClone(auto);
+assert.equal(D.chosen(card).id,latest.id);assert.deepEqual(auto,snapshot,'Reading default selection never approves or mutates');
+assert.deepEqual(D.visibleVariants(card).map(v=>v.id),[image.id,latest.id]);
+assert.equal(card.variants[0].text,'Исходное действие','Source description is retained');
+card.selectedId=image.id;assert.equal(D.chosen(card).id,image.id,'Explicit image choice wins over newest result');
+card.selectedId=draft.id;
+assert.equal(selections(auto,5).find(s=>s.itemId===card.id).variantId,latest.id);
+B.approveBatch(auto,5,selections(auto,5));assert.equal(card.selectedId,latest.id);assert.equal(card.approvedId,latest.id);
+assert.equal(auto.items.find(i=>i.id===first.id).approvedId,approvedId,'Previously approved image is preserved');
+const empty={...card,selectedId:draft.id,approvedId:undefined,variants:[draft]};
+assert.equal(D.chosen(empty).id,draft.id);assert.equal(D.visibleVariants(empty).length,1,'Brief remains available before generation');
+const otherStage={...empty,stage:7,variants:[draft,latest]};assert.equal(D.chosen(otherStage).id,draft.id,'Other stages retain explicit selection');
+console.log('PASS storyboard image defaults: legacy draft fallback, visible images, retained source brief, explicit image choice and one-click batch approval.');
