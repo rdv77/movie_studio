@@ -2,14 +2,14 @@ import { loadProject, mutate, getKey } from './server';
 import { model } from './models';
 import { generate } from './providers';
 import { now, assertBudget } from './domain';
-import { directorBasis, directorJob, taskReady, parseDirectorJSON, applyDirectorResult,publishDirectorScript } from './directing';
+import { directorBasis, directorRunBasis, directorJob, taskReady, parseDirectorJSON, applyDirectorResult,publishDirectorScript } from './directing';
 
 // All admission and task dependencies are decided on the server. CAS claims
 // prevent two tabs/workers from sending the same paid request twice.
 export async function runDirectorStep(user:string,projectId:string){
   const snapshot=await loadProject(user,projectId);
   const expired=snapshot.jobs.some(j=>j.purpose==='directing'&&j.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000);
-  const ready=snapshot.directing?.runs.some(r=>!r.stopped&&(r.basis!==directorBasis(snapshot)||r.tasks.some(t=>taskReady(r,t))));
+  const ready=snapshot.directing?.runs.some(r=>!r.stopped&&(r.basis!==directorRunBasis(snapshot,r)||r.tasks.some(t=>taskReady(r,t))));
   if(!expired&&!ready)return snapshot;
   const claimed:string[]=[];
   let p=await mutate(user,projectId,p=>{
@@ -18,7 +18,7 @@ export async function runDirectorStep(user:string,projectId:string){
     for(const run of d.runs){
       for(const t of run.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000){j.status='unknown';j.error='Прервалось ожидание ответа. Проверьте расход; автоматического повтора нет.';t.error=j.error;}}
       if(run.stopped)continue;
-      if(run.basis!==directorBasis(p)){run.stopped=true;continue;}
+      if(run.basis!==directorRunBasis(p,run)){run.stopped=true;continue;}
       const occupied=p.jobs.filter(j=>j.purpose==='directing'&&j.status==='dispatching').length;
       for(const t of run.tasks.filter(t=>taskReady(run,t)).slice(0,Math.max(0,3-occupied))){
         const j=directorJob(p,run,t);assertBudget(p,[j]);j.status='dispatching';j.started=now();t.jobId=j.id;p.jobs.push(j);claimed.push(j.id);

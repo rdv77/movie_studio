@@ -2,6 +2,7 @@
 import { useState,useEffect,useRef } from 'react';
 import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
 import { GENRE_OPTIONS,renderCreativeInstructions } from '@/lib/creative-brief';
+import { ScriptWorkflowEditor } from './script-workflow-editor';
 import { VersionComparison } from './version-comparison';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +13,7 @@ import type { Project } from '@/lib/domain';
 import { money } from '@/lib/domain';
 import { MODELS } from '@/lib/models';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
-import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,directorPrompt,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
+import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,directorPrompt,directorRunActive,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
 
 type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void};
 const F=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
@@ -34,7 +35,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const scenes=d?.scenes??[],scene=scenes.find(s=>s.id===sceneId)??scenes[0];
   const pendingShotIds=scenes.flatMap(s=>s.shots.filter(shot=>!shotApproved(s,shot,p)).map(shot=>shot.id));
   const allShotsApproved=scenes.length>0&&scenes.every(s=>s.shots.length>0)&&pendingShotIds.length===0;
-  const run=d?.runs.at(-1),running=!!run&&!run.stopped&&run.tasks.some(t=>!t.result&&!t.error);
+  const run=d?.runs.at(-1),running=!!run&&directorRunActive(run);
   const locked=busy||running;
   const seconds=plannedRuntime(p),timingAccepted=d?.acceptedRuntime?.basis===runtimeAcceptanceBasis(p);
   const call=(action:string,data?:unknown)=>submit(action,data);
@@ -75,7 +76,9 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
       <details><summary>Промпт рецензента по текущим настройкам</summary><p className="muted">Ниже полный запрос без отправки. Сохраните задание перед запуском. Редактируйте приёмы и дополнительные инструкции выше.</p><pre className="whitespace-pre-wrap max-h-96 overflow-auto text-sm">{directorPrompt({...p,directing:{...(d??{scenes:[],runs:[],issues:[],patches:[]}),brief}}, {id:'preview',created:'',basis:'',model,mode:'critic',tasks:[],sceneIds:[]},{id:'preview',role:'critic',requires:[]})}</pre></details>
       <label className="row"><input type="checkbox" checked={brief.factual} onChange={e=>setBrief({...brief,factual:e.target.checked})}/>Неигровое кино: сохранять факты, отмечать сведения для проверки</label>
-      <div className="row wrap"><Button disabled={locked} onClick={async()=>{await call('brief',{brief,productionOrder:order});briefDirty.current=false;}}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
+      <div className="row wrap"><Button disabled={locked} onClick={async()=>{await call('brief',{brief,productionOrder:order});briefDirty.current=false;}}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d||briefDirty.current} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
+      {briefDirty.current&&<p role="status">Есть несохранённые настройки. Сохраните творческое задание перед запуском команды.</p>}
+      <ScriptWorkflowEditor p={p} model={model} busy={busy||briefDirty.current} submit={call}/>
       {d?.critic&&<div className="space-y-3"><h3>Рецензия</h3><p className="whitespace-pre-wrap">{d.critic.review}</p>{d.critic.alternatives.map((a,index)=><details key={index}><summary>{a.title}</summary><p className="whitespace-pre-wrap">{a.text}</p><Button disabled={locked} variant="outline" onClick={()=>call('useAlternative',{index})}>Добавить как вариант сценария</Button></details>)}</div>}
     </>}
     {stage===12&&<>
@@ -120,7 +123,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       {d.issues.map(i=>{const patches=d.patches.filter(p=>p.issueId===i.id);return <div key={i.id} className="border rounded p-3 space-y-3"><p>{i.resolved?'✓':i.severity==='conflict'?'Конфликт':'Замечание'}: {i.message}</p>{i.solution&&<p><b>Решение редактора:</b> {i.solution}</p>}{patches.map(patchPreview)}{patches.some(p=>!p.applied)&&<Button size="sm" disabled={locked} onClick={()=>call('applySolution',{issueId:i.id})}>Применить решение</Button>}{!i.resolved&&!patches.length&&<p className="muted">Готовая правка не приложена. Нажмите «Предложить решения / проверить заново» — это новый запрос к выбранной модели. Если нужен ваш творческий выбор, редактор объяснит его.</p>}{i.resolution&&<small>{i.resolution}</small>}{!i.resolved&&<details><summary>Решить вручную</summary><F label="Как решено замечание"><Input value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Как вы исправили план или почему оставляете его"/></F><Button size="sm" variant="outline" disabled={locked||!resolution.trim()} onClick={()=>call('resolveIssue',{issueId:i.id,resolution})}>Зафиксировать решение</Button></details>}</div>;})}</div>}
     {!!d?.patches.some(p=>!p.issueId)&&<div className="space-y-3"><h3>Другие предложенные правки</h3>{d.patches.filter(p=>!p.issueId).map(patch=><div key={patch.id}>{patchPreview(patch)}<Button size="sm" disabled={locked||patch.applied} onClick={()=>call('applyPatch',{patchId:patch.id})}>Применить правку</Button></div>)}</div>}
     {run&&<details open={running}><summary>Работа команды · {run.tasks.filter(t=>t.applied).length}/{run.tasks.length}</summary><p className="muted">На этом сайте оставьте студию открытой. Сохранённая очередь продолжается при возвращении. В самостоятельной серверной версии обработка работает в фоне.</p>
-      <div className="space-y-2">{run.tasks.map(t=>{const job=p.jobs.find(j=>j.id===t.jobId);return <div key={t.id} className="border rounded p-3"><b>{ROLE_NAMES[t.role]}</b> {scenes.find(s=>s.id===t.sceneId)?.title} · {t.error?'Требует внимания':t.applied?'Готово':job?'В работе':'Ожидает'}{job&&<small> · расход: {money(job.actual)}</small>}{t.error&&<p role="alert">{t.error}</p>}{t.error&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>call('retry',{runId:run.id,taskId:t.id,acknowledgeCost:true})}>{job?.status==='unknown'?'Повторить с возможным повторным списанием':'Повторить только это задание'}</Button>}</div>;})}</div>
+      <div className="space-y-2">{run.tasks.map(t=>{const job=p.jobs.find(j=>j.id===t.jobId);return <div key={t.id} className="border rounded p-3"><b>{ROLE_NAMES[t.role]}</b> {scenes.find(s=>s.id===t.sceneId)?.title} · {t.error?'Требует внимания':t.applied?'Готово':job?'В работе':t.requires.some(id=>run.tasks.find(v=>v.id===id)?.error)?'Ожидает решения по предыдущему шагу':'Ожидает'}{job&&<small> · расход: {money(job.actual)}</small>}{t.error&&<p role="alert">{t.error}</p>}{t.error&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>call('retry',{runId:run.id,taskId:t.id,acknowledgeCost:true})}>{job?.status==='unknown'?'Повторить с возможным повторным списанием':'Повторить только это задание'}</Button>}</div>;})}</div>
       {!run.stopped&&<Button className="mt-3" variant="outline" disabled={busy} onClick={()=>call('stop',{runId:run.id})}>Остановить дальнейшую проработку</Button>}
     </details>}
   </section>;

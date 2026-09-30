@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { createScriptWorkflowRun,importScriptWorkflowCandidate,scriptRoleSchema,scriptPromptOverridesSchema,CINEMA_METHOD_IDS } from '@/lib/script-workflow';
 import { recordCreativeVersion, restoreCreativeVersion, restoreSceneVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { model } from '@/lib/models';
 import { id, makeVariant } from '@/lib/domain';
 import { runDirectorStep } from '@/lib/director-runner';
-import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, scenesBasis, shotApproval, shotFoundationBasis, directorBasis, editorBasis, type DirectorRole } from '@/lib/directing';
+import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, directorRunActive, scenesBasis, shotApproval, shotFoundationBasis, directorBasis, editorBasis, type DirectorRole } from '@/lib/directing';
 import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
 import {applyEditorPatches} from '@/lib/directing';
@@ -16,13 +17,20 @@ export const POST=api(async(req,ctx)=>{
   const p=await loadProject(user,projectId);
   if(body.revision!==p.revision)throw Error('Проект изменился. Обновите данные и повторите действие.');
   const d=ensureDirecting(p),v=body.data??{};
-  const running=d.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error));
-  if(running&&!['stop','retry'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
+  const running=d.runs.some(directorRunActive);
+  if(running&&!['stop','retry','importScriptCandidate'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
   const tracksHistory=['brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions'].includes(body.action);
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
     case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;
     case 'restoreSceneVersion':restoreSceneVersion(p,z.string().uuid().parse(v.versionId),z.string().uuid().parse(v.sceneId));break;
+    case 'scriptRun':{
+      const input=z.object({model:z.string(),roles:z.array(scriptRoleSchema).min(1).max(5),sourceVariantId:z.string().uuid(),sourceTaskId:z.string().uuid().optional(),methodologyIds:z.array(z.enum(CINEMA_METHOD_IDS)).max(7).optional(),promptOverrides:scriptPromptOverridesSchema.optional()}).parse(v);
+      const m=model(input.model);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Выберите текстовую модель.');
+      await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовых агентов расходы определяются по токенам. Снимите лимит на время прохода и сверяйте журнал.');
+      createScriptWorkflowRun(p,input.model,input.roles,input.sourceVariantId,input.sourceTaskId,{methodologyIds:input.methodologyIds,promptOverrides:input.promptOverrides});break;
+    }
+    case 'importScriptCandidate':importScriptWorkflowCandidate(p,z.string().uuid().parse(v.runId),z.string().uuid().parse(v.taskId));break;
     case 'runtimePolicy':{
       const mode=z.enum(['free','strict']).parse(v.mode);
       if(d.durationMode!==mode){d.durationMode=mode;d.editorBasis=undefined;d.acceptedRuntime=undefined;

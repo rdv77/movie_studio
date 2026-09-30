@@ -1,5 +1,6 @@
 'use client';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
+import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
@@ -421,7 +422,7 @@ function Workspace() {
     const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
       if(!current)return;
-      if(!directorFlight&&current.directing?.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error))){directorFlight=true;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);}).finally(()=>{directorFlight=false;});}
+      if(!directorFlight&&current.directing?.runs.some(directorRunActive)){directorFlight=true;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);}).finally(()=>{directorFlight=false;});}
       for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
         checkingWait.add(job.id);
         void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait'})
