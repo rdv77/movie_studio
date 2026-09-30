@@ -10,6 +10,7 @@ export type VersionSource = {
   followApproval?: boolean;
 };
 export type VersionInfo = {
+  mergedFromIds?: string[];
   parentVariantId?: string; created: string; reason?: string;
   sources: VersionSource[]; settings?: unknown;
 };
@@ -111,6 +112,15 @@ export function restoreCreativeVersion(p:Project,versionId:string):CreativeVersi
   // Restoration is a new branch, not a rewind of paid jobs or other choices.
   const entry:CreativeVersion={id:crypto.randomUUID(),parentId:parent,restoredFromId:source.id,created:new Date().toISOString(),reason:'restore',basis:snapshotBasis(s),snapshot:creativeSnapshot(p)!};
   (p.creativeHistory??=[]).push(entry);p.creativeVersionId=entry.id;return entry;
+}
+export function restoreSceneVersion(p:Project,versionId:string,sceneId:string):CreativeVersion|undefined {
+  const d=p.directing,source=p.creativeHistory?.find(v=>v.id===versionId)?.snapshot.scenes.find(s=>s.id===sceneId);
+  if(!d||!source)throw Error('Сцена не найдена в этой версии.');
+  if(d.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error)))throw Error('Остановите проработку перед выбором версии сцены.');
+  const index=d.scenes.findIndex(s=>s.id===sceneId);if(index<0)throw Error('Сцена больше не входит в фильм.');
+  recordCreativeVersion(p,'До выбора версии сцены');
+  d.scenes[index]=structuredClone(source);d.scenesApproved=undefined;d.editorBasis=undefined;d.patchesBasis=undefined;d.acceptedRuntime=undefined;
+  return recordCreativeVersion(p,'Выбрана версия сцены',p.creativeVersionId);
 }
 export function recordCharacterVersion(item:Item,reason:string):CharacterVersion|undefined {
   if(!item.character)return undefined;

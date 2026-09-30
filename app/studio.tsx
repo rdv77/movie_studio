@@ -1,6 +1,7 @@
 'use client';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { DirectingEditor } from './directing-editor';
+import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
 import { selectedVideoPromptLimit,videoPromptLimit,availableForDirecting } from '@/lib/model-capabilities';
 import { CaptionEditor } from './caption-editor';
@@ -1014,6 +1015,7 @@ function Workspace() {
                       <TabsTrigger value="context">
                         Утвержденная основа
                       </TabsTrigger>
+                      {[0,1,4].includes(step)&&<TabsTrigger value="compare">Сравнить тексты</TabsTrigger>}
                     </TabsList>
                     <div className="row">
                       <Button
@@ -1033,6 +1035,18 @@ function Workspace() {
                       </span>
                     </div>
                   </div>
+                  {[0,1,4].includes(step)&&<TabsContent value="compare"><VersionComparison
+                    title={step===1?'Сравнить описания героя':'Сравнить варианты сценария'}
+                    versions={item.variants.map(v=>{const j=p.jobs.find(j=>j.id===v.jobId);return {id:v.id,label:v.title,text:step===1&&v.character?[v.character.appearance,v.character.description,v.character.instructions].filter(Boolean).join('\n\n'):v.text,
+                      metadata:{origin:v.versionInfo?.parentVariantId?`На основе: ${item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'предыдущая версия'}`:'Исходный материал',model:MODELS.find(m=>m.id===v.model)?.name??v.model,created:v.created,
+                        settings:v.versionInfo?.settings as Record<string,unknown>|undefined,actualCost:j?money(j.actual):'Без генерации',estimatedCost:j?money(j.estimate):undefined}} satisfies ComparisonVersion;})}
+                    selectedId={item.selectedId} approvedId={isApproved(p,item)?item.approvedId:undefined} disabled={busy}
+                    onChoose={v=>perform(()=>action('select',{variantId:v.id},item.id))}
+                    onMerge={({text,sourceIds})=>perform(()=>action('addVariant',{title:'Объединённый вариант',kind:'text',text,refs:[],parentVariantId:sourceIds[0],mergedFromIds:sourceIds},item.id))}
+                  />{step===1&&!!item.characterHistory?.length&&<VersionComparison title="История исходного описания героя" disabled={busy}
+                    versions={item.characterHistory.map(v=>({id:v.id,label:`${v.profile.name} · ${new Date(v.created).toLocaleString('ru-RU')}`,text:[v.profile.appearance,v.profile.description,v.profile.instructions].filter(Boolean).join('\n\n'),metadata:{origin:v.reason,created:v.created}}))}
+                    selectedId={item.characterVersionId} onChoose={v=>perform(()=>action('restoreCharacterVersion',{versionId:v.id},item.id))}
+                    onMerge={({text})=>perform(()=>action('saveCharacter',{profile:{...item.character,description:text}},item.id))}/>}</TabsContent>}
                   <TabsContent value="variants">
                     <div className="workbench">
                       <section className="variants-area">
@@ -1675,7 +1689,7 @@ function VariantEditor({
         voiceId: value?.voiceId ?? '',
         parentVariantId: value?.id,
       });
-  }, [open, value, item.id]);
+  }, [open, value?.id, item.id]);
   function set(k: string, v: any) {
     setData((s: any) => ({ ...s, [k]: v }));
   }

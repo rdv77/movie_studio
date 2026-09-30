@@ -53,6 +53,7 @@ const variant = z.object({
   continuity: z.string().max(4000).default(''),
   voiceId: z.string().max(150).default(''),
   parentVariantId: z.string().uuid().optional(),
+  mergedFromIds: z.array(z.string().uuid()).min(2).max(2).optional(),
 });
 export const GET = api(async (req, ctx) =>
   Response.json(await loadProject(await owner(req), (await ctx.params).id)),
@@ -257,7 +258,8 @@ export const PATCH = api(async (req, ctx) => {
       const v = variant.parse(d);
       const versionItem=getItem(p,body.itemId!);
       if(v.parentVariantId&&!versionItem.variants.some(x=>x.id===v.parentVariantId))throw Error('Исходная версия не найдена в этой карточке.');
-      const versionInfo={...captureVersionInfo(p,versionItem,v,undefined,'Правки режиссёра'),...(v.parentVariantId?{parentVariantId:v.parentVariantId}:{})};
+      if(v.mergedFromIds?.some(id=>!versionItem.variants.some(x=>x.id===id)))throw Error('Объединяемый вариант больше не находится в этой карточке.');
+      const versionInfo={...captureVersionInfo(p,versionItem,v,undefined,'Правки режиссёра'),...(v.parentVariantId?{parentVariantId:v.parentVariantId}:{}),...(v.mergedFromIds?{mergedFromIds:v.mergedFromIds}:{})};
       if (v.speechType) assertSpeech(speechInfo(v),v.dialogue);
       if(v.kind==='audio'&&v.speechType==='character'&&!getItem(p,body.itemId!).sourceShot) throw new Error('Для реплик героев используйте отдельные карточки: «Подготовить озвучку по планам».');
       if (v.assetId) {

@@ -57,6 +57,10 @@ p.jobs=[{id:D.id(),status:'done',actual:'900000000',requestId:'paid'}];p.mediaDu
 const preserved=structuredClone({jobs:p.jobs,media:p.mediaDurations,cuts:p.assemblyCuts,items:p.items});
 const restored=C.restoreCreativeVersion(p,baseline.id);A.equal(restored.parentId,changed.id);A.equal(restored.restoredFromId,baseline.id);A.notEqual(restored.id,baseline.id);
 A.deepEqual(C.creativeSnapshot(p),settingsBefore);A.deepEqual({jobs:p.jobs,media:p.mediaDurations,cuts:p.assemblyCuts,items:p.items},preserved,'Restoring creative text preserves paid media and montage');A.equal(d.editorBasis,undefined);
+const originalScene=structuredClone(d.scenes[0]);d.scenes.push({...structuredClone(originalScene),id:D.id(),title:'Независимая сцена',shots:[]});
+const extraSceneId=d.scenes.at(-1).id;C.recordCreativeVersion(p,'with extra scene');d.scenes[0].purpose='Изменённая задача';
+const branch=C.restoreSceneVersion(p,baseline.id,originalScene.id);A.equal(d.scenes[0].purpose,originalScene.purpose);A.equal(d.scenes.at(-1).id,extraSceneId,'Choosing one scene preserves other scenes');A.equal(branch.parentId,p.creativeHistory.at(-2).id);A.equal(d.scenesApproved,undefined);A.deepEqual(p.jobs,preserved.jobs);
+d.scenes.pop();d.scenesApproved=settingsBefore.scenesApproved;
 const heroFirst=C.recordCharacterVersion(anna,'baseline');anna.character.appearance='Светлые волосы';const heroChanged=C.recordCharacterVersion(anna,'edit');const heroRestored=C.restoreCharacterVersion(anna,heroFirst.id);
 A.equal(heroRestored.parentId,heroChanged.id);A.equal(heroRestored.restoredFromId,heroFirst.id);A.equal(anna.character.appearance,'Чёрные волосы');A.equal(anna.approvedId,anna.variants[0].id,'Profile restoration does not approve or replace an image');
 const aShot=d.scenes[0].shots[0],bShot=d.scenes[0].shots[1];A(R.shotApproved(d.scenes[0],aShot,p));

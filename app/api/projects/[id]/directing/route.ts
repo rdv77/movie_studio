@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { recordCreativeVersion, restoreCreativeVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
+import { recordCreativeVersion, restoreCreativeVersion, restoreSceneVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { model } from '@/lib/models';
 import { id, makeVariant } from '@/lib/domain';
@@ -22,6 +22,7 @@ export const POST=api(async(req,ctx)=>{
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
     case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;
+    case 'restoreSceneVersion':restoreSceneVersion(p,z.string().uuid().parse(v.versionId),z.string().uuid().parse(v.sceneId));break;
     case 'runtimePolicy':{
       const mode=z.enum(['free','strict']).parse(v.mode);
       if(d.durationMode!==mode){d.durationMode=mode;d.editorBasis=undefined;d.acceptedRuntime=undefined;
