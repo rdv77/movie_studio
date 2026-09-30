@@ -10,6 +10,7 @@ import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
 import {applyEditorPatches} from '@/lib/directing';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
+import {assertSceneLocations} from '@/lib/world-assets';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -66,7 +67,7 @@ export const POST=api(async(req,ctx)=>{
       t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;r.stopped=false;break;
     }
     case 'saveScene':{
-      const scene=sceneSchema.parse(v.scene);const old=d.scenes.find(s=>s.id===scene.id);
+      const scene=sceneSchema.parse(v.scene);assertSceneLocations(p,scene);const old=d.scenes.find(s=>s.id===scene.id);
       if(!old){if(d.scenes.length>=24)throw Error('Максимум 24 сцены.');d.scenes.push({...scene,id:id(),shots:[]});}
       else Object.assign(old,{...scene,shots:old.shots});break;
     }

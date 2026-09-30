@@ -1,4 +1,5 @@
 import type { CharacterBrief, Project, Variant } from './domain';
+import type {LocationProfile} from './world-assets';
 
 /**
  * Asset candidates referenced by a trusted, already saved project snapshot.
@@ -11,6 +12,8 @@ export function projectAssetIds(p: Project): Set<string> {
   const add = (value: unknown) => { if (typeof value === 'string' && value.length) ids.add(value); };
   const refs = (values: unknown) => { if (Array.isArray(values)) for (const value of values) add(value); };
   const character = (value?: CharacterBrief) => refs(value?.refs);
+  const location=(value?:LocationProfile)=>{refs(value?.refs);for(const angle of value?.approvedAngles??[])refs(angle.refs);};
+  const provenance=(value?:Variant['versionInfo'])=>{for(const source of value?.sources??[])add(source.assetId);};
 
   // animaticBasis() records [config, format, seconds, speech mode, clips, audio,
   // audio indexes]. Its source tuples contain an asset ID only at position 1.
@@ -35,12 +38,14 @@ export function projectAssetIds(p: Project): Set<string> {
     refs(value.refs);
     refs(value.characterRefs);
     character(value.character);
+    location(value.location);provenance(value.versionInfo);
     animaticSources(value.animaticBasis);
     // Variant.lipsync contains item/variant identifiers, not file identifiers.
   };
 
   for (const item of p.items) {
     character(item.character);
+    location(item.location);
     for(const version of item.characterHistory??[])character(version.profile);
     // Deliberately include every variant, including unselected/unapproved ones,
     // and every item, including planArchive and removedAt entries.
@@ -55,6 +60,7 @@ export function projectAssetIds(p: Project): Set<string> {
     refs(job.refs);
     refs(job.characterRefs);
     character(job.character);
+    location(job.location);provenance(job.versionInfo);
     if (job.lipsync) {
       add(job.lipsync.audioAssetId);
       if (job.lipsync.inputType === 'image') add(job.lipsync.imageAssetId);
@@ -65,6 +71,7 @@ export function projectAssetIds(p: Project): Set<string> {
     // tests are audio jobs whose itemId identifies a comparison, not an Item.
     if (job.kind === 'image' || job.kind === 'audio' || job.kind === 'video') add(job.id);
   }
+  for(const run of p.directing?.runs??[]){character(run.characterInput?.character);provenance(run.characterInput?.versionInfo);}
   for (const comparison of p.voiceComparisons ?? []) {
     for (const sample of comparison.samples) add(sample.assetId);
   }

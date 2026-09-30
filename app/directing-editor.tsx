@@ -3,6 +3,7 @@ import { useState,useEffect,useRef } from 'react';
 import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
 import { GENRE_OPTIONS,renderCreativeInstructions } from '@/lib/creative-brief';
 import { ScriptWorkflowEditor } from './script-workflow-editor';
+import {SceneLocationEditor} from './world-editor';
 import { VersionComparison } from './version-comparison';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -86,6 +87,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       <div className="row wrap"><Button disabled={locked} onClick={()=>generate('scenes',{replaceScenes:!!scenes.length})}>{scenes.length?'Заново разделить сценарий на сцены':'Создать весь этап · разделить на сцены'}</Button><Button variant="outline" disabled={locked} onClick={()=>editScene({id:'new',title:'Новая сцена',purpose:'',location:'',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[]})}>Добавить сцену вручную</Button><Button disabled={locked||!scenes.length} variant="outline" onClick={()=>call('approveScenes')}>{d?.scenesApproved===scenesBasis(p)?'✓ Структура сцен утверждена':'Утвердить структуру сцен'}</Button></div>
       {scenes.length>0&&<p className="muted">Повторное разбиение создаёт новую структуру для проработки. Опубликованный сценарий и готовые файлы остаются в истории проекта.</p>}
       {scenes.map((s,n)=><article key={s.id} className="border rounded p-4 space-y-2"><strong>{n+1}. {s.title}</strong><p>{s.purpose}</p><p><b>Локация:</b> {s.location}</p><p><b>Конфликт:</b> {s.conflict} <b>Поворот:</b> {s.turn}</p><p><b>Начало:</b> {s.stateIn} <b>Конец:</b> {s.stateOut}</p>{s.continuity.map((c,n)=><p key={n}><b>{c.character}:</b> {c.outfit} · {c.props}</p>)}<div className="row"><Button size="sm" variant="outline" disabled={locked} onClick={()=>editScene(s)}>Правки</Button><Button size="sm" variant="ghost" disabled={locked} onClick={()=>call('removeScene',{sceneId:s.id})}>Удалить сцену</Button></div></article>)}
+      {scenes.map(s=><SceneLocationEditor key={p.id+':'+s.id} p={p} scene={s} busy={locked} onSave={(_sceneId,data)=>call('saveScene',{scene:{...s,...data}})}/>)}
       <Dialog open={!!editing} onOpenChange={value=>{if(!value)setEditing(undefined);}}><DialogContent className="sm:max-w-3xl max-h-[90dvh] overflow-y-auto" aria-describedby={undefined}>
       {editing&&<><DialogHeader><DialogTitle>Правки сцены: {editing.title}</DialogTitle></DialogHeader>{(['title','purpose','location','conflict','turn','stateIn','stateOut'] as const).map((key,n)=><F key={key} label={['Название','Задача сцены','Локация','Конфликт','Поворот','Состояние в начале','Состояние в конце'][n]}><Textarea value={editing[key]} onChange={e=>setEditing({...editing,[key]:e.target.value})}/></F>)}
         <SceneCreativeControls brief={brief} value={editing.creativeOverrides} disabled={locked} onChange={creativeOverrides=>setEditing({...editing,creativeOverrides})}/>

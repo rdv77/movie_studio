@@ -1,6 +1,7 @@
 import { planReferenceIds } from './plan-references';
 import { selectedReferences } from './reference-selection';
 import { isApproved, type Project, type Item, type CharacterBrief } from './domain';
+import {actorDirection} from './world-assets';
 
 export function approvedCharacters(p: Project) {
   return p.items.filter(i => i.stage === 1 && isApproved(p,i)).flatMap(item => {
@@ -10,7 +11,7 @@ export function approvedCharacters(p: Project) {
   });
 }
 export function characterPrompt(c: CharacterBrief) {
-  return `Создай утверждаемый образ одного героя анимационного фильма: ${c.name}. Покажи только этого героя, в полный рост, с хорошо различимым лицом, на простом фоне. Не добавляй надписи, панели комикса или других персонажей.\n\nНеизменные черты: ${c.appearance}\nОписание и характер: ${c.description}\nЗадача режиссёра и работа с исходными изображениями: ${c.instructions || 'Создай образ по описанию.'}\n${c.refs.length ? 'Прикреплённые изображения — исходные прообразы этого героя. Сохрани узнаваемые черты, меняй только то, что указано в задаче.' : ''}`;
+  return `Создай утверждаемый образ одного героя анимационного фильма: ${c.name}. Покажи только этого героя, в полный рост, с хорошо различимым лицом, на простом фоне. Не добавляй надписи, панели комикса или других персонажей.\n\nНеизменные черты: ${c.appearance}\nОписание и характер: ${c.description}\nЗадача режиссёра и работа с исходными изображениями: ${c.instructions || 'Создай образ по описанию.'}\n${c.refs.length ? 'Прикреплённые изображения — исходные прообразы этого героя. Сохрани узнаваемые черты, меняй только то, что указано в задаче.' : ''}${c.actorProfile?'\n\nАктёрский образ:\n'+actorDirection(c.actorProfile):''}`;
 }
 export function characterImageRefs(p: Project, item: Item, extra: string[]) {
   const fixed = item.character && item.stage === 1 ? item.character.refs
@@ -19,7 +20,7 @@ export function characterImageRefs(p: Project, item: Item, extra: string[]) {
 }
 export function characterReferenceNote(p: Project, refs: string[]) {
   const rows = approvedCharacters(p).filter(c=>refs.includes(c.assetId));
-  return rows.length ? `\n\nРеференсы постоянных героев (порядок прикреплённых изображений):\n${rows.map(c=>`Изображение ${refs.indexOf(c.assetId)+1}: ${c.profile.name}. ${c.profile.appearance}`).join('\n')}\nИспользуй эти изображения как образцы внешности, а не как композицию сцены. Показывай только героев, участвующих в описанном действии. Не смешивай лица и одежду разных героев.` : '';
+  return rows.length ? `\n\nРеференсы постоянных героев (порядок прикреплённых изображений):\n${rows.map(c=>`Изображение ${refs.indexOf(c.assetId)+1}: ${c.profile.name}. ${c.profile.appearance}${c.profile.actorProfile?'\n'+actorDirection(c.profile.actorProfile):''}`).join('\n')}\nИспользуй эти изображения как образцы внешности, а не как композицию сцены. Показывай только героев, участвующих в описанном действии. Не смешивай лица и одежду разных героев.` : '';
 }
 export function videoCharacters(p:Project,characterIds?:string[]) {
   const heroes=approvedCharacters(p);
@@ -30,7 +31,7 @@ export function videoCharacters(p:Project,characterIds?:string[]) {
 }
 export function withCharacterIdentity(p: Project, prompt: string, characterIds?:string[]) {
   const heroes = videoCharacters(p,characterIds);
-  return heroes.length ? `${prompt}\n\nПостоянные герои: ${heroes.map(c=>`${c.profile.name}: ${c.profile.appearance || c.profile.description || 'внешность по утверждённому изображению'}`).join('; ')}. Сохрани лица, возраст, пропорции и одежду. Показывай только участников этого плана.` : prompt;
+  return heroes.length ? `${prompt}\n\nПостоянные герои: ${heroes.map(c=>`${c.profile.name}: ${c.profile.appearance || c.profile.description || 'внешность по утверждённому изображению'}${c.profile.actorProfile?'\n'+actorDirection(c.profile.actorProfile):''}`).join('; ')}. Сохрани лица, возраст, пропорции и одежду. Показывай только участников этого плана.` : prompt;
 }
 export function videoCharacterRefs(p: Project, provider: string, characterIds?:string[]) {
   const heroes=videoCharacters(p,characterIds);

@@ -30,12 +30,14 @@ import { z } from 'zod';
 import { speechInfo, assertSpeech } from '@/lib/speech-mode';
 import { saveAnimatic, approveAnimatic } from '@/lib/animatic';
 import { archiveJournal } from '@/lib/journal';
+import {actorProfileSchema,locationProfileSchema,assertLocationAssets} from '@/lib/world-assets';
 const character = z.object({name:z.string().trim().min(1).max(100),appearance:z.string().trim().max(160).default(''),
-  description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),refs:z.array(z.string().uuid()).max(5).default([])});
+  description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),refs:z.array(z.string().uuid()).max(5).default([]),actorProfile:actorProfileSchema.optional()});
 const variant = z.object({
   speechType: z.enum(['voiceover','character','none']).optional(),
   speaker: z.string().trim().max(100).optional(),
   character: character.optional(),
+  location:locationProfileSchema.optional(),
   characterRefs: z.array(z.string().uuid()).max(7).optional(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
   shotSource: z.string().uuid().optional(),
@@ -273,6 +275,10 @@ export const PATCH = api(async (req, ctx) => {
         if (getItem(p,body.itemId!).stage!==1) throw new Error('Описание героя доступно на этапе «Герои».');
         for (const ref of v.character.refs) {const a=await asset(user, ref, p);if(!a.mime.startsWith('image/'))throw new Error('Референс героя должен быть изображением.');}
       }
+      if(v.location){
+        if(versionItem.stage!==3)throw Error('Профиль локации доступен на этапе «Образы и локации».');
+        const allowed=new Set<string>();for(const ref of [...new Set([...v.location.refs,...v.location.approvedAngles.flatMap(a=>a.refs)])]){const a=await asset(user,ref,p);if(!a.mime.startsWith('image/'))throw Error('Референс локации должен быть изображением.');allowed.add(ref);}assertLocationAssets(v.location,allowed);
+      }
       if (body.action === 'saveAnimatic') addAnimatic(p, body.itemId!, v);
       else addVariant(p, body.itemId!, {...v,versionInfo});
       break;
@@ -281,6 +287,7 @@ export const PATCH = api(async (req, ctx) => {
       const i = getItem(p, body.itemId!);
       const v = i.variants.find((v) => v.id === d?.variantId);
       if (!v) throw new Error('Вариант не найден.');
+      if(i.stage===1&&v.characterDraft)throw Error('Выберите описание через «Актёрский образ». Выбор изображения героя выполняется отдельно.');
       i.selectedId = v.id;
       break;
     }

@@ -233,6 +233,7 @@ export const POST = api(async (req, ctx) => {
           imageSettings: job.imageSettings,
           refs: job.refs,
           character:job.character,
+          location:job.location,
           characterRefs:job.characterRefs,
           characterIds:job.characterIds,
           dialogue: job.dialogue,

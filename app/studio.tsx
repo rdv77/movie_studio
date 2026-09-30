@@ -2,6 +2,7 @@
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
+import {LocationLibraryEditor,ActorProfileEditor} from './world-editor';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
 import { selectedVideoPromptLimit,videoPromptLimit,availableForDirecting } from '@/lib/model-capabilities';
@@ -402,6 +403,11 @@ function Workspace() {
       if (epoch === projectEpoch.current) setBusy(false);
     }
   }
+  async function worldAction(name:string,data:unknown){
+    if(!p)throw Error('Откройте проект.');const epoch=projectEpoch.current;let next:Project|undefined;
+    await perform(async()=>{next=await request('/api/projects/'+p.id+'/world','POST',{revision:p.revision,action:name,data});replace(next!);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время сохранения.');}});
+    if(!next)throw Error('Изменение не сохранено. Проверьте сообщение об ошибке.');return next;
+  }
   useEffect(() => {
     if (!p || ![5, 7].includes(step) || busy || !videoScript?.variant ||
       p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status))) return;
@@ -787,6 +793,7 @@ function Workspace() {
                 </div>}
               </div>
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
+              {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>
@@ -868,6 +875,7 @@ function Workspace() {
                 </> : <p>Добавьте отдельную карточку для каждого героя: имя, описание, исходное изображение по желанию и указания, что сохранить или изменить. Если общее описание «Персонажи» уже перенесено в отдельные карточки, эту общую карточку можно удалить.</p>}
                 {item&&<Button variant="outline" disabled={busy} className="mt-3" onClick={()=>perform(async()=>{await action('removeCharacter',undefined,item.id);setItemId('');})}><Trash2/>Удалить карточку «{item.title}»</Button>}
               </section>}
+              {step===1&&item?.character&&<ActorProfileEditor key={p.id+':'+item.id} p={p} item={item} busy={busy} onSave={(itemId,profile)=>worldAction('saveActorProfile',{itemId,profile})} onGenerate={(itemId,data)=>worldAction('generateActor',{itemId,...data})} onChooseDraft={(itemId,variantId)=>worldAction('chooseActorDraft',{itemId,variantId})}/>}
               {step===1&&p.items.some(i=>i.stage===1&&i.removedAt)&&<details className="editor-surface p-4 mb-5"><summary>Удалённые карточки героев · {p.items.filter(i=>i.stage===1&&i.removedAt).length}</summary>
                 <p className="muted small">Карточки исключены из основы фильма. Восстановите нужную, выберите образ и утвердите его.</p>
                 {p.items.filter(i=>i.stage===1&&i.removedAt).map(i=><div className="row spread py-2" key={i.id}><span>{i.title} · вариантов: {i.variants.length}</span><Button size="sm" variant="outline" disabled={busy} onClick={()=>perform(async()=>{await action('restoreCharacter',undefined,i.id);setItemId(i.id);})}><Undo2/>Восстановить</Button></div>)}
@@ -1038,7 +1046,7 @@ function Workspace() {
                   </div>
                   {[0,1,4].includes(step)&&<TabsContent value="compare"><VersionComparison
                     title={step===1?'Сравнить описания героя':'Сравнить варианты сценария'}
-                    versions={item.variants.map(v=>{const j=p.jobs.find(j=>j.id===v.jobId);return {id:v.id,label:v.title,text:step===1&&v.character?[v.character.appearance,v.character.description,v.character.instructions].filter(Boolean).join('\n\n'):v.text,
+                    versions={visibleVariants(item).map(v=>{const j=p.jobs.find(j=>j.id===v.jobId);return {id:v.id,label:v.title,text:step===1&&v.character?[v.character.appearance,v.character.description,v.character.instructions].filter(Boolean).join('\n\n'):v.text,
                       metadata:{origin:v.versionInfo?.parentVariantId?`На основе: ${item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'предыдущая версия'}`:'Исходный материал',model:MODELS.find(m=>m.id===v.model)?.name??v.model,created:v.created,
                         settings:v.versionInfo?.settings as Record<string,unknown>|undefined,actualCost:j?money(j.actual):'Без генерации',estimatedCost:j?money(j.estimate):undefined}} satisfies ComparisonVersion;})}
                     selectedId={item.selectedId} approvedId={isApproved(p,item)?item.approvedId:undefined} disabled={busy}

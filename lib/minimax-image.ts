@@ -3,6 +3,7 @@ import { planCharacterIds } from './plan-references';
 import { approvedCharacters } from './characters';
 import { planFields, storyboardPrompt } from './storyboard';
 import { videoShot } from './video';
+import {actorDirection,locationDraftForItem,locationProfileText,planWorldText} from './world-assets';
 
 export const MINIMAX_IMAGE_PROMPT_LIMIT = 1500;
 export const MINIMAX_IMAGE_ESTIMATE = '35000000'; // $0.0035; estimate, not a billing receipt.
@@ -80,9 +81,14 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
     add('Герой',`${character.name}: ${character.appearance}`,5);
     add('Характер',character.description,2);
     add('Работа с исходными изображениями',character.instructions,5);
+    if(character.actorProfile)add('Актёрский образ',actorDirection(character.actorProfile),3);
   }
-  for(const c of item.stage<4?[]:approvedCharacters(p).filter(c=>![5,7].includes(item.stage)||planCharacterIds(p,item).includes(c.itemId)))
+  for(const c of item.stage<4?[]:approvedCharacters(p).filter(c=>![5,7].includes(item.stage)||planCharacterIds(p,item).includes(c.itemId))){
     add(`Герой ${c.profile.name}`,`${refs.includes(c.assetId)?`Референс ${refs.indexOf(c.assetId)+1}. `:''}${c.profile.appearance||c.profile.description}`,2);
+    if(c.profile.actorProfile)add(`Актёрский образ ${c.profile.name}`,actorDirection(c.profile.actorProfile),2);
+  }
+  if(item.stage===3){const location=locationDraftForItem(item);if(location)add('Постоянная локация',locationProfileText(location),4);}
+  if([5,7].includes(item.stage)){const world=planWorldText(p,item);if(world)add('Локация и состояние сцены',world,3);}
   if(item.stage===1){
     const context=characterVisualContext(p);
     add('Стиль',context.style,3);
@@ -91,6 +97,10 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
   }
   for(const card of p.items.filter(i=>item.stage!==1&&[2,3].includes(i.stage)&&i.stage<item.stage&&isApproved(p,i))) {
     const v=card.variants.find(v=>v.id===card.approvedId)!;
+    if(card.stage===3&&[5,7].includes(item.stage)){
+      const scene=p.directing?.scenes.find(s=>s.id===shot?.sceneId),ids=shot?.locationIds??scene?.locationIds;
+      if(ids!==undefined&&!ids.includes(card.id))continue;
+    }
     if(card.stage===3&&v.kind!=='text'&&!refs.includes(v.assetId??''))continue;
     add(card.stage===2?'Стиль':'Локация',v.text,2);
   }

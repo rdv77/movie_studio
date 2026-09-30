@@ -29,7 +29,7 @@ function sourceValue(p:Project,source:VersionSource){
     item?.variants.find(v=>v.id===source.variantId)??p.removedVariants?.find(r=>r.itemId===source.itemId&&r.variant.id===source.variantId)?.variant;
   if(source.itemId&&!v)return {itemId:source.itemId,missing:true};
   if(source.role==='frame'||source.role==='reference'||source.role==='audio')return {itemId:source.itemId,asset:v?.assetId??source.assetId};
-  return {itemId:source.itemId,text:v?.character?undefined:v?.text,character:v?.character?{appearance:v.character.appearance,description:v.character.description,instructions:v.character.instructions}:undefined,asset:v?.assetId??source.assetId};
+  return {itemId:source.itemId,text:v?.character?undefined:v?.text,character:v?.character?{appearance:v.character.appearance,description:v.character.description,instructions:v.character.instructions,...(v.character.actorProfile?{actorProfile:v.character.actorProfile}:{})}:undefined,asset:v?.assetId??source.assetId,...(v?.location?{location:v.location}:{})};
 }
 function speechIdentity(p:Project,shot:any){
   const type=shot.speechType??(shot.dialogue?'voiceover':'none');
@@ -84,6 +84,7 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
     story:shot.description,camera:shot.camera,design:shot.productionDesign,stateIn:shot.stateIn,
     continuity:shot.stateIn===undefined?shot.continuity:undefined,sceneContinuity:continuity,priorChanges,
     heroes:sources('hero',castItems),style:sources('style',p.items.filter(i=>i.stage===2&&active(i))),locations:sources('location',locations),
+    ...(shot.locationState??scene?.locationState?{locationState:shot.locationState??scene?.locationState}:{}),
     speech:{type:speech.type,speaker:speech.type==='character'?speech.speaker:''},
     ...(item.stage===7?{duration:shot.duration,stateOut:shot.stateOut,changes:shot.continuityChanges,
       frames:frame,previous:boundary(previous,'out'),next:boundary(next,'in'),lipsync:variant.lipsync}:{}),

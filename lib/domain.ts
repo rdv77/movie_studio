@@ -1,3 +1,4 @@
+import type { ActorProfile,LocationProfile } from './world-assets';
 import { renderCreativeInstructions } from './creative-brief';
 import type { SpeechType } from './speech-mode';
 import type { ImageSettings } from './image-quality';
@@ -23,7 +24,7 @@ export const STAGES = [
   'Финальная сборка',
 ];
 export type Kind = 'text' | 'image' | 'audio' | 'video';
-export type CharacterBrief = { name: string; appearance: string; description: string; instructions: string; refs: string[] };
+export type CharacterBrief = { actorProfile?:ActorProfile; name: string; appearance: string; description: string; instructions: string; refs: string[] };
 export type LipsyncBasis = { audioVariantId: string; audioItemId: string } & (
   { inputType?: 'video'; videoVariantId: string } |
   { inputType: 'image'; imageVariantId: string; imageItemId: string; speaker: { x: number; y: number }; prompt: string }
@@ -33,6 +34,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  location?:LocationProfile;characterDraft?:boolean;
   basisVersion?: 2;
   versionInfo?: VersionInfo;
   imageSettings?: ImageSettings;
@@ -66,6 +68,7 @@ export type Variant = {
   lipsync?: LipsyncBasis;
 };
 export type Item = {
+  location?:LocationProfile;
   characterHistory?: CharacterVersion[];
   characterVersionId?: string;
   planArchive?: { reason:'duplicate'|'removed'|'excluded'; replacementId?:string };
@@ -81,6 +84,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  location?:LocationProfile;
   basisVersion?: 2;
   versionInfo?: VersionInfo;
   imageSettings?: ImageSettings;
@@ -210,6 +214,7 @@ export function isStoryboardDraft(v: Variant) {
   return v.kind==='text'&&!v.assetId&&!v.jobId&&(v.planDraft||v.title==='Описание плана из сценария');
 }
 export function visibleVariants(item: Item) {
+  if(item.stage===1)return item.variants.filter(v=>!v.characterDraft);
   return item.stage===5&&item.variants.some(v=>v.kind==='image'&&v.assetId)
     ? item.variants.filter(v=>!isStoryboardDraft(v)) : item.variants;
 }

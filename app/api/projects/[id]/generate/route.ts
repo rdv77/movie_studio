@@ -158,6 +158,7 @@ export const POST = api(async (req, ctx) => {
       offset: speechSource?.offset ?? basis?.offset ?? 0,
       volume: basis?.volume ?? 1,
       character: item.stage===1 ? item.character : undefined,
+      location: item.stage===3 ? item.location??chosen(item)?.location : undefined,
       characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
       characterIds: kind==='video'?characterIds:undefined,
       prompt: kind==='image'&&item.stage===1 ? characterImageRequest(p,item,s.prompt,refs,n+1,s.count,m.id).prompt : isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(

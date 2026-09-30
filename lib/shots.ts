@@ -1,3 +1,4 @@
+import {locationStateSchema} from './world-schemas';
 import { z } from 'zod';
 import { speechInfo, speechNames, assertSpeech } from './speech-mode';
 export const shotSchema = z.object({
@@ -7,7 +8,7 @@ export const shotSchema = z.object({
       z.object({
         id:z.string().optional(),sceneId:z.string().optional(),cast:z.array(z.string()).optional(),productionDesign:z.string().max(6000).optional(),imagePrompt:z.string().max(32000).optional(),videoPrompt:z.string().max(32000).optional(),
         characterIds:z.array(z.string().max(100)).max(20).optional(),locationIds:z.array(z.string().max(100)).max(20).optional(),speakerId:z.string().max(100).optional(),
-        stateIn:z.string().max(6000).optional(),stateOut:z.string().max(6000).optional(),continuityChanges:z.string().max(2000).optional(),dialogueDelivery:z.string().max(1500).optional(),
+        locationState:locationStateSchema.optional(),stateIn:z.string().max(6000).optional(),stateOut:z.string().max(6000).optional(),continuityChanges:z.string().max(2000).optional(),dialogueDelivery:z.string().max(1500).optional(),
         sceneContinuity:z.array(z.object({character:z.string().max(100),characterId:z.string().max(100).optional(),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20).optional(),
         previousChanges:z.array(z.object({id:z.string().max(100),changes:z.string().max(2000)})).max(120).optional(),
         title: z.string().min(1).max(100),
