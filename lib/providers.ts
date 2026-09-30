@@ -1,4 +1,5 @@
 import {videoPromptLimit} from './model-capabilities';
+import { imageSettingsSchema, LEGACY_IMAGE_SETTINGS } from './image-quality';
 import { generateFal, pollFal } from './fal-provider';
 import { generateGoogle, pollGoogle } from './google-provider';
 import { call, json, ProviderError } from './provider-http';
@@ -173,8 +174,7 @@ export async function generate(
       model: j.model,
       prompt: j.prompt,
       n: 1,
-      resolution: '1k',
-      quality: 'low',
+      ...imageSettingsSchema.parse(j.imageSettings ?? LEGACY_IMAGE_SETTINGS),
       aspect_ratio: format,
     };
     if (refs.length === 1) body.image = { url: refs[0], type: 'image_url' };

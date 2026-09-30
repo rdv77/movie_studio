@@ -1,4 +1,5 @@
 import { filterPlanReferences } from '@/lib/plan-references';
+import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate } from '@/lib/image-quality';
 import {materialBasis} from '@/lib/material-basis';
 import { prepareFalJobs } from '@/lib/fal-models';
 import { assertSelectedReferences } from '@/lib/reference-selection';
@@ -17,6 +18,7 @@ const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
+  imageSettings: imageSettingsSchema.optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
@@ -48,8 +50,9 @@ export const POST = api(async (req, ctx) => {
     const issue=storyboardImagePromptIssue(request,m.id,entry.item.title);if(issue)throw new Error(issue);
     const job:Job={ id: id(), batchId: s.batchId, itemId: entry.item.id, model: m.id, kind: 'image',
       brief: row.prompt, prompt: request.prompt, refs,
+      ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...fields, offset: 0, volume: 1, voiceId: '', deps: dependencies(p, 5), created: now(),
-      status: 'queued', transportVersion: 2, estimate: s.estimate, actual: null };
+      status: 'queued', transportVersion: 2, estimate: m.id === GROK_IMAGE_MODEL ? grokImageEstimate(s.imageSettings, refs.length) : s.estimate, actual: null };
     prepareFalJobs([job],imageAssets);prepareZenJobs([job],imageAssets);jobs.push(job);
   }
   await getKey(user, m.provider);

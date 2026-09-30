@@ -55,8 +55,8 @@ export const MODELS: {
     name: 'Grok Imagine Image 2.0',
     provider: 'xai',
     kind: 'image',
-    estimate: '400000000',
-    note: '1K, low; $0.04 + $0.01 за референс',
+    estimate: '800000000',
+    note: 'Финальный medium / 2K $0.08; черновой low / 1K $0.04; + $0.01 за референс',
   },
   {
     id: 'flux-2-pro',

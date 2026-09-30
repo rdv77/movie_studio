@@ -1,4 +1,5 @@
 import { planCharacterIds, filterPlanReferences } from '@/lib/plan-references';
+import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate } from '@/lib/image-quality';
 import {materialBasis} from '@/lib/material-basis';
 import {selectedVideoPromptLimit,availableForDirecting} from '@/lib/model-capabilities';
 import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
@@ -52,6 +53,7 @@ export const POST = api(async (req, ctx) => {
       refs: z.array(z.string().uuid()).max(8),
       characterIds: z.array(z.string().uuid()).max(120).optional(),
       referenceMode: z.enum(['auto','selected']).default('auto'),
+      imageSettings: imageSettingsSchema.optional(),
       dialogue: z.string().max(9500),
       voiceId: z.string().max(150),
       speechSource: z.string().max(200).optional(),
@@ -147,6 +149,7 @@ export const POST = api(async (req, ctx) => {
       model: m.id,
       shotSource: fields?.shotSource??(kind==='audio'?scriptVideo(p).variant?.id:undefined),
       kind,
+      ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...(['audio','image','video'].includes(kind)&&item.stage>=5?info:{}),
       brief: s.prompt,
       camera: fields?.camera ?? basis?.camera ?? 'Статичная камера',
@@ -173,7 +176,7 @@ export const POST = api(async (req, ctx) => {
       created: now(),
       status: 'queued',
       transportVersion: 2,
-      estimate: s.estimates[m.id] ?? null,
+      estimate: m.id === GROK_IMAGE_MODEL ? grokImageEstimate(s.imageSettings, refs.length) : s.estimates[m.id] ?? null,
       actual: null,
     })),
   );

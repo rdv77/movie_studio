@@ -43,7 +43,7 @@ function baseline() {
     const media = item.stage === 1 || item.stage === 5 ? 'image' : item.stage === 6 ? 'audio' : item.stage >= 7 ? 'video' : 'text';
     D.addVariant(p, item.id, {
       title: `Approved stage ${item.stage}`, text: item.stage === 4
-        ? JSON.stringify({ shots: [{ title: 'План 1', description: 'Лена у ворот', duration: 5, dialogue: 'Мы пришли.', speechType: 'voiceover', speaker: 'Рассказчик' }] })
+        ? JSON.stringify({ timingMode: 'actual', shots: [{ title: 'План 1', description: 'Лена у ворот', cast: [hero.id], duration: 5, camera: 'Статичная камера', continuity: 'Прямая склейка', dialogue: 'Мы пришли.', speechType: 'voiceover', speaker: 'Рассказчик' }] })
         : `Approved material ${item.stage}`,
       kind: media, ...(media !== 'text' ? { assetId: D.id() } : {}),
       ...(item.stage === 1 ? { character: structuredClone(hero.character) } : {}),
@@ -98,6 +98,9 @@ test('legacy approved IDs recover status after script changes without any writes
 test('selection and draft profile changes keep the previously approved hero references', () => {
   const p = baseline();
   const hero = p.items[1];
+  // Production references are scoped to the cast of this shot, even when a
+  // draft changes the hero's display name. Stable character IDs preserve cast.
+  p.items[5].sourceShot = { scriptId: p.items[4].approvedId, title: 'План 1' };
   const old = structuredClone(hero.variants.find((variant) => variant.id === hero.approvedId));
   const productionDeps = D.dependencies(p, 5);
   hero.character = { ...hero.character, name: 'Черновое имя', appearance: 'Синяя куртка', refs: [D.id()] };
@@ -109,7 +112,8 @@ test('selection and draft profile changes keep the previously approved hero refe
   assert.deepEqual(C.characterImageRefs(p, p.items[5], []), [old.assetId]);
   assert(D.isApproved(p, p.items[7]), 'Unapproved selection must not invalidate production work.');
   D.approve(p, hero.id);
-  assert.deepEqual(C.characterImageRefs(p, p.items[5], []), [replacement.assetId]);
+  assert.deepEqual(C.approvedCharacters(p).map(record => record.assetId), [replacement.assetId]);
+  assert.deepEqual(C.characterImageRefs(p, p.items[5], []), [], 'A stale detailed script no longer supplies automatic per-shot cast references.');
   assert.notEqual(D.dependencies(p, 5), productionDeps);
   for (const stage of [1, 2, 3]) assert(D.isApproved(p, p.items[stage]));
   for (const stage of [4, 5, 6, 7, 8]) assert(!D.isApproved(p, p.items[stage]));

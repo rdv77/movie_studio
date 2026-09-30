@@ -1,4 +1,5 @@
 import type { SpeechType } from './speech-mode';
+import type { ImageSettings } from './image-quality';
 import type { DirectingState } from './directing';
 import { productionPrecedes } from './production-order';
 import { materialBasis } from './material-basis';
@@ -30,6 +31,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  imageSettings?: ImageSettings;
   reviewBasis?: string;
   animaticBasis?: string;
   planDraft?: boolean;
@@ -73,6 +75,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  imageSettings?: ImageSettings;
   reviewBasis?:string;
   newSeriesAllowedAt?: string;
   waitStartedAt?: string;
@@ -274,6 +277,7 @@ export function makeVariant(
   data: Partial<Variant>,
 ): Variant {
   const sameFile = data.assetId ? p.items.flatMap(i => i.variants).find(v => v.assetId === data.assetId && v.lipsync) : undefined;
+  const imageSource = data.assetId ? item.variants.find(v => v.assetId === data.assetId && v.imageSettings) : undefined;
   return {
     ...(p.directing&&[5,6,7].includes(item.stage)?{reviewBasis:materialBasis(p,item,data)}:{}),
     title: 'Новый вариант',
@@ -292,6 +296,8 @@ export function makeVariant(
     continuity: '',
     voiceId: '',
     ...data,
+    imageSettings: data.imageSettings ?? imageSource?.imageSettings,
+    ...(imageSource && data.kind === 'image' ? {model: imageSource.model, jobId: imageSource.jobId} : {}),
     lipsync: data.lipsync ?? sameFile?.lipsync,
     id: data.id ?? id(),
   };

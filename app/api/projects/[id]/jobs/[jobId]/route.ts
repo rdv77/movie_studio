@@ -227,6 +227,7 @@ export const POST = api(async (req, ctx) => {
           shotSource: job.shotSource,
           assetId,
           model: job.model,
+          imageSettings: job.imageSettings,
           refs: job.refs,
           character:job.character,
           characterRefs:job.characterRefs,

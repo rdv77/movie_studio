@@ -43,9 +43,10 @@ for(const patch of [s=>s.description='Новое',s=>s.camera='Новая',s=>s.
  D.chosen(source).text=JSON.stringify(data);
  assert(!ready(x).some(s=>s.itemId===frames[0].id));
 }
-for(const change of [x=>x.configVersion++,x=>{D.getItem(x,p.items[1].id).approvedId=D.id()},x=>{D.getItem(x,frames[0].id).approvedId=undefined},x=>{D.getItem(x,frames[0].id).selectedId=undefined},x=>{D.getItem(x,frames[0].id).planArchive={reason:'removed'}},x=>{D.getItem(x,frames[0].id).removedAt='now'},x=>{D.chosen(D.getItem(x,frames[0].id)).deps='invalid'},x=>{x.jobs.push({status:'pending'})},x=>{D.getItem(x,script.id).variants=D.getItem(x,script.id).variants.filter(v=>v.id!==oldId)},x=>{const v=D.chosen(D.getItem(x,script.id));v.text=JSON.stringify({...JSON.parse(v.text),direction:'Новая атмосфера'})}]){
+for(const change of [x=>x.configVersion++,x=>{D.getItem(x,p.items[1].id).approvedId=D.id()},x=>{D.getItem(x,frames[0].id).approvedId=undefined},x=>{D.getItem(x,frames[0].id).planArchive={reason:'removed'}},x=>{D.getItem(x,frames[0].id).removedAt='now'},x=>{D.chosen(D.getItem(x,frames[0].id)).deps='invalid'},x=>{x.jobs.push({status:'pending'})},x=>{D.getItem(x,script.id).variants=D.getItem(x,script.id).variants.filter(v=>v.id!==oldId)},x=>{const v=D.chosen(D.getItem(x,script.id));v.text=JSON.stringify({...JSON.parse(v.text),direction:'Новая атмосфера'})}]){
  const x=structuredClone(before);change(x);assert(!ready(x).some(s=>s.itemId===frames[0].id));
 }
+const fallback=structuredClone(before);delete D.getItem(fallback,frames[0].id).selectedId;assert(ready(fallback).some(s=>s.itemId===frames[0].id),"The approved image remains eligible when the explicit selection is absent.");
 const deleted=structuredClone(before),deletedScript=D.getItem(deleted,script.id),old=deletedScript.variants.find(v=>v.id===oldId);
 deletedScript.variants=deletedScript.variants.filter(v=>v.id!==oldId);deleted.removedVariants=[{itemId:script.id,variant:old,removedAt:'now'}];assert.equal(ready(deleted).length,8);
 const all=ready(before),bad={itemId:frames[4].id,variantId:frames[4].selectedId};

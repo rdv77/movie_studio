@@ -26,9 +26,10 @@ assert(D.isApproved(p,frame));assert(D.stageReady(p,6));assert(!D.isApproved(p,p
 assert.deepEqual(p.items[6],downstream);assert.deepEqual(p.jobs,before.jobs);
 assert(!B.approvalBlockers(p,6).some(b=>b.itemId===frame.id));
 const draft=structuredClone(before);D.chosen(draft.items[5]).kind='text';delete D.chosen(draft.items[5]).assetId;S.reapproveStoryboard(draft,frame.id,source.id);assert(D.isApproved(draft,draft.items[5]));
-for(const change of [x=>{x.items[4].approvedId=undefined},x=>{x.jobs.push({status:'saving'})},x=>{x.items[5].selectedId=undefined},x=>{x.items[5].planArchive=true},x=>{x.items[5].removedAt='now'},x=>{x.items[5].sourceShot.title='Удалённый план'},x=>{delete D.chosen(x.items[5]).assetId},x=>{D.chosen(x.items[5]).kind='video'}]) {
+for(const change of [x=>{x.items[4].approvedId=undefined},x=>{x.jobs.push({status:'saving'})},x=>{x.items[5].planArchive=true},x=>{x.items[5].removedAt='now'},x=>{x.items[5].sourceShot.title='Удалённый план'},x=>{delete D.chosen(x.items[5]).assetId},x=>{D.chosen(x.items[5]).kind='video'}]) {
  const bad=structuredClone(before);change(bad);const snapshot=structuredClone(bad);assert.throws(()=>S.reapproveStoryboard(bad,frame.id,source.id));assert.deepEqual(bad,snapshot);
 }
+const fallback=structuredClone(before);delete fallback.items[5].selectedId;S.reapproveStoryboard(fallback,frame.id,source.id);assert(D.isApproved(fallback,fallback.items[5]),"The existing approved image remains the fallback choice.");
 const payload={revision:before.revision,action:'reapproveStoryboard',itemId:frame.id,data:{variantId:source.id}};
 const run=body=>PATCH(new Request('https://site.test/api',{method:'PATCH',body:JSON.stringify(body)}),{params:Promise.resolve({id:p.id})});
 globalThis.state=structuredClone(before);

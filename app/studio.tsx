@@ -1,4 +1,5 @@
 'use client';
+import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { DirectingEditor } from './directing-editor';
 import { ReviewCenter } from './review-center';
 import { selectedVideoPromptLimit,videoPromptLimit,availableForDirecting } from '@/lib/model-capabilities';
@@ -1137,6 +1138,7 @@ function Workspace() {
                                   <Media v={v} />
                                   <div className="variant-body">
                                     <h2>{v.title}</h2>
+                                    {v.kind==='image'&&v.model===GROK_IMAGE_MODEL&&<p className="muted">{imageSettingsLabel(v.imageSettings??LEGACY_IMAGE_SETTINGS)}</p>}
                                     {v.character&&<details><summary>Описание этого образа · {v.character.name}</summary><p>{v.character.appearance}</p><p className="whitespace-pre-wrap">{v.character.description}</p><p className="whitespace-pre-wrap">{v.character.instructions}</p></details>}
                                     <div className="variant-meta">
                                       <span>
@@ -1883,6 +1885,7 @@ function GenerateDialog({
   const [speechMeta,setSpeechMeta]=useState<SpeechInfo>({speechType:'voiceover',speaker:''});
   const [voice, setVoice] = useState('');
   const [estimates, setEstimates] = useState<Record<string, string>>({});
+  const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
   const [batch, setBatch] = useState('');
   const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
   const unresolved=p.jobs.filter((j:Job)=>j.itemId===item.id&&unresolvedJobBlocks(j));
@@ -1937,6 +1940,7 @@ function GenerateDialog({
       setSpeechSource(k === 'audio' ? initial.sourceId : 'current');
       setVoice(preferred?.voiceId ?? v?.voiceId ?? '');
       setEstimates({});
+      setImageSettings(FINAL_IMAGE_SETTINGS);
       setBatch(crypto.randomUUID());
     }
   }, [open, p.id, item.id]);
@@ -1960,14 +1964,12 @@ function GenerateDialog({
   const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
     ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
     : selected.some(m=>kind==='video'&&m.provider==='xai'&&videoCharacterRefs(p,'xai',effectiveCharacters).length>7)?'Grok Video принимает до 7 отдельных образов героев.':'';
-  const computed = (m: (typeof MODELS)[number]) => googleEstimate(m.id,
+  const computed = (m: (typeof MODELS)[number]) => m.id === GROK_IMAGE_MODEL ? grokImageEstimate(imageSettings, Math.min(5,effectiveRefs.length)) : googleEstimate(m.id,
     estimates[m.id] !== undefined
       ? estimates[m.id]
         ? ticks(estimates[m.id])
         : null
-      : m.id === 'grok-imagine-image-2.0'
-        ? (400000000n + BigInt(effectiveRefs.length) * 100000000n).toString()
-        : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
+      : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
         : m.estimate);
   let total: string | null = null;
   try {
@@ -2065,15 +2067,16 @@ function GenerateDialog({
                   >
                     <Input
                       inputMode="decimal"
+                      readOnly={m.id === GROK_IMAGE_MODEL}
                       placeholder={
                         m.estimate
                           ? String(Number(m.estimate) / 1e10)
                           : 'Неизвестно'
                       }
                       value={
-                        estimates[m.id] ??
+                        m.id === GROK_IMAGE_MODEL ? String(Number(computed(m))/1e10) : estimates[m.id] ??
                         (m.id === 'grok-imagine-image-2.0'
-                          ? String(0.04 + 0.01 * effectiveRefs.length)
+                          ? String(Number(computed(m))/1e10)
                           : m.id==='grok-imagine-video-1.5' ? (0.85+0.01*videoCharacterRefs(p,'xai',effectiveCharacters).length).toFixed(2)
                           : m.estimate
                             ? String(Number(m.estimate) / 1e10)
@@ -2089,6 +2092,7 @@ function GenerateDialog({
             );
           })}
         </div>
+        {models.includes(GROK_IMAGE_MODEL) && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
         {kind === 'text' && source?.text && (
           <Field
             label={item.stage === 0 ? 'Сценарий для доработки' : 'Материал для доработки'}
@@ -2313,6 +2317,7 @@ function GenerateDialog({
                   voiceId: voice,
                   ...(kind === 'audio' && speechSource !== 'current' ? { speechSource } : {}),
                   estimates: es,
+                  ...(models.includes(GROK_IMAGE_MODEL) ? {imageSettings} : {}),
                 });
                 close();
               })
@@ -2720,6 +2725,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     prompt: storyboardPrompt(snapshot, item), refs:planReferenceIds(snapshot,item),
   })));
   const [override, setOverride] = useState<string | undefined>();
+  const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
   const referenceOptions=new Map(rows.map(r=>[r.itemId,planReferenceIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!)]));
   const referencesByPlan=new Map(rows.map(r=>[r.itemId,filterPlanReferences(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.refs)]));
   const rowRefs=(r:(typeof rows)[number])=>referencesByPlan.get(r.itemId)??[];
@@ -2727,11 +2733,12 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   const excludedRefs=hiddenReferences(snapshot);
   const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id));
   const included = rows.filter(r => r.include && !r.blocked);
-  const base = m?.id === 'grok-imagine-image-2.0' ? (400000000n + BigInt(effectiveRefs.length) * 100000000n).toString() : m?.estimate ?? null;
+  const isGrok = modelId === GROK_IMAGE_MODEL;
+  const base = isGrok ? grokImageEstimate(imageSettings, Math.min(5,effectiveRefs.length)) : m?.estimate ?? null;
   let estimate = base, costError = '';
-  try { if (override !== undefined) estimate = override.trim() ? ticks(override.trim()) : null; }
+  try { if (!isGrok && override !== undefined) estimate = override.trim() ? ticks(override.trim()) : null; }
   catch { costError = 'Укажите стоимость в USD, например 0.05.'; estimate = null; }
-  const total = estimate === null ? null : (BigInt(estimate) * BigInt(included.length)).toString();
+  const total = isGrok ? included.reduce((sum,r)=>sum+BigInt(grokImageEstimate(imageSettings,Math.min(5,rowRefs(r).length))),0n).toString() : estimate === null ? null : (BigInt(estimate) * BigInt(included.length)).toString();
   const budget = totals(p);
   if (!costError && p.limit !== null) {
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
@@ -2749,6 +2756,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
+      {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
       {isFalImage(modelId)&&<p className="note">Qwen Image Edit: кадры создаются с выбранными референсами и утверждёнными образами героев. Промпт сокращён до бюджета студии в 5000 символов; проверьте его перед запуском.</p>}
       {isZenCreatorImage(modelId)&&<p className="note">ZenCreator: промпт каждого кадра подготовлен в пределах 5000 символов. Проверьте действие, героев и стиль в разделе «Промпт для модели»; исходные описания остаются целиком.</p>}
       {isMiniMaxImage(modelId)&&<p className="note">MiniMax image-01: описание каждого кадра сокращается до 1500 символов. Перед запуском проверьте «Промпт для модели» в отмеченных планах. Референсы PNG/JPEG меньше 10 МБ; общий размер до 20 МБ. Используется сохранённый ключ MiniMax.</p>}
@@ -2773,19 +2781,23 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       {effectiveRefs.length > refLimit && <p role="alert">С учётом героев выбрано {effectiveRefs.length} референсов. Уберите дополнительные изображения или выберите модель с большим лимитом (до {refLimit} у текущей модели).</p>}
       <ZenCost modelId={modelId} refs={effectiveRefs.length} count={included.length}/>
       <Field label="Оценка одной картинки, USD" hint="Оценка не равна списанию. Неизвестную стоимость можно оставить пустой при отсутствии лимита проекта.">
-        <Input aria-label="Оценка одной картинки, USD" inputMode="decimal" value={override ?? (base === null ? '' : String(Number(BigInt(base)) / 1e10))} onChange={e => setOverride(e.target.value)} />
+        <Input aria-label="Оценка одной картинки, USD" inputMode="decimal" readOnly={isGrok} value={isGrok ? Number(base)/1e10 : override ?? (base === null ? '' : String(Number(BigInt(base)) / 1e10))} onChange={e => setOverride(e.target.value)} />
       </Field>
+      {isGrok && <p className="muted">Сумма рассчитана отдельно по референсам каждого выбранного плана; поле выше показывает максимальную оценку одной картинки.</p>}
       <div className="generation-total"><div><span>Будет создано</span><strong>{included.length} картинок</strong></div>
         <div><span>Оценка всей серии</span><strong>{money(total)}</strong></div></div>
       {costError && <p role="alert">{costError}</p>}
       <p className="muted">Кадры обрабатываются параллельно. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
-          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:[], referenceMode:'selected', estimate,
+          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:[], referenceMode:'selected', estimate, ...(isGrok?{imageSettings}:{}),
             plans: included.map(r => ({ itemId:r.itemId, prompt:r.prompt,refs:rowRefs(r) })) }); close();
         })}><Sparkles />Сгенерировать {included.length} картинок</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
+}
+function GrokImageQuality({value,onChange}:{value:ImageSettings;onChange:(value:ImageSettings)=>void}) {
+  return <Field label="Качество Grok" hint="Режим сохраняется с каждой попыткой. Цена проверена 1 октября 2026; фактическое списание учитывается отдельно."><Drop label="Качество Grok" value={value.quality==='medium'?'final':'draft'} onChange={v=>onChange(v==='final'?FINAL_IMAGE_SETTINGS:LEGACY_IMAGE_SETTINGS)} options={[{value:'final',label:'Финальный · medium / 2K · $0.08 + референсы'},{value:'draft',label:'Черновой · low / 1K · $0.04 + референсы'}]}/></Field>;
 }
 function ZenCost({modelId,refs=0,count=1}: {modelId:string;refs?:number;count?:number}) {
   const cost=zenCredits(modelId,refs);
@@ -3045,6 +3057,7 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.purpose==='voice-test'&&<small>Проба голоса · {j.voiceName||j.voiceId}</small>}
                   {(j.purpose==='music'||j.purpose==='music-ideas')&&<small>{j.purpose==='music'?'Музыкальное сопровождение':'Музыкальные направления по сценарию'}</small>}
                   <small>{new Date(j.created).toLocaleString('ru-RU')}</small>
+                  {j.model===GROK_IMAGE_MODEL&&<small>{imageSettingsLabel(j.imageSettings??LEGACY_IMAGE_SETTINGS)}</small>}
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
                 </TableCell>
                 <TableCell>
