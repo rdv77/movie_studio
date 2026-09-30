@@ -1,7 +1,8 @@
-import { assertBudget, dependencies, getItem, stageReady, type Job, type Project } from './domain';
+import { assertBudget, dependencies, jobCurrent, getItem, stageReady, type Job, type Project } from './domain';
 import { selectedReferences } from './reference-selection';
 import {unresolvedJobBlocks} from './job-wait';
 import {materialBasis} from './material-basis';
+import {stampGenerationVersions} from './creative-versions';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
@@ -63,7 +64,7 @@ export async function enqueueStoryboard(snapshot:Project,jobs:Job[],load:()=>Pro
   return enqueuePlanJobs(snapshot,jobs,load,save);
 }
 export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promise<Project>,save:(p:Project,revision:number)=>Promise<Project>,sourceItemId?:string) {
-  if(snapshot.directing)for(const job of jobs)job.reviewBasis=materialBasis(snapshot,getItem(snapshot,job.itemId),job);
+  stampGenerationVersions(snapshot,jobs);
   const stage=getItem(snapshot,jobs[0].itemId).stage,batchId=jobs[0].batchId;
   if(![1,2,3,5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии материалов.');
   const items=[...new Set(jobs.map(j=>j.itemId))];
@@ -71,7 +72,7 @@ export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promi
   for(let n=0;n<5;n++) {
     const p=await load();
     if(p.jobs.some(j=>j.batchId===batchId))return p;
-    if(dependencies(p,stage)!==basis||items.some(id=>JSON.stringify(getItem(p,id))!==originals.get(id))||!stageReady(p,stage)||
+    if((jobs.every(j=>j.basisVersion===2)?jobs.some(j=>!jobCurrent(p,getItem(p,j.itemId),j)):dependencies(p,stage)!==basis)||items.some(id=>JSON.stringify(getItem(p,id))!==originals.get(id))||!stageReady(p,stage)||
       sourceItemId&&getItem(p,sourceItemId).selectedId!==getItem(snapshot,sourceItemId).selectedId)
       throw new Error('Основа или выбранный план изменились. Проверьте задачу заново.');
     for(const itemId of items){const issue=stage===5?storyboardAdmissionIssue(p,itemId):stage===7?videoAdmissionIssue(p,itemId):conceptImageAdmissionIssue(p,itemId);if(issue)throw new Error(issue);}

@@ -862,6 +862,7 @@ function Workspace() {
                   <div className="reference-grid">{item.character.refs.map(ref=><div className="reference" key={ref}><img src={'/api/assets/'+ref} alt={`Исходный прообраз ${item.character!.name}`}/><span>Исходный прообраз</span></div>)}</div>
                   {item.approvedId&&JSON.stringify(item.character)!==JSON.stringify(item.variants.find(v=>v.id===item.approvedId)?.character)&&<p className="warning-text">Исходная карточка и утверждённый образ различаются. Следующие этапы используют описание и изображение утверждённого варианта.</p>}
                   <p className="muted">Создайте несколько образов через «Создать с ИИ», выберите лучший и утвердите его. Можно также использовать готовое изображение из карточки героя.</p>
+                  {!!item.characterHistory?.length&&<details><summary>История описания героя · {item.characterHistory.length}</summary>{[...item.characterHistory].reverse().map(v=><div className="border rounded p-3" key={v.id}><b>{v.profile.name}</b><small className="block">{new Date(v.created).toLocaleString('ru-RU')}</small><p>{v.profile.appearance}</p><p className="whitespace-pre-wrap">{v.profile.description}</p><p>{v.profile.instructions}</p><Button variant="outline" size="sm" disabled={busy||item.characterVersionId===v.id} onClick={()=>perform(()=>action('restoreCharacterVersion',{versionId:v.id},item.id))}>Вернуть описание</Button></div>)}</details>}
                 </> : <p>Добавьте отдельную карточку для каждого героя: имя, описание, исходное изображение по желанию и указания, что сохранить или изменить. Если общее описание «Персонажи» уже перенесено в отдельные карточки, эту общую карточку можно удалить.</p>}
                 {item&&<Button variant="outline" disabled={busy} className="mt-3" onClick={()=>perform(async()=>{await action('removeCharacter',undefined,item.id);setItemId('');})}><Trash2/>Удалить карточку «{item.title}»</Button>}
               </section>}
@@ -1138,6 +1139,7 @@ function Workspace() {
                                   <Media v={v} />
                                   <div className="variant-body">
                                     <h2>{v.title}</h2>
+                                    {v.versionInfo&&<details><summary>Происхождение варианта</summary><p>{v.versionInfo.reason}</p><p className="muted">Родитель: {item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'Исходный материал'} · использовано источников: {v.versionInfo.sources.length}</p></details>}
                                     {v.kind==='image'&&v.model===GROK_IMAGE_MODEL&&<p className="muted">{imageSettingsLabel(v.imageSettings??LEGACY_IMAGE_SETTINGS)}</p>}
                                     {v.character&&<details><summary>Описание этого образа · {v.character.name}</summary><p>{v.character.appearance}</p><p className="whitespace-pre-wrap">{v.character.description}</p><p className="whitespace-pre-wrap">{v.character.instructions}</p></details>}
                                     <div className="variant-meta">
@@ -1671,6 +1673,7 @@ function VariantEditor({
         volume: value?.volume ?? 1,
         ...planFields(p, item, value),
         voiceId: value?.voiceId ?? '',
+        parentVariantId: value?.id,
       });
   }, [open, value, item.id]);
   function set(k: string, v: any) {

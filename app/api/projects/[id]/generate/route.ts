@@ -1,4 +1,5 @@
 import { planCharacterIds, filterPlanReferences } from '@/lib/plan-references';
+import {stampGenerationVersions} from '@/lib/creative-versions';
 import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate } from '@/lib/image-quality';
 import {materialBasis} from '@/lib/material-basis';
 import {selectedVideoPromptLimit,availableForDirecting} from '@/lib/model-capabilities';
@@ -187,7 +188,7 @@ export const POST = api(async (req, ctx) => {
   prepareZenJobs(jobs, imageAssets);
   if(parallelConcept||parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
   assertBudget(p, jobs);
-  if(p.directing)for(const job of jobs)job.reviewBasis=materialBasis(p,p.items.find(i=>i.id===job.itemId)!,job);
+  stampGenerationVersions(p,jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
 });

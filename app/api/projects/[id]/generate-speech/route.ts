@@ -1,4 +1,5 @@
 import {materialBasis} from '@/lib/material-basis';
+import {stampGenerationVersions} from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { id, now, stageReady, dependencies, assertBudget, type Job } from '@/lib/domain';
 import { speechPlans, speechCharacters } from '@/lib/speech';
@@ -44,7 +45,7 @@ export const POST = api(async (req, ctx) => {
   });
   await getKey(user, m.provider);
   assertBudget(p, jobs);
-  p.speechMode = 'plans'; if(p.directing)for(const job of jobs)job.reviewBasis=materialBasis(p,p.items.find(i=>i.id===job.itemId)!,job);
+  p.speechMode = 'plans'; stampGenerationVersions(p,jobs);
   p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, original.revision));
 });

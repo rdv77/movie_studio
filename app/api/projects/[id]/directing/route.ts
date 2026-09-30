@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { recordCreativeVersion, restoreCreativeVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { model } from '@/lib/models';
 import { id, makeVariant } from '@/lib/domain';
 import { runDirectorStep } from '@/lib/director-runner';
-import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, scenesBasis, shotApproval, directorBasis, type DirectorRole } from '@/lib/directing';
+import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, scenesBasis, shotApproval, shotFoundationBasis, directorBasis, editorBasis, type DirectorRole } from '@/lib/directing';
 import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
 import {applyEditorPatches} from '@/lib/directing';
@@ -17,7 +18,10 @@ export const POST=api(async(req,ctx)=>{
   const d=ensureDirecting(p),v=body.data??{};
   const running=d.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error));
   if(running&&!['stop','retry'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
+  const tracksHistory=['brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions'].includes(body.action);
+  if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
+    case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;
     case 'runtimePolicy':{
       const mode=z.enum(['free','strict']).parse(v.mode);
       if(d.durationMode!==mode){d.durationMode=mode;d.editorBasis=undefined;d.acceptedRuntime=undefined;
@@ -65,6 +69,7 @@ export const POST=api(async(req,ctx)=>{
       if(old)Object.assign(old,{...shot,approved:undefined});else scene.shots.push({...shot,id:id()});break;
     }
     case 'approveShots':{
+      const reviewed=d.editorBasis===editorBasis(p);
       const ids=z.array(z.string()).max(120).parse(v.ids);let count=0;
       // Older clients may submit an empty list after every shot was approved.
       // Return the current project without modifying approvals or its revision.
@@ -73,8 +78,8 @@ export const POST=api(async(req,ctx)=>{
         if(!shot.story.trim()||!shot.cinematography.trim()||!shot.productionDesign.trim())throw Error('Заполните сценарий, операторскую работу и художественное решение.');
         if(shot.dialogue.speechType==='character'&&(!shot.dialogue.speaker||!shot.cast.includes(shot.dialogue.speaker)))throw Error('Укажите присутствующего в кадре говорящего.');
         if(d.issues.some(i=>i.severity==='conflict'&&!i.resolved&&(!i.shotId||i.shotId===shot.id)&&(!i.sceneId||i.sceneId===s.id)))throw Error('Сначала разрешите конфликт редактора.');
-        dialogueSchema.parse(shot.dialogue);shot.approved=shotApproval(s,shot);shot.approvedFoundation=directorBasis(p);count++;
-      }if(count!==new Set(ids).size)throw Error('Состав планов изменился.');break;
+        dialogueSchema.parse(shot.dialogue);shot.characterIds??=relevantHeroItems(p,shot).map(i=>i.id);shot.locationIds??=relevantLocationItems(p,s,shot).map(i=>i.id);shot.approvalVersion=2;shot.approved=shotApproval(s,shot);shot.approvedFoundation=shotFoundationBasis(p,s,shot);count++;
+      }if(count!==new Set(ids).size)throw Error('Состав планов изменился.');if(reviewed)d.editorBasis=editorBasis(p);break;
     }
     case 'resolveIssue':{const issue=d.issues.find(i=>i.id===v.issueId);if(!issue)throw Error('Замечание не найдено.');issue.resolution=z.string().trim().min(1).max(2000).parse(v.resolution);issue.resolved=true;break;}
     case 'applyPatch':{
@@ -93,5 +98,6 @@ export const POST=api(async(req,ctx)=>{
     }
     default:throw Error('Неизвестное действие.');
   }
+  if(tracksHistory)recordCreativeVersion(p,'Изменение: '+body.action);
   return Response.json(await saveProject(user,p,p.revision));
 });

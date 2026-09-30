@@ -3,6 +3,7 @@ import { id, now, chosen, makeVariant, dependencies, isApproved, type Project, t
 import { speechDirection } from './speech-mode';
 import { parseShots } from './shots';
 import {runtimeMode,plannedRuntime,runtimeLimit,checkRuntime,runtimeAcceptanceBasis} from './runtime-policy';
+import { recordCreativeVersion, normalizedName, relevantHeroItems, relevantLocationItems } from './creative-versions';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -25,13 +26,15 @@ const text=z.string().max(6000);
 export const dialogueSchema=z.object({speechType:z.enum(['voiceover','character','none']),speaker:z.string().max(100),text:z.string().max(4000),delivery:z.string().max(1500)}).refine(v=>v.speechType!=='none'||!v.text.trim(),'Для плана без речи текст должен быть пустым.').refine(v=>v.speechType!=='character'||!!v.speaker.trim(),'Укажите говорящего героя.');
 export const directingShotSchema=z.object({
   id:z.string().min(1).max(100),title:z.string().min(1).max(100),duration:z.number().min(.5).max(60),
+  characterIds:z.array(z.string().min(1).max(100)).max(20).optional(),locationIds:z.array(z.string().min(1).max(100)).max(20).optional(),
   cast:z.array(z.string().max(100)).max(20),story:text,stateIn:text,stateOut:text,
   cinematography:text,productionDesign:text,dialogue:dialogueSchema,continuityChanges:z.string().max(2000),
 });
-export type DirectingShot=z.infer<typeof directingShotSchema>&{approved?:string;approvedFoundation?:string;imagePrompt?:string;videoPrompt?:string;promptBasis?:string};
+export type DirectingShot=z.infer<typeof directingShotSchema>&{approvalVersion?:2;approved?:string;approvedFoundation?:string;imagePrompt?:string;videoPrompt?:string;promptBasis?:string};
 export const sceneSchema=z.object({id:z.string().min(1).max(100),title:z.string().min(1).max(100),purpose:text,location:text,conflict:text,turn:text,
+  locationIds:z.array(z.string().min(1).max(100)).max(20).optional(),
   stateIn:text,stateOut:text,
-  continuity:z.array(z.object({character:z.string().max(100),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20),
+  continuity:z.array(z.object({character:z.string().max(100),characterId:z.string().max(100).optional(),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20),
   shots:z.array(directingShotSchema).max(40),
 });
 export type Scene=Omit<z.infer<typeof sceneSchema>,'shots'>&{shots:DirectingShot[]};
@@ -51,8 +54,25 @@ export function ensureDirecting(p:Project){return p.directing??={brief:{...DEFAU
 export function sceneOutline(s:Scene){const {shots,...rest}=s;return rest;}
 export function scenesBasis(p:Project){return signature({scenes:p.directing?.scenes.map(sceneOutline)??[],script:foundation(p).filter(i=>i.stage===0),brief:p.directing?.brief});}
 export function precedingChanges(s:Scene,shot:DirectingShot){return s.shots.slice(0,Math.max(0,s.shots.findIndex(v=>v.id===shot.id))).filter(v=>v.continuityChanges.trim()).map(v=>({id:v.id,changes:v.continuityChanges}));}
-export function shotApproval(s:Scene,shot:DirectingShot){const {approved,approvedFoundation,imagePrompt,videoPrompt,promptBasis,...data}=shot;return signature({scene:sceneOutline(s),previousChanges:precedingChanges(s,shot),shot:data});}
-export function shotApproved(s:Scene,shot:DirectingShot,p?:Project){return !!shot.approved&&shot.approved===shotApproval(s,shot)&&(!p||shot.approvedFoundation===directorBasis(p));}
+function relevantContinuity(s:Scene,shot:DirectingShot){return s.continuity.filter(c=>shot.characterIds?.includes(c.characterId??'')||shot.cast.some(name=>name===c.characterId||normalizedName(name)===normalizedName(c.character)));}
+export function relevantPrecedingChanges(s:Scene,shot:DirectingShot){
+  return s.shots.slice(0,Math.max(0,s.shots.findIndex(v=>v.id===shot.id))).filter(v=>v.continuityChanges.trim()&&(
+    // Unstructured legacy changes cannot safely be attributed to one hero.
+    !v.characterIds?.length||v.characterIds.some(id=>shot.characterIds?.includes(id))||v.cast.some(name=>shot.cast.some(c=>normalizedName(c)===normalizedName(name)))
+  )).map(v=>({id:v.id,changes:v.continuityChanges}));
+}
+export function shotApproval(s:Scene,shot:DirectingShot){
+  const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...data}=shot;
+  if(approvalVersion===2){const {continuity,stateIn,stateOut,...outline}=sceneOutline(s);return signature({version:2,scene:{...outline,continuity:relevantContinuity(s,shot)},previousChanges:relevantPrecedingChanges(s,shot),shot:data});}
+  return signature({scene:sceneOutline(s),previousChanges:precedingChanges(s,shot),shot:data});
+}
+export function shotFoundationBasis(p:Project,s:Scene,shot:DirectingShot){
+  const {targetSeconds,...brief}=p.directing?.brief??{};
+  const material=(i:typeof p.items[number])=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,text:v?.character?undefined:v?.text,character:v?.character?{appearance:v.character.appearance,description:v.character.description,instructions:v.character.instructions}:undefined,assetId:v?.assetId};};
+  return signature({version:2,format:p.format,brief,heroes:relevantHeroItems(p,shot).map(material),style:p.items.filter(i=>i.stage===2&&!i.removedAt&&!i.planArchive).map(material),locations:relevantLocationItems(p,s,shot).map(material)});
+}
+export function shotApproved(s:Scene,shot:DirectingShot,p?:Project){return !!shot.approved&&shot.approved===shotApproval(s,shot)&&(!p||shot.approvedFoundation===(shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorBasis(p)));}
+export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return signature([shotApproval(s,shot),shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorBasis(p)]);}
 export function foundation(p:Project){return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId};});}
 export function directorBasis(p:Project){return signature({brief:p.directing?.brief,foundation:foundation(p)});}
 export function editorBasis(p:Project){return signature([directorBasis(p),p.directing?.scenes.map(s=>[sceneOutline(s),s.shots.map(shot=>shotApproval(s,shot))])]);}
@@ -102,12 +122,14 @@ function validateDialogue(s:DirectingShot){if(s.dialogue.speechType==='none'&&s.
 export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,result:unknown){
   const d=ensureDirecting(p);t.result=result;
   if(run.stopped||run.basis!==directorBasis(p)){t.error='Основа изменилась или работа остановлена. Ответ сохранён; примените после проверки.';return;}
+  recordCreativeVersion(p,'before-'+t.role);
   if(t.role==='critic')d.critic=z.object({review:text,alternatives:z.array(z.object({title:z.string().max(200),text:z.string().max(30000)})).max(2)}).parse(result);
   else if(t.role==='scenes'){
     const data=z.object({scenes:z.array(sceneSchema).min(1).max(24)}).parse(result);
     if(new Set(data.scenes.map(s=>s.id)).size!==data.scenes.length)throw Error('Повторяются ID сцен.');
     // Replacing a reviewed scene map is always explicit in the UI.
-    d.scenes=data.scenes.map(s=>({...s,id:id(),shots:[]}));d.scenesApproved=undefined;
+    const existing=d.scenes;
+    d.scenes=data.scenes.map(s=>{const matches=existing.filter(old=>old.id===s.id||normalizedName(old.title)===normalizedName(s.title));return {...s,id:matches.length===1?matches[0].id:id(),shots:[]};});d.scenesApproved=undefined;
   }else if(t.role==='editor'){
     const data=z.object({issues:z.array(z.object({id:z.string().optional(),category:z.enum(['runtime_target','runtime_metadata','speech_fit','other']).optional(),sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text,solution:text.optional()})).max(150),patches:z.array(z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(EDITOR_SECTIONS),after:text,reason:text})).max(150)}).parse(result);
     const links=new Map<string,string>();
@@ -128,7 +150,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
         const fixed=`\nАнимация ${p.format}. Только эти герои: ${shot.cast.join(', ')}. Постоянная внешность: ${identities}. Исходная одежда и реквизит в начале сцены: ${locks}. Уже произошедшие изменения (сохраняются в этом плане): ${changes||'нет'}. Начальное состояние этого плана: ${shot.stateIn}. Новые изменения в этом плане: ${shot.continuityChanges||'нет'}. Не возвращай изменённые одежду и предметы к исходному состоянию без действия.\n\nПравило речи для этого плана: ${speechDirection({speechType:shot.dialogue.speechType,speaker:shot.dialogue.speaker})}`;
         const imagePrompt=value.imagePrompt+'\nОдин цельный первый кадр, без надписей и коллажа.'+fixed,videoPrompt=value.videoPrompt+fixed;
         if(imagePrompt.length>5000||videoPrompt.length>5000)throw Error(`«${shot.title}»: обязательные признаки и промпт не помещаются в 5000 символов. Сократите описание одежды/реквизита и повторите подготовку.`);
-        return {shot,imagePrompt,videoPrompt,promptBasis:signature([shotApproval(scene,shot),directorBasis(p)])};
+        return {shot,imagePrompt,videoPrompt,promptBasis:shotPromptBasis(p,scene,shot)};
       });
       for(const {shot,...fields} of prepared)Object.assign(shot,fields);
     }else if(t.role==='story'){
@@ -145,9 +167,11 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
     }
   }
   t.applied=true;t.error=undefined;
+  recordCreativeVersion(p,'agent-'+t.role);
 }
 export function applyEditorPatches(p:Project,patchIds:string[]){
   const copy=structuredClone(p),d=ensureDirecting(copy);
+  recordCreativeVersion(copy,'before-editor-patches');
   if(!patchIds.length||new Set(patchIds).size!==patchIds.length)throw Error('Выберите готовые решения без повторов.');
   const patches=patchIds.map(id=>{const patch=d.patches.find(v=>v.id===id);if(!patch)throw Error('Предложение не найдено.');return patch;}).filter(v=>!v.applied);
   if(!patches.length)return;
@@ -160,7 +184,7 @@ export function applyEditorPatches(p:Project,patchIds:string[]){
     directingShotSchema.parse(shot);validateDialogue(shot);shot.approved=undefined;patch.applied=true;
   }
   for(const issue of d.issues){const linked=d.patches.filter(v=>v.issueId===issue.id);if(linked.length&&linked.every(v=>v.applied)){issue.resolved=true;issue.resolution='Применено решение редактора: '+(issue.solution||linked.map(v=>v.reason).join('; '));}}
-  d.editorBasis=undefined;d.patchesBasis=editorBasis(copy);p.directing=d;
+  d.editorBasis=undefined;d.patchesBasis=editorBasis(copy);recordCreativeVersion(copy,'editor-patches');p.directing=d;p.creativeHistory=copy.creativeHistory;p.creativeVersionId=copy.creativeVersionId;
 }
 export function directorExport(p:Project){
   const d=ensureDirecting(p);
@@ -172,7 +196,11 @@ export function directorExport(p:Project){
   let n=0;return {schemaVersion:2,timingMode:'actual',shots:d.scenes.flatMap(s=>s.shots.map(shot=>({
     id:shot.id,sceneId:s.id,title:`План ${String(++n).padStart(2,'0')} — ${shot.title.replace(/^План\s*\d+\s*[—–-]?\s*/i,'')}`,
     description:shot.story,duration:shot.duration,camera:shot.cinematography,productionDesign:shot.productionDesign,
-    ...(shot.promptBasis===signature([shotApproval(s,shot),directorBasis(p)])?{imagePrompt:shot.imagePrompt,videoPrompt:shot.videoPrompt}:{}),
+    ...(shot.promptBasis===shotPromptBasis(p,s,shot)?{imagePrompt:shot.imagePrompt,videoPrompt:shot.videoPrompt}:{}),
+    stateIn:shot.stateIn,stateOut:shot.stateOut,continuityChanges:shot.continuityChanges,dialogueDelivery:shot.dialogue.delivery,
+    characterIds:shot.characterIds??relevantHeroItems(p,shot).map(i=>i.id),locationIds:shot.locationIds??s.locationIds??relevantLocationItems(p,s,shot).map(i=>i.id),
+    speakerId:shot.dialogue.speechType==='character'?relevantHeroItems(p,shot).find(i=>i.id===shot.dialogue.speaker||normalizedName(i.variants.find(v=>v.id===i.approvedId)?.character?.name??i.character?.name??i.title)===normalizedName(shot.dialogue.speaker))?.id:undefined,
+    sceneContinuity:relevantContinuity(s,shot),previousChanges:relevantPrecedingChanges(s,shot),
     continuity:`Сцена: ${s.title}. Исходная одежда и реквизит в начале сцены: ${s.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`).join('; ')}. Уже произошедшие изменения, которые сохраняются: ${precedingChanges(s,shot).map(v=>v.changes).join('; ')||'нет'}. Начало этого плана: ${shot.stateIn}. Конец: ${shot.stateOut}. Новые изменения: ${shot.continuityChanges||'нет'}.`,
     cast:shot.cast,...{speechType:shot.dialogue.speechType,speaker:shot.dialogue.speaker,dialogue:shot.dialogue.text},
   })))};

@@ -15,6 +15,7 @@ import {
 import { parallelJob, generationInProgress, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
 import {
   dependencies,
+  jobCurrent,
   isStoryboardDraft,
   stageReady,
   getItem,
@@ -98,7 +99,7 @@ export const POST = api(async (req, ctx) => {
       if(parallelJob(p,job)&&p.jobs.filter(j=>j.id!==job.id&&parallelJob(p,j)&&generationInProgress(j)).length>=PARALLEL_GENERATIONS)return;
       const i = job.purpose==='voice-test'||isMusicJob(job)?undefined:getItem(p, job.itemId);
       if(isMusicJob(job)&&job.deps!==musicBasis(p)){job.status='cancelled';job.actual='0';job.actualSource='Сценарий или стиль изменились до отправки';return;}
-      if (i && (job.deps !== dependencies(p, i.stage) || !stageReady(p, i.stage))) {
+      if (i && (!jobCurrent(p,i,job) || !stageReady(p, i.stage))) {
         job.status = 'cancelled';
         job.actual = '0';
         job.actualSource = 'Основа изменилась до отправки';
@@ -221,6 +222,8 @@ export const POST = api(async (req, ctx) => {
         const v = makeVariant(p, item, {
           id: jobId,
           reviewBasis:job.reviewBasis,
+          basisVersion:job.basisVersion,
+          versionInfo:job.versionInfo,
           title: model(job.model).name + (job.lipsync?.inputType === 'image' ? ' · из кадра' : '') + ' · ' + (item.variants.length + 1),
           text: result.text ?? job.brief,
           kind: job.kind,

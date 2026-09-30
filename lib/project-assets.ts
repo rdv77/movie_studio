@@ -41,6 +41,7 @@ export function projectAssetIds(p: Project): Set<string> {
 
   for (const item of p.items) {
     character(item.character);
+    for(const version of item.characterHistory??[])character(version.profile);
     // Deliberately include every variant, including unselected/unapproved ones,
     // and every item, including planArchive and removedAt entries.
     for (const value of item.variants) variant(value);

@@ -1,6 +1,7 @@
 import type { SpeechType } from './speech-mode';
 import type { ImageSettings } from './image-quality';
 import type { DirectingState } from './directing';
+import { captureVersionInfo, type VersionInfo, type CreativeVersion, type CharacterVersion } from './creative-versions';
 import { productionPrecedes } from './production-order';
 import { materialBasis } from './material-basis';
 import {precedesStage} from './stage-order';
@@ -31,6 +32,8 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  basisVersion?: 2;
+  versionInfo?: VersionInfo;
   imageSettings?: ImageSettings;
   reviewBasis?: string;
   animaticBasis?: string;
@@ -62,6 +65,8 @@ export type Variant = {
   lipsync?: LipsyncBasis;
 };
 export type Item = {
+  characterHistory?: CharacterVersion[];
+  characterVersionId?: string;
   planArchive?: { reason:'duplicate'|'removed'|'excluded'; replacementId?:string };
   excludedAt?: string;
   removedAt?: string;
@@ -75,6 +80,8 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  basisVersion?: 2;
+  versionInfo?: VersionInfo;
   imageSettings?: ImageSettings;
   reviewBasis?:string;
   newSeriesAllowedAt?: string;
@@ -132,6 +139,8 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  creativeHistory?: CreativeVersion[];
+  creativeVersionId?: string;
   directing?: DirectingState;
   productionOrder?: 'voice-first' | 'video-first';
   mediaDurations?: Record<string,number>;
@@ -239,6 +248,11 @@ export function variantCurrent(p: Project, item: Item, variant: Variant) {
   if(variant.reviewBasis&&[5,6,7].includes(item.stage))return variant.reviewBasis===materialBasis(p,item,variant);
   return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
 }
+export function jobCurrent(p: Project, item: Item, job: Job) {
+  if(job.basisVersion===2&&job.reviewBasis&&[5,6,7].includes(item.stage))
+    return job.reviewBasis===materialBasis(p,item,job);
+  return job.deps===dependencies(p,item.stage);
+}
 export function approvalCurrent(p: Project, item: Item): boolean {
   const variant = item.variants.find(v => v.id === item.approvedId);
   if(variant?.lipsync&&p.items.find(i=>i.id===variant.lipsync!.audioItemId)?.approvedId!==variant.lipsync.audioVariantId)return false;
@@ -278,8 +292,10 @@ export function makeVariant(
 ): Variant {
   const sameFile = data.assetId ? p.items.flatMap(i => i.variants).find(v => v.assetId === data.assetId && v.lipsync) : undefined;
   const imageSource = data.assetId ? item.variants.find(v => v.assetId === data.assetId && v.imageSettings) : undefined;
+  const basisVersion = data.basisVersion ?? (!data.reviewBasis&&p.directing&&[5,6,7].includes(item.stage)?2:undefined);
+  const versionInfo = data.versionInfo ?? captureVersionInfo(p,item,data,data.imageSettings);
   return {
-    ...(p.directing&&[5,6,7].includes(item.stage)?{reviewBasis:materialBasis(p,item,data)}:{}),
+    ...(p.directing&&[5,6,7].includes(item.stage)?{reviewBasis:materialBasis(p,item,{...data,basisVersion,versionInfo})}:{}),
     title: 'Новый вариант',
     text: '',
     kind: 'text',
@@ -296,6 +312,8 @@ export function makeVariant(
     continuity: '',
     voiceId: '',
     ...data,
+    basisVersion,
+    versionInfo,
     imageSettings: data.imageSettings ?? imageSource?.imageSettings,
     ...(imageSource && data.kind === 'image' ? {model: imageSource.model, jobId: imageSource.jobId} : {}),
     lipsync: data.lipsync ?? sameFile?.lipsync,

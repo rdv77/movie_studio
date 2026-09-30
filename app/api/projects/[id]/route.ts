@@ -1,4 +1,5 @@
 import { approveReview } from '@/lib/review-center';
+import { recordCharacterVersion, restoreCharacterVersion, captureVersionInfo } from '@/lib/creative-versions';
 import { syncVideoPlans } from '@/lib/video';
 import {stopJobWait,allowNewSeries} from '@/lib/job-wait';
 import { moveStoryboardPlan } from '@/lib/plan-order';
@@ -51,6 +52,7 @@ const variant = z.object({
   dialogue: z.string().max(10000).default(''),
   continuity: z.string().max(4000).default(''),
   voiceId: z.string().max(150).default(''),
+  parentVariantId: z.string().uuid().optional(),
 });
 export const GET = api(async (req, ctx) =>
   Response.json(await loadProject(await owner(req), (await ctx.params).id)),
@@ -193,9 +195,18 @@ export const PATCH = api(async (req, ctx) => {
       let item = body.itemId ? getItem(p,body.itemId) : p.items.find(i=>i.stage===1&&!i.removedAt&&!i.character&&!i.variants.length);
       if (item && item.stage!==1) throw new Error('Карточка героя должна находиться на этапе «Герои».');
       if (!item) {if(p.items.length>=120)throw new Error('В проекте максимум 120 материалов.');item={id:uid(),stage:1,title:c.name,variants:[]};p.items.push(item);}
+      recordCharacterVersion(item,'Исходное описание');
       item.title=c.name;item.character=c;
+      recordCharacterVersion(item,'Правки героя');
       if (imageId) addVariant(p,item.id,{title:c.name+' · готовый образ',kind:'image',assetId:imageId,
         text:[c.name,c.appearance,c.description,c.instructions].filter(Boolean).join('\n\n'),refs:c.refs,character:c});
+      break;
+    }
+    case 'restoreCharacterVersion': {
+      const item=getItem(p,body.itemId!);
+      if(item.stage!==1||item.removedAt)throw Error('Откройте действующую карточку героя.');
+      restoreCharacterVersion(item,z.string().uuid().parse(d?.versionId));
+      for(const ref of item.character?.refs??[])await asset(user,ref,p);
       break;
     }
     case 'reapproveVideo': {
@@ -244,6 +255,9 @@ export const PATCH = api(async (req, ctx) => {
     case 'saveAnimatic':
     case 'addVariant': {
       const v = variant.parse(d);
+      const versionItem=getItem(p,body.itemId!);
+      if(v.parentVariantId&&!versionItem.variants.some(x=>x.id===v.parentVariantId))throw Error('Исходная версия не найдена в этой карточке.');
+      const versionInfo={...captureVersionInfo(p,versionItem,v,undefined,'Правки режиссёра'),...(v.parentVariantId?{parentVariantId:v.parentVariantId}:{})};
       if (v.speechType) assertSpeech(speechInfo(v),v.dialogue);
       if(v.kind==='audio'&&v.speechType==='character'&&!getItem(p,body.itemId!).sourceShot) throw new Error('Для реплик героев используйте отдельные карточки: «Подготовить озвучку по планам».');
       if (v.assetId) {
@@ -258,7 +272,7 @@ export const PATCH = api(async (req, ctx) => {
         for (const ref of v.character.refs) {const a=await asset(user, ref, p);if(!a.mime.startsWith('image/'))throw new Error('Референс героя должен быть изображением.');}
       }
       if (body.action === 'saveAnimatic') addAnimatic(p, body.itemId!, v);
-      else addVariant(p, body.itemId!, v);
+      else addVariant(p, body.itemId!, {...v,versionInfo});
       break;
     }
     case 'select': {
