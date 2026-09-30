@@ -1,5 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState,useEffect,useRef } from 'react';
+import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
+import { GENRE_OPTIONS,renderCreativeInstructions } from '@/lib/creative-brief';
 import { VersionComparison } from './version-comparison';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,13 +12,15 @@ import type { Project } from '@/lib/domain';
 import { money } from '@/lib/domain';
 import { MODELS } from '@/lib/models';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
-import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
+import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,directorPrompt,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
 
 type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void};
 const F=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
 export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const d=p.directing;
-  const [brief,setBrief]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
+  const [brief,setBriefState]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
+  const briefDirty=useRef(false);const setBrief=(value:typeof brief)=>{briefDirty.current=true;setBriefState(value);};
+  const savedBrief=JSON.stringify(d?.brief);useEffect(()=>{if(!briefDirty.current&&d)setBriefState(d.brief);},[p.id,savedBrief]);
   const [order,setOrder]=useState(p.productionOrder??'voice-first');
   const [model,setModel]=useState(MODELS.find(m=>m.kind==='text'&&m.provider==='openai')!.id);
   const [sceneId,setSceneId]=useState(d?.scenes[0]?.id??'');
@@ -36,7 +40,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const call=(action:string,data?:unknown)=>submit(action,data);
   const generate=(mode:string,extra:Record<string,unknown>={})=>call('run',{model,mode,...extra});
   const roles:{id:DirectorRole;label:string}[]=[{id:'story',label:'Сценарий'},{id:'camera',label:'Оператор'},{id:'art',label:'Художник'},{id:'dialogue',label:'Реплики'}];
-  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId);await call('restoreCreativeVersion',{versionId});if(v){setBrief(v.snapshot.brief);setOrder(v.snapshot.productionOrder??'voice-first');}};
+  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId);await call('restoreCreativeVersion',{versionId});if(v){briefDirty.current=false;setBriefState(v.snapshot.brief);setOrder(v.snapshot.productionOrder??'voice-first');}};
   const sceneText=(s:Scene)=>[s.title,`Задача: ${s.purpose}`,`Локация: ${s.location}`,`Конфликт: ${s.conflict}`,`Поворот: ${s.turn}`,`Начало: ${s.stateIn}`,`Конец: ${s.stateOut}`,...s.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`),...s.shots.map(shot=>`${shot.title} · ${shot.duration} сек\n${shot.story}\nОператор: ${shot.cinematography}\nХудожник: ${shot.productionDesign}\nРечь: ${shot.dialogue.speaker}: ${shot.dialogue.text}\nПодача: ${shot.dialogue.delivery}\nНачало: ${shot.stateIn}\nКонец: ${shot.stateOut}`)].join('\n\n');
   const shotField=(key:keyof DirectingShot,value:unknown)=>setShotEdit(e=>e?{...e,shot:{...e.shot,[key]:value}}:e);
   const patchPreview=(patch:EditorPatch)=>{const target=scenes.find(s=>s.shots.some(v=>v.id===patch.shotId)),shot=target?.shots.find(s=>s.id===patch.shotId);return <details key={patch.id} className="border rounded p-3"><summary>{target?.title} · {shot?.title??'План'} · {EDITOR_SECTION_NAMES[patch.section]} {patch.applied&&'✓ Применено'}</summary><p>{patch.reason}</p><p className="whitespace-pre-wrap"><b>Было:</b> {patch.before||'Пусто'}</p><p className="whitespace-pre-wrap"><b>Предложение:</b> {patch.after||'Пусто'}</p></details>;};
@@ -58,7 +62,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
     </div>
     {stage===0&&<>
       <div className="grid gap-4 md:grid-cols-2">
-        <F label="Жанр"><Input list="director-genres" value={brief.genre} onChange={e=>setBrief({...brief,genre:e.target.value})}/><datalist id="director-genres">{['Комедия','Приключение','Блокбастер','Хоррор','Драма','Неигровое кино','Сказка'].map(s=><option key={s} value={s}/>)}</datalist></F>
+        <F label="Жанр"><Input list="director-genres" value={brief.genre} onChange={e=>setBrief({...brief,genre:e.target.value})}/><datalist id="director-genres">{GENRE_OPTIONS.map(s=><option key={s} value={s}/>)}</datalist></F>
         <F label="Режиссёрский подход"><select className="w-full rounded border p-2 bg-background" value={brief.director} onChange={e=>setBrief({...brief,director:e.target.value,techniques:DIRECTOR_PRESETS[e.target.value]})}>{Object.keys(DIRECTOR_PRESETS).map(s=><option key={s}>{s}</option>)}</select></F>
         <F label="Аудитория"><Input value={brief.audience} onChange={e=>setBrief({...brief,audience:e.target.value})}/></F>
         <F label="Ориентир длительности, сек"><Input type="number" min={10} max={3600} value={brief.targetSeconds} onChange={e=>setBrief({...brief,targetSeconds:Number(e.target.value)})}/></F>
@@ -67,8 +71,11 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
         <F label="Что нельзя менять"><Textarea value={brief.locked} onChange={e=>setBrief({...brief,locked:e.target.value})}/></F>
         <F label="Порядок производства"><select className="w-full rounded border p-2 bg-background" value={order} onChange={e=>setOrder(e.target.value as typeof order)}><option value="voice-first">Сначала голоса и аниматик, затем видео</option><option value="video-first">Сначала видео, затем голоса под его длительность</option></select><small>При озвучке после видео проверяем фактическую длину файлов. Речь не обрезается и не ускоряется.</small></F>
       </div>
+      <CreativeStrengthControls value={brief.strengths} disabled={locked} onChange={strengths=>setBrief({...brief,strengths})}/>
+      <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
+      <details><summary>Промпт рецензента по текущим настройкам</summary><p className="muted">Ниже полный запрос без отправки. Сохраните задание перед запуском. Редактируйте приёмы и дополнительные инструкции выше.</p><pre className="whitespace-pre-wrap max-h-96 overflow-auto text-sm">{directorPrompt({...p,directing:{...(d??{scenes:[],runs:[],issues:[],patches:[]}),brief}}, {id:'preview',created:'',basis:'',model,mode:'critic',tasks:[],sceneIds:[]},{id:'preview',role:'critic',requires:[]})}</pre></details>
       <label className="row"><input type="checkbox" checked={brief.factual} onChange={e=>setBrief({...brief,factual:e.target.checked})}/>Неигровое кино: сохранять факты, отмечать сведения для проверки</label>
-      <div className="row wrap"><Button disabled={locked} onClick={()=>call('brief',{brief,productionOrder:order})}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
+      <div className="row wrap"><Button disabled={locked} onClick={async()=>{await call('brief',{brief,productionOrder:order});briefDirty.current=false;}}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
       {d?.critic&&<div className="space-y-3"><h3>Рецензия</h3><p className="whitespace-pre-wrap">{d.critic.review}</p>{d.critic.alternatives.map((a,index)=><details key={index}><summary>{a.title}</summary><p className="whitespace-pre-wrap">{a.text}</p><Button disabled={locked} variant="outline" onClick={()=>call('useAlternative',{index})}>Добавить как вариант сценария</Button></details>)}</div>}
     </>}
     {stage===12&&<>
@@ -78,6 +85,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       {scenes.map((s,n)=><article key={s.id} className="border rounded p-4 space-y-2"><strong>{n+1}. {s.title}</strong><p>{s.purpose}</p><p><b>Локация:</b> {s.location}</p><p><b>Конфликт:</b> {s.conflict} <b>Поворот:</b> {s.turn}</p><p><b>Начало:</b> {s.stateIn} <b>Конец:</b> {s.stateOut}</p>{s.continuity.map((c,n)=><p key={n}><b>{c.character}:</b> {c.outfit} · {c.props}</p>)}<div className="row"><Button size="sm" variant="outline" disabled={locked} onClick={()=>editScene(s)}>Правки</Button><Button size="sm" variant="ghost" disabled={locked} onClick={()=>call('removeScene',{sceneId:s.id})}>Удалить сцену</Button></div></article>)}
       <Dialog open={!!editing} onOpenChange={value=>{if(!value)setEditing(undefined);}}><DialogContent className="sm:max-w-3xl max-h-[90dvh] overflow-y-auto" aria-describedby={undefined}>
       {editing&&<><DialogHeader><DialogTitle>Правки сцены: {editing.title}</DialogTitle></DialogHeader>{(['title','purpose','location','conflict','turn','stateIn','stateOut'] as const).map((key,n)=><F key={key} label={['Название','Задача сцены','Локация','Конфликт','Поворот','Состояние в начале','Состояние в конце'][n]}><Textarea value={editing[key]} onChange={e=>setEditing({...editing,[key]:e.target.value})}/></F>)}
+        <SceneCreativeControls brief={brief} value={editing.creativeOverrides} disabled={locked} onChange={creativeOverrides=>setEditing({...editing,creativeOverrides})}/>
         <F label="Постоянные одежда и реквизит — строка на героя: имя | одежда | предметы"><Textarea rows={5} value={continuityText} onChange={e=>setContinuityText(e.target.value)}/></F>
         <div className="row sticky bottom-0 bg-popover py-3"><Button disabled={locked} onClick={async()=>{await call('saveScene',{scene:{...editing,continuity:continuityText.split('\n').filter(line=>line.trim()).map(line=>{const [character='',outfit='',...props]=line.split('|');return {character:character.trim(),outfit:outfit.trim(),props:props.join('|').trim()};})}});setEditing(undefined);}}>Сохранить сцену</Button><Button variant="ghost" onClick={()=>setEditing(undefined)}>Закрыть</Button></div></>}
       </DialogContent></Dialog>
@@ -88,7 +96,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
         <div className="row wrap"><Button disabled={locked||d.scenesApproved!==scenesBasis(p)} onClick={()=>generate('develop')}>Создать весь этап · все сцены и специалисты</Button><Button variant="outline" disabled={locked||!scenes.some(s=>s.shots.length)} onClick={()=>generate('editor')}>Проверить весь фильм редактором</Button></div>
         <p className="muted">Оператор, художник и автор реплик работают после режиссёра сцены. Редактор проверяет переходы, одежду и реквизит по всему фильму.</p>
         <F label="Сцена"><select className="w-full rounded border p-2 bg-background" value={scene?.id??''} onChange={e=>setSceneId(e.target.value)}>{scenes.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></F>
-        {scene&&<><p><b>Постоянные образы:</b> {scene.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`).join(' · ')}</p><div className="row wrap">{roles.map(r=><Button key={r.id} size="sm" variant="outline" disabled={locked||(r.id!=='story'&&!scene.shots.length)} onClick={()=>generate('role',{sceneId:scene.id,role:r.id})}>Доработать: {r.label}</Button>)}</div>
+        {scene&&<><SceneCreativeSettings key={scene.id} brief={d.brief} value={scene.creativeOverrides} disabled={locked} save={creativeOverrides=>call('saveScene',{scene:{...scene,creativeOverrides}})}/><details><summary>Инструкции для специалистов этой сцены</summary><pre className="whitespace-pre-wrap text-sm">{renderCreativeInstructions(d.brief,scene.creativeOverrides,'scene')||JSON.stringify(d.brief,null,2)}</pre></details><p><b>Постоянные образы:</b> {scene.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`).join(' · ')}</p><div className="row wrap">{roles.map(r=><Button key={r.id} size="sm" variant="outline" disabled={locked||(r.id!=='story'&&!scene.shots.length)} onClick={()=>generate('role',{sceneId:scene.id,role:r.id})}>Доработать: {r.label}</Button>)}</div>
           {scene.shots.map((s,n)=><article className="border rounded p-4 space-y-3" key={s.id}><div className="row spread"><strong>{n+1}. {s.title} · {s.duration} сек</strong><span>{shotApproved(scene,s,p)?'✓ Утверждён':'На рассмотрении'}</span></div>
             <Tabs defaultValue="story"><TabsList className="flex flex-wrap h-auto"><TabsTrigger value="story">Сценарий</TabsTrigger><TabsTrigger value="camera">Оператор</TabsTrigger><TabsTrigger value="art">Художник</TabsTrigger><TabsTrigger value="dialogue">Реплики и звук</TabsTrigger></TabsList>
               <TabsContent value="story"><p className="whitespace-pre-wrap">{s.story}</p><p>В начале: {s.stateIn}</p><p>В конце: {s.stateOut}</p><p>Изменения одежды / предметов: {s.continuityChanges||'Нет'}</p></TabsContent>

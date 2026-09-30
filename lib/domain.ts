@@ -1,3 +1,4 @@
+import { renderCreativeInstructions } from './creative-brief';
 import type { SpeechType } from './speech-mode';
 import type { ImageSettings } from './image-quality';
 import type { DirectingState } from './directing';
@@ -440,7 +441,7 @@ export function promptFor(
   instruction: string,
   variant?: Variant,
 ) {
-  if(p.directing)instruction=`Творческое задание фильма (утверждённые настройки): ${JSON.stringify(p.directing.brief)}\n${instruction}`;
+  if(p.directing)instruction=`Творческое задание фильма (утверждённые настройки): ${JSON.stringify(p.directing.brief)}\n${renderCreativeInstructions(p.directing.brief)}\n${p.directing.brief.promptNotes??''}\n${instruction}`;
   if (item.stage === 4) instruction += '\nРаздели закадровый рассказ и реплики видимых героев. Для каждого плана явно заполни speechType: voiceover (закадровый голос, внутренний монолог), character (герой говорит в кадре) или none (без речи). speaker — имя рассказчика или одного говорящего героя; для none пустая строка. В dialogue записывай только произносимые слова, без имени и ремарок. Один план — один вид речи и один говорящий. Если рассказчик сменяется героем или меняется говорящий, раздели действие на последовательные планы, сохранив общий хронометраж. Для none dialogue пустой. Не задавай артикуляцию персонажей при voiceover или none.';
   const context = p.items
     .filter((i) => precedesStage(i.stage,item.stage) && isApproved(p, i))

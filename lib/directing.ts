@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { creativeStrengthsSchema, creativeOverridesSchema, effectiveCreativeBrief, renderCreativeInstructions } from './creative-brief';
 import { id, now, chosen, makeVariant, dependencies, isApproved, type Project, type Job } from './domain';
 import { speechDirection } from './speech-mode';
 import { parseShots } from './shots';
@@ -20,6 +21,7 @@ export const creativeBriefSchema=z.object({
   genre:z.string().max(200),effect:z.string().max(1000),audience:z.string().max(300),
   director:z.string().max(100),techniques:z.string().max(3000),locked:z.string().max(5000),
   factual:z.boolean(),targetSeconds:z.number().min(10).max(3600),
+  strengths:creativeStrengthsSchema.optional(),promptNotes:z.string().max(6000).optional(),
 });
 export const DEFAULT_BRIEF={genre:'Приключение',effect:'Увлечь и вызвать сопереживание',audience:'Широкая аудитория',director:'Без особого стиля',techniques:DIRECTOR_PRESETS['Без особого стиля'],locked:'',factual:false,targetSeconds:120};
 const text=z.string().max(6000);
@@ -33,7 +35,7 @@ export const directingShotSchema=z.object({
 export type DirectingShot=z.infer<typeof directingShotSchema>&{approvalVersion?:2;approved?:string;approvedFoundation?:string;imagePrompt?:string;videoPrompt?:string;promptBasis?:string};
 export const sceneSchema=z.object({id:z.string().min(1).max(100),title:z.string().min(1).max(100),purpose:text,location:text,conflict:text,turn:text,
   locationIds:z.array(z.string().min(1).max(100)).max(20).optional(),
-  stateIn:text,stateOut:text,
+  stateIn:text,stateOut:text,creativeOverrides:creativeOverridesSchema.optional(),
   continuity:z.array(z.object({character:z.string().max(100),characterId:z.string().max(100).optional(),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20),
   shots:z.array(directingShotSchema).max(40),
 });
@@ -99,7 +101,7 @@ export function taskReady(run:DirectorRun,t:DirectorTask){return !run.stopped&&!
 function context(p:Project,run:DirectorRun,t:DirectorTask){
   const d=ensureDirecting(p),index=d.scenes.findIndex(s=>s.id===t.sceneId);
   const script=p.items.find(i=>i.stage===0),currentScenario=t.role==='critic'?script&&chosen(script)?.text:script?.variants.find(v=>v.id===script.approvedId)?.text;
-  return {film:p.title,brief:d.brief,runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
+  return {film:p.title,brief:effectiveCreativeBrief(d.brief,d.scenes[index]?.creativeOverrides),runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
     ...(t.sceneId?{previous:d.scenes[index-1],scene:d.scenes[index],next:d.scenes[index+1]}:{scenes:d.scenes}),shotId:t.shotId};
 }
 export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
@@ -115,7 +117,7 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
     compress:'Подготовь промпты для всех планов текущей сцены по утверждённым четырём разделам. Для картинки — только начальное состояние, для видео — движение и монтажный стык. Учти утверждённые стиль, локацию, внешность героев. Сожми по смыслу, не обрывай предложения. Камера и свет должны остаться точными. Каждый промпт до 3000 символов. Имена, костюм, реквизит и правило закрытого рта будут добавлены программой отдельно. Верни {"shots":[{"id":"существующий ID","imagePrompt":"...","videoPrompt":"..."}]}.',
   };
   const timing=`Хронометраж: ${runtimeMode(p)==='free'?'СВОБОДНЫЙ. targetSeconds — пожелание, а не предел. Разница с суммой duration — только note, никогда conflict. Не сокращай действия/паузы автоматически ради ориентира.':'СТРОГИЙ. targetSeconds — верхний предел суммы duration всего фильма. Распределяй время между сценами, не выделяй весь бюджет каждой сцене. Превышение — conflict; предложи монтажное сокращение без ускорения/обрезки речи.'} Актуальный ориентир только brief.targetSeconds. Старые числа секунд в стиле, героях и других документах — устаревшие метаданные, только note; они не требуют изменения художественной основы. Нехватка времени для речи внутри конкретного видео — самостоятельный технический конфликт в обоих режимах. Каждому issues добавь category: runtime_target (только общая длина), runtime_metadata (устаревшее число секунд в документах), speech_fit (реплика не помещается), other (остальное). Не смешивай категории в одном замечании.\n`;
-  return base+timing+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
+  return base+timing+renderCreativeInstructions(p.directing!.brief,p.directing!.scenes.find(s=>s.id===t.sceneId)?.creativeOverrides,t.sceneId?'scene':'scenario')+'\n'+(p.directing!.brief.promptNotes?`Дополнительное задание режиссёра: ${JSON.stringify(p.directing!.brief.promptNotes)}\n`:'')+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
 }
 export function parseDirectorJSON(value:string){return JSON.parse(value.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));}
 function validateDialogue(s:DirectingShot){if(s.dialogue.speechType==='none'&&s.dialogue.text.trim())throw Error('У плана без речи заполнена реплика.');if(s.dialogue.speechType==='character'&&(!s.dialogue.speaker||!s.cast.includes(s.dialogue.speaker)))throw Error('Говорящий герой должен присутствовать в составе плана.');}

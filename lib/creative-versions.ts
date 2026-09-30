@@ -1,3 +1,4 @@
+import { effectiveCreativeBrief } from './creative-brief';
 import type { CharacterBrief, Item, Job, Project, Variant } from './domain';
 import type { DirectingState, Scene } from './directing';
 import { materialBasis } from './material-basis';
@@ -79,7 +80,8 @@ export function stampGenerationVersions(p:Project,jobs:Job[]) {
   for(const job of jobs){
     if(job.purpose)continue;
     const item=p.items.find(i=>i.id===job.itemId);if(!item)continue;
-    job.versionInfo??=captureVersionInfo(p,item,job,{brief:p.directing?.brief,image:job.imageSettings,model:job.model},'generation');
+    const scene=p.directing?.scenes.find(s=>s.id===item.sourceShot?.sceneId);
+    job.versionInfo??=captureVersionInfo(p,item,job,{brief:p.directing?effectiveCreativeBrief(p.directing.brief,scene?.creativeOverrides):undefined,image:job.imageSettings,model:job.model},'Генерация');
     if(p.directing&&[5,6,7].includes(item.stage)){
       job.basisVersion=2;job.reviewBasis=materialBasis(p,item,job)||undefined;
     }
