@@ -6,11 +6,13 @@ for(const stage of [0,2,3,1]){const i=p.items.find(i=>i.stage===stage);D.addVari
 const d=R.ensureDirecting(p);d.brief.targetSeconds=120;
 const scene={id:D.id(),title:'Письмо',purpose:'Герой узнаёт правду',location:'Комната',conflict:'Страх',turn:'Решение',stateIn:'За столом',stateOut:'В дверях',continuity:[{character:'Анна',outfit:'Синий плащ',props:'Письмо в правой руке'}],shots:[]};
 d.scenes=[scene];d.scenesApproved=R.scenesBasis(p);
-const run=R.newDirectorRun(p,'grok-4.6','develop');A.equal(run.tasks.length,5);A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['story']);
+const run=R.newDirectorRun(p,'grok-4.6','develop');A.equal(run.tasks.length,7);A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['story']);
 const shot={id:'new',title:'Решение',duration:5,cast:['Анна'],story:'Анна читает письмо',stateIn:'Письмо в правой руке',stateOut:'Письмо сложено',cinematography:'Крупный план',productionDesign:'Синий плащ, тёплый свет',dialogue:{speechType:'character',speaker:'Анна',text:'Я вернусь.',delivery:'Тихо'},continuityChanges:''};
 R.applyDirectorResult(p,run,run.tasks[0],{shots:[shot]});A.equal(scene.shots.length,1);const sid=scene.shots[0].id;A.notEqual(sid,'new');
-A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['camera','art','dialogue']);
+A.deepEqual(run.tasks.filter(t=>R.taskReady(run,t)).map(t=>t.role),['camera','art','dialogue','performance']);
 for(const t of run.tasks.filter(t=>['camera','art','dialogue'].includes(t.role))){const field=t.role==='camera'?'cinematography':t.role==='art'?'productionDesign':'dialogue';R.applyDirectorResult(p,run,t,{shots:[{id:sid,[field]:shot[field]}]});}
+R.applyDirectorResult(p,run,run.tasks.find(t=>t.role==='performance'),{shots:[{id:sid,performance:[]}]});
+const reviewer=run.tasks.find(t=>t.role==='scene-expressive-reviewer');A(R.taskReady(run,reviewer));R.applyDirectorResult(p,run,reviewer,{issues:[],patches:[]});
 A.equal(R.taskReady(run,run.tasks.at(-1)),true);R.applyDirectorResult(p,run,run.tasks.at(-1),{issues:[],patches:[]});
 scene.shots[0].approved=R.shotApproval(scene,scene.shots[0]);scene.shots[0].approvedFoundation=R.directorBasis(p);A(R.shotApproved(scene,scene.shots[0]));
 scene.continuity[0].outfit='Красный плащ';A(!R.shotApproved(scene,scene.shots[0]));scene.continuity[0].outfit='Синий плащ';

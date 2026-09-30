@@ -1,6 +1,7 @@
 import { chosen, id, type Item, type Project, type Variant } from './domain';
+import type {ShotDirection} from './shot-direction';
 
-export type ScriptPlan = { id?:string;sceneId?:string;productionDesign?:string;cast?:string[];characterIds?:string[];locationIds?:string[];speakerId?:string;stateIn?:string;stateOut?:string;continuityChanges?:string;dialogueDelivery?:string;sceneContinuity?:{character:string;characterId?:string;outfit:string;props:string}[];previousChanges?:{id:string;changes:string}[]; title:string; description:string; duration:number; camera:string; dialogue:string; continuity:string; speechType?:'voiceover'|'character'|'none'; speaker?:string };
+export type ScriptPlan = { direction?:ShotDirection;id?:string;sceneId?:string;productionDesign?:string;cast?:string[];characterIds?:string[];locationIds?:string[];speakerId?:string;stateIn?:string;stateOut?:string;continuityChanges?:string;dialogueDelivery?:string;sceneContinuity?:{character:string;characterId?:string;outfit:string;props:string}[];previousChanges?:{id:string;changes:string}[]; title:string; description:string; duration:number; camera:string; dialogue:string; continuity:string; speechType?:'voiceover'|'character'|'none'; speaker?:string };
 export type PlanScript = { source:Item; variant:Variant; shots:ScriptPlan[] };
 
 export function planKey(title:string) {

@@ -82,6 +82,7 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
     (variant.refs??[]).map(asset=>({asset}));
   return 'v2:'+stable({format:p.format,brief,cast:castIds.length?castIds:shot.characterIds??shot.cast,
     story:shot.description,camera:shot.camera,design:shot.productionDesign,stateIn:shot.stateIn,
+    ...(shot.direction?{direction:shot.direction}:{}),
     continuity:shot.stateIn===undefined?shot.continuity:undefined,sceneContinuity:continuity,priorChanges,
     heroes:sources('hero',castItems),style:sources('style',p.items.filter(i=>i.stage===2&&active(i))),locations:sources('location',locations),
     ...(shot.locationState??scene?.locationState?{locationState:shot.locationState??scene?.locationState}:{}),

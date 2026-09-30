@@ -1,4 +1,5 @@
 import {locationStateSchema} from './world-schemas';
+import {shotDirectionSchema,validateShotDirection,readableShotDirection} from './shot-direction';
 import { z } from 'zod';
 import { speechInfo, speechNames, assertSpeech } from './speech-mode';
 export const shotSchema = z.object({
@@ -7,6 +8,7 @@ export const shotSchema = z.object({
     .array(
       z.object({
         id:z.string().optional(),sceneId:z.string().optional(),cast:z.array(z.string()).optional(),productionDesign:z.string().max(6000).optional(),imagePrompt:z.string().max(32000).optional(),videoPrompt:z.string().max(32000).optional(),
+        direction:shotDirectionSchema.optional(),
         characterIds:z.array(z.string().max(100)).max(20).optional(),locationIds:z.array(z.string().max(100)).max(20).optional(),speakerId:z.string().max(100).optional(),
         locationState:locationStateSchema.optional(),stateIn:z.string().max(6000).optional(),stateOut:z.string().max(6000).optional(),continuityChanges:z.string().max(2000).optional(),dialogueDelivery:z.string().max(1500).optional(),
         sceneContinuity:z.array(z.object({character:z.string().max(100),characterId:z.string().max(100).optional(),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20).optional(),
@@ -38,6 +40,7 @@ export function parseShots(text: string, seconds: number) {
     );
   }
   for (const shot of data.shots) if (shot.speechType) assertSpeech(speechInfo(shot),shot.dialogue);
+  for(const shot of data.shots){const conflict=validateShotDirection({...shot,id:shot.id??shot.title}).find(i=>i.severity==='conflict');if(conflict)throw Error(`«${shot.title}»: ${conflict.message}`);}
   const total = data.shots.reduce((s, v) => s + v.duration, 0);
   if (data.timingMode!=='actual'&&Math.abs(total - seconds) > 0.1)
     throw new Error(
@@ -58,7 +61,7 @@ export function readableText(text: string) {
     return data.shots
       .map(
         (s, i) =>
-          `${String(i + 1).padStart(2, '0')}. ${s.title} · ${s.duration} сек\n${s.description}\nКамера: ${s.camera}\n${speechNames[speechInfo(s).speechType]}${s.speaker ? ' · '+s.speaker : ''}: ${s.dialogue || 'Без речи'}\nМонтаж: ${s.continuity}`,
+          `${String(i + 1).padStart(2, '0')}. ${s.title} · ${s.duration} сек\n${s.description}\nКамера: ${s.camera}${s.direction?'\n'+readableShotDirection(s.direction):''}\n${speechNames[speechInfo(s).speechType]}${s.speaker ? ' · '+s.speaker : ''}: ${s.dialogue || 'Без речи'}\nМонтаж: ${s.continuity}`,
       )
       .join('\n\n');
   } catch {

@@ -9,6 +9,8 @@ import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema,
 import { setProductionOrder } from '@/lib/production-order';
 import {parseShots} from '@/lib/shots';
 import {applyEditorPatches} from '@/lib/directing';
+import {applyEditorSolutions} from '@/lib/directing-solutions';
+import {validateScenePlan,validateShotDirection} from '@/lib/shot-direction';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 import {assertSceneLocations} from '@/lib/world-assets';
 export const POST=api(async(req,ctx)=>{
@@ -20,7 +22,7 @@ export const POST=api(async(req,ctx)=>{
   const d=ensureDirecting(p),v=body.data??{};
   const running=d.runs.some(directorRunActive);
   if(running&&!['stop','retry','importScriptCandidate'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
-  const tracksHistory=['brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions'].includes(body.action);
+  const tracksHistory=['brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
     case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;
@@ -53,7 +55,7 @@ export const POST=api(async(req,ctx)=>{
     }
     case 'brief':d.brief=creativeBriefSchema.parse(v.brief);if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
     case 'run':{
-      const s=z.object({model:z.string(),mode:z.enum(['critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue']).optional()}).parse(v);
+      const s=z.object({model:z.string(),mode:z.enum(['critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).parse(v);
       if(model(s.model).kind!=='text'||!['openai','xai','minimax'].includes(model(s.model).provider))throw Error('Выберите текстовую модель OpenAI, Grok или MiniMax.');
       await getKey(user,model(s.model).provider);
       if(p.limit!==null)throw Error('Для текстовых агентов стоимость определяется по токенам. Снимите денежный лимит на время проработки и сверяйте расход в журнале.');
@@ -76,7 +78,8 @@ export const POST=api(async(req,ctx)=>{
     case 'saveShot':{
       const scene=d.scenes.find(s=>s.id===v.sceneId);if(!scene)throw Error('Сцена не найдена.');
       const shot=directingShotSchema.parse(v.shot),old=scene.shots.find(s=>s.id===shot.id);
-      if(old)Object.assign(old,{...shot,approved:undefined});else scene.shots.push({...shot,id:id()});break;
+      const conflict=validateShotDirection(shot).find(i=>i.severity==='conflict');if(conflict)throw Error(conflict.message);
+      if(old)Object.assign(old,{...shot,direction:shot.direction,approved:undefined});else scene.shots.push({...shot,id:id()});break;
     }
     case 'approveShots':{
       const reviewed=d.editorBasis===editorBasis(p);
@@ -85,6 +88,7 @@ export const POST=api(async(req,ctx)=>{
       // Return the current project without modifying approvals or its revision.
       if(!ids.length)return Response.json(p);
       for(const s of d.scenes)for(const shot of s.shots)if(ids.includes(shot.id)){
+        const conflict=validateScenePlan(s).find(i=>i.severity==='conflict'&&(!i.shotId||i.shotId===shot.id));if(conflict)throw Error(`«${shot.title}»: ${conflict.message}`);
         if(!shot.story.trim()||!shot.cinematography.trim()||!shot.productionDesign.trim())throw Error('Заполните сценарий, операторскую работу и художественное решение.');
         if(shot.dialogue.speechType==='character'&&(!shot.dialogue.speaker||!shot.cast.includes(shot.dialogue.speaker)))throw Error('Укажите присутствующего в кадре говорящего.');
         if(d.issues.some(i=>i.severity==='conflict'&&!i.resolved&&(!i.shotId||i.shotId===shot.id)&&(!i.sceneId||i.sceneId===s.id)))throw Error('Сначала разрешите конфликт редактора.');
@@ -95,8 +99,10 @@ export const POST=api(async(req,ctx)=>{
     case 'applyPatch':{
       applyEditorPatches(p,[z.string().parse(v.patchId)]);break;
     }
-    case 'applySolution':applyEditorPatches(p,d.patches.filter(patch=>patch.issueId===z.string().parse(v.issueId)).map(patch=>patch.id));break;
-    case 'applyAllSolutions':applyEditorPatches(p,d.patches.filter(patch=>!patch.applied).map(patch=>patch.id));break;
+    case 'applySolution':{const issueId=z.string().parse(v.issueId);applyEditorSolutions(p,d.patches.filter(patch=>patch.issueId===issueId||patch.relatedIssueIds?.includes(issueId)).map(patch=>patch.id),(d.montageOperations??[]).filter(op=>op.issueId===issueId||op.relatedIssueIds?.includes(issueId)).map(op=>op.id));break;}
+    case 'applyAllSolutions':applyEditorSolutions(p,d.patches.filter(patch=>!patch.applied).map(patch=>patch.id),(d.montageOperations??[]).filter(op=>!op.applied).map(op=>op.id));break;
+    case 'applyMontageOperation':applyEditorSolutions(p,[],[z.string().parse(v.operationId)]);break;
+    case 'applyAllMontageOperations':applyEditorSolutions(p,[],(d.montageOperations??[]).filter(op=>!op.applied).map(op=>op.id));break;
     case 'useAlternative':{
       const a=d.critic?.alternatives[v.index],item=p.items.find(i=>i.stage===0);if(!a||!item)throw Error('Альтернатива не найдена.');
       const candidate=makeVariant(p,item,{kind:'text',text:a.text,title:a.title,model:'Рецензент'});item.variants.push(candidate);item.selectedId=candidate.id;break;
