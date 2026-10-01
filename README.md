@@ -2,6 +2,8 @@
 
 Последовательная разработка: [план выпусков](docs/release-plan.md), [требования](docs/implementation-plan.md), [журнал](docs/release-progress.md). [Режимы качества Grok](docs/grok-image-quality.md).
 
+[Руководство нового процесса](docs/director-workflow-v2.md) · [Очередь, фон и отчёт расходов](docs/R13-queue-cost-background.md) · [Проверка настоящей сборки](docs/offline-film-verification.md).
+
 Интеграция [ZenCreator: подключение, модели и учёт кредитов](docs/ZENCREATOR.md).
 
 Самостоятельная режиссёрская студия для создания короткого анимационного фильма: от чернового сценария и образов героев до раскадровки, озвучки, видеопланов, синхронизации губ и итогового MP4.
@@ -15,7 +17,7 @@
 Установите Docker Engine и Docker Compose, направьте домен на сервер и откройте порты 80/443. Затем:
 
 ```bash
-git clone https://github.com/rdv77/movie_studio.git
+git clone --branch codex/standalone https://github.com/rdv77/movie_studio.git
 cd movie_studio
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/app" -w /app node:24-bookworm-slim \
   node scripts/setup.mjs --origin=https://studio.example.com --username=director

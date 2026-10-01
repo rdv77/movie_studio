@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { strict as assert } from 'node:assert';
-import { Miniflare } from 'miniflare';
+import { ProviderHarness as Miniflare } from './provider-harness.mjs';
 const fakeServer=`
 export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
 export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:400})}};

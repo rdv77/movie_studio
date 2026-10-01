@@ -1,0 +1,24 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+const server=`export class HttpError extends Error{constructor(message,status){super(message);this.status=status;}}
+export const api=f=>async(...a)=>{try{return await f(...a);}catch(e){return Response.json({error:e.message},{status:e.status??400});}};
+export const owner=async req=>{if(req.headers.get('test-owner')!=='owner')throw new HttpError('owner',403);return 'owner';};
+export const loadProject=async()=>structuredClone(globalThis.state);
+export const saveProject=async(user,p,expected)=>{if(expected!==globalThis.state.revision)throw new HttpError('revision',409);p.revision++;globalThis.state=structuredClone(p);return p;};
+export const asset=async(user,id,p)=>{if(user!=='owner'||!globalThis.files.has(id)||!p.items.some(i=>i.variants.some(v=>v.assetId===id)))throw new HttpError('owned file',404);return globalThis.files.get(id);};`;
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as Q from './lib/audio-qc';export * as M from './lib/media-review';export {PATCH} from './app/api/projects/[id]/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/audio-qc-api.mjs',plugins:[{name:'server',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
+const {D,Q,M,PATCH}=await import('../work/tests/audio-qc-api.mjs');
+globalThis.state=D.newProject('QC');globalThis.files=new Map();
+const item=state.items.find(i=>i.stage===8),file=D.id(),v=D.makeVariant(state,item,{kind:'video',assetId:file,model:'assembly',duration:5});item.variants.push(v);item.selectedId=v.id;files.set(file,{id:file,mime:'video/mp4'});
+const report={schemaVersion:1,id:D.id(),created:new Date().toISOString(),source:Q.makeAudioQcSource(state,item.id,v.id),settings:{silenceDb:-40,minSilence:.4,maxSeconds:600},measurement:{hasAudio:true,seconds:5,audioSeconds:5,channels:2,sampleRate:44100,peakDb:-3,rmsDb:-18,silence:[],issues:[],limitations:['Техническое измерение']},evidence:['Peak level dB: -3']};
+const ctx={params:Promise.resolve({id:state.id})},req=(r,owner='owner',revision=state.revision)=>new Request('https://studio.test/api',{method:'PATCH',headers:{'content-type':'application/json','test-owner':owner},body:JSON.stringify({revision,action:'recordAudioQc',data:r})});
+assert.equal((await PATCH(req(report,'other'),ctx)).status,403);assert.equal(state.audioQc,undefined);
+assert.equal((await PATCH(req({...report,source:{...report.source,assetId:D.id()}}),ctx)).status,400);
+files.set(file,{id:file,mime:'image/png'});assert.equal((await PATCH(req(report),ctx)).status,400);files.set(file,{id:file,mime:'video/mp4'});
+assert.equal((await PATCH(req(report),ctx)).status,200);assert.equal(state.audioQc.length,1);
+assert.equal((await PATCH(req(report),ctx)).status,200);assert.equal(state.audioQc.length,1,'same report has no duplicate');
+const stale=await PATCH(req(report,'owner',0),ctx);assert.equal(stale.status,400);assert.match((await stale.json()).error,/изменился/);assert.equal(state.audioQc.length,1);
+const i=state.items.find(i=>i.id===item.id),current=i.variants.find(x=>x.id===v.id);assert.match(M.mediaReviewPrompt(state,i,current,[{assetId:file,role:'video-sample',at:0}],'film'),/technical-audio-qc/);
+const other=D.makeVariant(state,i,{kind:'video',assetId:D.id(),duration:5});i.variants.push(other);i.selectedId=other.id;
+assert.equal((await PATCH(req({...report,id:D.id()}),ctx)).status,400);assert.equal(Q.audioQcPromptContext(state,i,other),undefined);assert.equal(state.audioQc.length,1);
+console.log('audio QC API: source/owner/MIME/revision/idempotency/frozen prompt PASS');

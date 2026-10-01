@@ -1,3 +1,4 @@
+import type {AudioQcReport} from './audio-qc';
 import {soundLayerApproved} from './soundscape';
 import type {SoundscapeState,SoundGeneration} from './soundscape';
 import type {VideoPreparation} from './video-from-animatic';
@@ -168,6 +169,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  audioQc?:AudioQcReport[];
   soundscape?:SoundscapeState;
   animaticSettings?:{sound:'silent'|'voices';music:boolean;motion:boolean};
   voiceStudio?:VoiceStudioState;

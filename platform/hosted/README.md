@@ -1,0 +1,20 @@
+# Hosted варианты очереди
+
+Эти шаблоны относятся к Site на vinext/Cloudflare. Они не используются при запуске самостоятельного Node-приложения и не заменяют его авторизацию или файловое хранилище.
+
+| Шаблон | Файл hosted проекта |
+| --- | --- |
+| `background-kick.ts.template` | `lib/background-kick.ts` |
+| `jobs-route.ts.template` | `app/api/projects/[id]/jobs/[jobId]/route.ts` |
+| `worker-tick-route.ts.template` | `app/api/worker/tick/route.ts` |
+| `server.ts.template` | `lib/server.ts` — собственный hosted runtime/auth и реальный after-save hook |
+
+Общие `background-work`, `queue-policy`, `project-worker` и `media-job-runner` можно переносить вместе с актуальными исполнителями голоса, звуков и режиссёрских задач. Файл hosted `lib/server.ts` должен сохранять собственные ChatGPT auth, D1, R2 и секреты среды. Node `instrumentation.ts`, `director-worker.ts` и `storage.ts` в hosted не переносятся.
+
+Hosted `api` в `lib/server.ts` уже подключён к `lib/api-queue-hook.ts`: после успешного ответа авторизованного enqueue/save он повторно проверяет пользователя и наличие проекта с этим владельцем в D1, затем вызывает `kickProjectQueue(owner, projectId)` через lazy import. Это реальная точка подключения для single/batch генераций, ключевых кадров, дизайна голоса, звуковых слоёв, режиссёрских и актёрских заданий, музыки, визуальной рецензии и параметров очереди. Строгий список маршрутов/действий не включает GET, загрузки файлов, правки, stop и jobs `check-wait`. Тело запроса читается из клона до выполнения route и не подменяет вход маршрута. Не добавляйте отдельный безусловный kick в jobs handler: это нарушило бы исключение watchdog.
+
+Kick использует только текущий `getRequestExecutionContext()?.waitUntil()`. Без контекста работа не запускается. Неудачная валидация, ответ с ошибкой или CAS save conflict не запускают worker. Ошибка фонового подключения не заменяет уже успешно сохранённый ответ. `tests/hosted-enqueue-hook.mjs` проверяет именно настоящий hosted server (либо этот же шаблон в самостоятельном клоне), авторизацию, владение и save-failure — не только инструкцию по его подключению. В самостоятельный Node `lib/server.ts` этот шаблон не копируется.
+
+Публичный jobs POST отдельно проверяет владельца. Закрытый worker tick проверяет отдельный секрет `QUEUE_WORKER_SECRET` из Cloudflare env по заголовку `x-queue-worker-secret`; тело запроса не выбирает пользователя. Без секрета endpoint закрыт. Подключение внешнего cron и секрета выполняется владельцем инфраструктуры.
+
+HTTP waitUntil ограничен примерно 30 секундами после ответа. Здесь нет обещания непрерывной hosted обработки без новых HTTP-вызовов. Для длительной автономной генерации используйте постоянный Node-сервер либо отдельно настроенный и подтверждённый scheduled worker. См. [описание R13](../../docs/R13-queue-cost-background.md).

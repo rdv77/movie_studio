@@ -1,0 +1,14 @@
+import {env} from 'cloudflare:workers';
+import {getRequestExecutionContext} from 'vinext/shims/request-context';
+import {api,HttpError} from '@/lib/server';
+import {workerSecretMatches,scheduleBackgroundWork} from '@/lib/background-work';
+import {projectWorkerTick} from '@/lib/project-worker';
+
+export const POST=api(async(req)=>{
+  const secret=(env as unknown as {QUEUE_WORKER_SECRET?:string}).QUEUE_WORKER_SECRET;
+  if(!await workerSecretMatches(secret,req.headers.get('x-queue-worker-secret')))
+    throw new HttpError('Фоновый доступ не разрешён.',401);
+  const scheduled=scheduleBackgroundWork(getRequestExecutionContext(),()=>projectWorkerTick());
+  if(!scheduled)await projectWorkerTick();
+  return Response.json({ok:true,background:scheduled,windowSeconds:scheduled?30:undefined},{headers:{'Cache-Control':'no-store'}});
+});

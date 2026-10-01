@@ -1,10 +1,11 @@
 import {build} from 'esbuild';import {strict as A} from 'node:assert';
-const server=`export const runtime={DB:{prepare:()=>({all:async()=>({results:globalThis.rows})})}};export async function loadProject(u,id){globalThis.loads++;return structuredClone(globalThis.states[id]);}`;
-const runner=`export async function runDirectorStep(u,id){globalThis.calls.push(id);await new Promise(r=>globalThis.releases.push(r));}`;
-await build({entryPoints:['lib/director-worker.ts'],bundle:true,platform:'node',format:'esm',outfile:'work/tests/director-worker.mjs',plugins:[{name:'mock',setup(b){b.onResolve({filter:/^\.\/(server|director-runner)$/},a=>({path:a.path,namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='./server'?server:runner}));}}]});
-const {directorWorkerTick}=await import('../work/tests/director-worker.mjs');
-globalThis.rows=[1,2,3,4].map(n=>({id:String(n),owner:'test',revision:1}));globalThis.states=Object.fromEntries(rows.map(r=>[r.id,{revision:1,directing:{runs:[{tasks:[{}]}]}}]));globalThis.loads=0;globalThis.calls=[];globalThis.releases=[];
-await directorWorkerTick();A.equal(calls.length,3);A.equal(loads,4);await directorWorkerTick();A.equal(calls.length,3,'Inflight projects are not dispatched twice');A.equal(loads,4,'Idle revisions do not read full snapshots');
-releases.splice(0).forEach(r=>r());await new Promise(r=>setImmediate(r));for(const row of rows.slice(0,3)){row.revision=2;states[row.id]={revision:2,directing:{runs:[]}};}
-await directorWorkerTick();A.deepEqual(calls,['1','2','3','4']);releases.splice(0).forEach(r=>r());await new Promise(r=>setImmediate(r));
-console.log('PASS standalone director worker: saved work resumes without a tab, bounded projects, no duplicate flights, revision cache.');
+await build({entryPoints:['lib/director-worker.ts'],bundle:true,platform:'node',format:'esm',outfile:'work/tests/director-worker.mjs',plugins:[{name:'mock',setup(b){b.onResolve({filter:/^\.\/project-worker$/},()=>({path:'worker',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const projectWorkerTick=()=>{globalThis.ticks++;return new Promise(r=>globalThis.releases.push(r));};`}));}}]});
+const {startProjectWorker,startDirectorWorker,directorWorkerTick}=await import('../work/tests/director-worker.mjs');
+globalThis.ticks=0;globalThis.releases=[];const scheduled=[],original=globalThis.setTimeout;
+try{
+ globalThis.setTimeout=(fn,ms)=>{const handle={fn,ms,unref(){handle.detached=true;}};scheduled.push(handle);return handle;};
+ delete globalThis.__kadrProjectWorker;startProjectWorker();startDirectorWorker();A.equal(scheduled.length,1,'Startup alias does not create a second worker');A.equal(scheduled[0].ms,1000);A(scheduled[0].detached);
+ scheduled[0].fn();A.equal(ticks,1);A.equal(scheduled[1].ms,5000);A(scheduled[1].detached);scheduled[1].fn();A.equal(ticks,2,'A slow provider does not prevent the next protected tick');
+ const manual=directorWorkerTick();A.equal(ticks,3);for(const release of releases)release();await manual;
+}finally{globalThis.setTimeout=original;delete globalThis.__kadrProjectWorker;}
+console.log('PASS Node startup: one persistent timer, compatible old startup name, detached intervals and overlapping protected ticks while a provider is slow. Ownership/CAS/restart checked by media-queue-worker.');

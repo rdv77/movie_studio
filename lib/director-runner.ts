@@ -1,3 +1,4 @@
+import {queueSlotIssue} from './queue-policy';
 import { loadProject, mutate, getKey } from './server';
 import { model } from './models';
 import { generate } from './providers';
@@ -19,9 +20,11 @@ export async function runDirectorStep(user:string,projectId:string){
       for(const t of run.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000){j.status='unknown';j.error='Прервалось ожидание ответа. Проверьте расход; автоматического повтора нет.';t.error=j.error;}}
       if(run.stopped)continue;
       if(run.basis!==directorRunBasis(p,run)){run.stopped=true;continue;}
-      const occupied=p.jobs.filter(j=>j.purpose==='directing'&&j.status==='dispatching').length;
-      for(const t of run.tasks.filter(t=>taskReady(run,t)).slice(0,Math.max(0,3-occupied))){
-        const j=directorJob(p,run,t);assertBudget(p,[j]);j.status='dispatching';j.started=now();t.jobId=j.id;p.jobs.push(j);claimed.push(j.id);
+      const waiting=run as typeof run&{queueIssue?:string};waiting.queueIssue=undefined;
+      for(const t of run.tasks.filter(t=>taskReady(run,t))){
+        const j=directorJob(p,run,t),issue=queueSlotIssue(p,j,new Set(),t);
+        if(issue){if(issue.includes('неизвестным исходом'))waiting.queueIssue=issue;continue;}
+        assertBudget(p,[j]);j.status='dispatching';j.started=now();t.jobId=j.id;p.jobs.push(j);claimed.push(j.id);
       }
     }
   });

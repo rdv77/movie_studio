@@ -3,6 +3,7 @@ import {now,type Project} from './domain';
 import {soundJobs,getSoundLayer,soundVariantFromJob,type SoundJob,type SoundscapeProject} from './soundscape';
 import {generateSoundscape,SoundResponseError} from './soundscape-provider';
 import {safeVoiceError} from './voice-design-provider';
+import {queueSlotIssue} from './queue-policy';
 const fileKey=(user:string,project:string,job:string)=>`soundscape/${encodeURIComponent(user)}/${project}/${job}`;
 async function saveSound(user:string,projectId:string,jobId:string){
   const p=await loadProject(user,projectId),j=soundJobs(p).find(j=>j.id===jobId);if(!j||j.status!=='saving')return;
@@ -14,6 +15,7 @@ async function saveSound(user:string,projectId:string,jobId:string){
 export async function runSoundscapeStep(user:string,projectId:string,jobId?:string){
   const p=await loadProject(user,projectId),j=soundJobs(p).find(j=>(!jobId||j.id===jobId)&&['queued','saving'].includes(j.status));if(!j)return p;
   if(j.status==='saving'){try{await saveSound(user,projectId,j.id);}catch(e){await mutate(user,projectId,p=>{const current=soundJobs(p).find(v=>v.id===j.id);if(current?.status==='saving')current.error=safeVoiceError(e);});}return loadProject(user,projectId);}
+  if(queueSlotIssue(p,j as unknown as import('./domain').Job))return p;
   j.status='dispatching';j.started=now();try{await saveProject(user,p,p.revision);}catch(e){if(e instanceof HttpError&&e.status===409)return loadProject(user,projectId);throw e;}
   let sent=false,key='';
   try{

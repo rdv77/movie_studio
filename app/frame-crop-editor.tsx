@@ -1,0 +1,30 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import {Button} from '@/components/ui/button';
+import {Input} from '@/components/ui/input';
+import {drawFrameCrop,fitFrameCrop,resizeFrameCrop,frameCropTransform,frameCropPng,type CropRect,type FrameCropFormat,type FrameCropTransform} from '@/lib/frame-crop';
+import type {PreparedFrame} from '@/lib/video-from-animatic';
+
+export function FrameCropEditor({frame,format,busy,upload,save,restore}:{frame:PreparedFrame;format:FrameCropFormat;busy:boolean;upload:(file:File)=>Promise<{id:string}>;save:(assetId:string,transform:FrameCropTransform)=>Promise<unknown>;restore:()=>Promise<unknown>}){
+  const [open,setOpen]=useState(false),[loading,setLoading]=useState(false),[working,setWorking]=useState(false),[error,setError]=useState(''),[target,setTarget]=useState<FrameCropFormat>(frame.transform?.format??format);
+  const [image,setImage]=useState<HTMLImageElement>(),[rect,setRect]=useState<CropRect>(),canvas=useRef<HTMLCanvasElement>(null);
+  const sourceId=frame.transform?.sourceAssetId??frame.assetId,disabled=busy||working||loading;
+  useEffect(()=>{if(!open)return;let live=true;const source=new Image();setLoading(true);setImage(undefined);setRect(undefined);setError('');
+    source.onload=()=>{if(!live)return;try{setImage(source);setRect(frame.transform&&frame.transform.sourceWidth===source.naturalWidth&&frame.transform.sourceHeight===source.naturalHeight&&frame.transform.format===target?frame.transform.rect:fitFrameCrop(source.naturalWidth,source.naturalHeight,target));}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+    source.onerror=()=>{if(live){setError('Исходное изображение недоступно. Откройте его карточку и проверьте файл.');setLoading(false);}};source.src='/api/assets/'+encodeURIComponent(sourceId);
+    return()=>{live=false;source.onload=null;source.onerror=null;source.src='';};
+  },[open,sourceId]);
+  let transform:FrameCropTransform|undefined;
+  try{if(image&&rect)transform=frameCropTransform(sourceId,image.naturalWidth,image.naturalHeight,target,rect);}catch{}
+  useEffect(()=>{if(!canvas.current||!image||!transform)return;try{drawFrameCrop(canvas.current,image,transform);}catch(e){setError((e as Error).message);}},[image,rect,target]);
+  const update=(key:keyof CropRect,value:number)=>{if(!image||!rect)return;try{setRect(resizeFrameCrop(image.naturalWidth,image.naturalHeight,target,rect,key,value));setError('');}catch(e){setError((e as Error).message);}};
+  return <div className="space-y-3 mt-3"><Button type="button" size="sm" variant="outline" disabled={busy||working} onClick={()=>setOpen(v=>!v)}>Подготовить кадр</Button>{frame.transform&&<p className="text-xs text-muted-foreground">Подготовлен из исходника: {frame.transform.rect.width}×{frame.transform.rect.height} → {frame.transform.outputWidth}×{frame.transform.outputHeight}, {frame.transform.format}. Исходный файл сохранён.</p>}
+    {open&&<section className="space-y-3 rounded border p-3" aria-label="Подготовка области кадра"><p className="text-sm">Выберите область исходного изображения. Она сохранится отдельным PNG для этого видеоплана; раскадровка и аниматик сохранят свои файлы. Генерация ИИ не запускается.</p>
+      <label className="block text-sm">Формат подготовленного кадра<select className="w-full rounded border bg-background p-2" value={target} disabled={disabled} onChange={e=>{const next=e.target.value as FrameCropFormat;setTarget(next);if(image){try{setRect(fitFrameCrop(image.naturalWidth,image.naturalHeight,next));setError('');}catch(e){setError((e as Error).message);}}}}><option value="16:9">16:9</option><option value="9:16">9:16</option></select></label>
+      {target!==format&&<p className="text-xs text-amber-600">Файл будет {target}, а фильм — {format}. При генерации и сборке проверьте, как модель впишет эту область в формат фильма.</p>}
+      {loading&&<p>Читаем исходное изображение…</p>}{image&&rect&&<><p className="text-xs">Исходник: {image.naturalWidth}×{image.naturalHeight} пикселей. Размеры области связаны выбранным форматом; растягивания нет.</p><div className="grid grid-cols-2 gap-3">{(['x','y','width','height'] as const).map((key,n)=><label key={key} className="text-sm">{['Слева, px','Сверху, px','Ширина, px','Высота, px'][n]}<Input type="number" step={1} min={key==='x'||key==='y'?0:1} value={rect[key]} disabled={disabled} onChange={e=>update(key,Number(e.target.value))}/></label>)}</div><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>setRect(fitFrameCrop(image.naturalWidth,image.naturalHeight,target))}>Центральная область</Button><Button type="button" size="sm" variant="outline" disabled={disabled} onClick={()=>setRect(fitFrameCrop(image.naturalWidth,image.naturalHeight,target,.75))}>Приблизить · 75%</Button></div></>}
+      <canvas ref={canvas} className="w-full max-w-sm rounded border bg-muted" aria-label="Предпросмотр подготовленного PNG"/>
+      {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={disabled||!image||!transform} onClick={async()=>{if(!image||!transform||!canvas.current)return;setWorking(true);setError('');try{const blob=await frameCropPng(canvas.current,image,transform),file=new File([blob],'Подготовленный кадр.png',{type:'image/png'}),saved=await upload(file);await save(saved.id,transform);setOpen(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Сохранить PNG и использовать</Button>{frame.transform&&<Button type="button" size="sm" variant="outline" disabled={disabled} onClick={async()=>{setWorking(true);setError('');try{await restore();setOpen(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Использовать исходный кадр</Button>}<Button type="button" size="sm" variant="ghost" disabled={working} onClick={()=>setOpen(false)}>Закрыть</Button></div>
+    </section>}
+  </div>;
+}

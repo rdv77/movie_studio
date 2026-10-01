@@ -94,5 +94,11 @@ export function videoFrameOptions(p: Project, item: Item) {
     if (existing) existing.approved ||= approved;
     else images.set(v.assetId, {assetId: v.assetId, title: v.title, model: v.model, approved});
   }
+  const prepared=item.videoPreparation?.startFrame;
+  if(prepared?.transform&&!images.has(prepared.assetId)){
+    const source=cards.flatMap(card=>card.variants).find(v=>v.id===prepared.variantId);
+    // A crop is explicitly selected preparation, not an approved storyboard variant.
+    images.set(prepared.assetId,{assetId:prepared.assetId,title:'Подготовленный кадр · '+prepared.transform.format,model:source?.model??'Подготовка изображения',approved:false});
+  }
   return [...images.values()];
 }

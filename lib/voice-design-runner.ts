@@ -1,3 +1,4 @@
+import {queueSlotIssue} from './queue-policy';
 import {loadProject,saveProject,mutate,getKey,storeAsset,runtime,HttpError} from '@/lib/server';
 import {id,now,type Project,type Job} from './domain';
 import {callVoiceWorkflow,VoiceWorkflowResponseError,safeVoiceError,type VoiceProviderResult} from './voice-design-provider';
@@ -31,6 +32,7 @@ export async function runVoiceWorkflowStep(user:string,projectId:string,jobId?:s
     try{await savePreviews(user,projectId,next.id);}catch(error){await mutate(user,projectId,p=>{const j=voiceWorkflowJobs(p).find(j=>j.id===next.id);if(j&&j.status==='saving')j.error=safeVoiceError(error);});}
     return loadProject(user,projectId);
   }
+  if(queueSlotIssue(snapshot,next))return snapshot;
   next.status='dispatching';next.started=now();
   try{await saveProject(user,snapshot,snapshot.revision);}catch(error){if(error instanceof HttpError&&error.status===409)return loadProject(user,projectId);throw error;}
   let sent=false,key='';

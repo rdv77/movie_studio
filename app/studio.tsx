@@ -1,4 +1,8 @@
 'use client';
+import {AudioQcEditor} from './audio-qc-editor';
+import {CostReport} from './cost-report';
+import {QueueSettingsEditor} from './queue-settings';
+import {queueSettings} from '@/lib/queue-policy';
 import {SoundscapeEditor} from './soundscape-editor';
 import {VoiceStudioShell} from './voice-studio-shell';
 import {VideoPreparationPanel} from './video-preparation';
@@ -29,7 +33,7 @@ import { GOOGLE_OMNI, googleEstimate } from '@/lib/google-models';
 import { isFalImage, falRefIssue, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
 import { scriptReapprovalReason } from '@/lib/script-approval';
 import { storyboardReapprovalReason, unchangedStoryboardBatch } from '@/lib/storyboard-approval';
-import { runnableJobs, newestProject, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue, PARALLEL_GENERATIONS } from '@/lib/generation-queue';
+import { runnableJobs, newestProject, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
 import { planCharacterIds, planReferenceIds, planFrameIds, filterPlanReferences } from '@/lib/plan-references';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
@@ -777,7 +781,7 @@ function Workspace() {
                   </div>
                   <h1>{stageTitle(step)}</h1>
                   <p className="muted">
-                    {step===11 ? 'Выберите музыку по сценарию и настройте громкость под речь.' : step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
+                    {step===11 ? 'Выберите музыку, атмосферу и звуковые события. Настройте их громкость во время речи.' : step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
@@ -839,10 +843,9 @@ function Workspace() {
                 <div className="info-banner">
                   <Loader2 className="spin" />
                   <span>
-                    В серии осталось {active.length} попыток. Обработка
-                    продолжается, пока студия открыта; при возвращении очередь
-                    возобновится.
-                    {[1,2,3,5,7].includes(step)&&` Для изображений и видеопланов — до ${PARALLEL_GENERATIONS} генераций одновременно. Можно открыть другую карточку и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
+                    В очереди осталось {active.length} попыток. Состояние сохраняется;
+                    готовые результаты появятся после обработки.
+                    {[1,2,3,5,7].includes(step)&&` Для изображений и видеопланов — до ${queueSettings(p).concurrency} генераций одновременно. Можно открыть другую карточку и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
                   </span>
                   <Button variant="ghost" onClick={() => setPanel('budget')}>
                     Посмотреть
@@ -978,6 +981,7 @@ function Workspace() {
               )}
               {step===5&&item&&<KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/>}
               {step===5&&<KeyframeBatchEditor p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
+              {step===8&&item&&selected?.kind==='video'&&selected.assetId&&<AudioQcEditor p={p} itemId={item.id} variantId={selected.id} busy={busy} onSave={async report=>{await action('recordAudioQc',report);}}/>}
               {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
                 <div className="editor-surface p-5 mb-5">
@@ -1027,7 +1031,7 @@ function Workspace() {
                   perform={perform}
                 />
               )}
-              {step===7&&<VideoPreparationPanel p={p} busy={busy} submit={async value=>{replace(await request(`/api/projects/${p.id}/video-preparation`,'POST',value));}}/>}
+              {step===7&&<VideoPreparationPanel p={p} busy={busy} upload={upload} submit={async value=>{replace(await request(`/api/projects/${p.id}/video-preparation`,'POST',value));}}/>}
               {step===9&&<AnimaticTimeline p={p} busy={busy} save={value=>action('setAnimaticSettings',value)} jump={id=>{setStep(5);setItemId(id);}}/>}
               {step===9&&<AnimaticPanel p={p} busy={busy} perform={perform} action={action} onContinue={()=>{setStep(7);setItemId('');}}/>}
               {step === 6 && voiceView==='plans' && <div className="editor-surface p-5 mb-5">
@@ -2318,7 +2322,7 @@ function GenerateDialog({
         {kind==='video'&&videoPreparationIssue(p,item)&&<p role="alert">{videoPreparationIssue(p,item)}</p>}
         {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,item.videoPreparation?.duration??shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,item.videoPreparation?.duration??shot.duration,models)}</p></section>}
         <p className="muted small">
-          {([1,2,3,5].includes(item.stage)&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другую карточку и запустить её. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
+          {([1,2,3,5].includes(item.stage)&&kind==='image'||item.stage===7&&kind==='video')?`До ${queueSettings(p).concurrency} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другую карточку и запустить её. Остальные попытки ждут свободного места.`:`Общая очередь: до ${queueSettings(p).concurrency} независимых задач одновременно.`} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
         </p>
         <DialogFooter>
@@ -2455,7 +2459,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
           <div><span>Предварительная оценка серии</span><strong>{money(total)}</strong></div></div>
         {costError && <p role="alert">{costError}</p>}
         {incomplete&&<section className="note" role="alert"><strong>Почему запуск недоступен · {blockReasons.length}</strong><ul>{blockReasons.map((reason,index)=><li key={index}>{reason}</li>)}</ul></section>}
-        <p className="muted">До {PARALLEL_GENERATIONS} генераций одновременно. Можно запустить несколько планов; остальные начнутся по мере освобождения мест. Держите приложение открытым; после закрытия очередь продолжится при следующем открытии. Каждая попытка попадёт в журнал расходов. Утверждения остаются за вами.</p>
+        <p className="muted">До {queueSettings(p).concurrency} генераций одновременно. Можно запустить несколько планов; остальные начнутся по мере освобождения мест. На сайте очередь продолжается в поддерживаемом фоновом окне и при открытой вкладке; на самостоятельном сервере обработчик работает постоянно. Каждая попытка попадёт в журнал расходов. Утверждения остаются за вами.</p>
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {
             await submit({ revision: snapshot.revision, batchId: batch, sourceItemId: source.id, sourceVariantId: chosen(source)!.id,
@@ -2567,7 +2571,7 @@ function LipsyncDialog({p,connections,busy,perform,upload,close,submit,openStage
     {status&&<p role="status">{status}</p>}{costError&&<p role="alert">{costError}</p>}
     {fromImage&&!imageInputsReady&&selected.length>0&&<p role="status">Для каждого отмеченного плана выберите лицо на картинке и проверьте описание.</p>}
     <p className="muted small">{fromImage?'В sync-3 отправятся сама картинка, точка на лице, описание движения и готовая запись речи. Промежуточное видео не создаётся.':'Подготовка приведёт видео к размеру до 1280 × 720 и сохранит выбранный участок.'} При финальной сборке используется утверждённая озвучка; повторная звуковая дорожка видео не накладывается.</p>
-    <p className="muted small">Серия обрабатывается по очереди. Держите приложение открытым. Фактическую стоимость сверьте с кабинетом sync.so в журнале расходов.</p>
+    <p className="muted small">Серия использует общую параллельную очередь. На сайте вкладка помогает продолжать обработку; на самостоятельном сервере работает фоновый обработчик. Фактическую стоимость сверьте с кабинетом sync.so в журнале расходов.</p>
     <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button>
       <Button disabled={busy||!configured||cost===null||!!costError} onClick={()=>perform(async()=>{
         const plans=[];
@@ -2740,7 +2744,7 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
     <Field label="Оценка одной записи, USD" hint="Оценка для контроля бюджета; фактическое списание учитывается отдельно. Без лимита можно оставить пустым."><Input aria-label="Оценка одной записи, USD" value={estimate} onChange={e => setEstimate(e.target.value)} /></Field>
     <div className="generation-total"><div><span>Будет создано</span><strong>{included.length} записей</strong></div><div><span>Оценка серии</span><strong>{money(total)}</strong></div></div>
     <p>После запуска включится режим «По планам». Общая запись сохранится в истории и не будет накладываться поверх реплик. Аниматик подстроит длительность кадров под полные реплики без ограничения в 60 секунд. Если речь не поместится в готовый видеоролик, переозвучьте этот план с более короткой репликой.</p>
-    <p className="muted">Держите приложение открытым для обработки очереди. Повторная генерация платная; сохранённые файлы не удаляются.</p>
+    <p className="muted">На сайте открытая вкладка помогает очереди продолжать работу; самостоятельный сервер обрабатывает её в фоне. Повторная генерация платная; сохранённые файлы не удаляются.</p>
     {error && <p role="alert">{error}</p>}
     <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button><Button disabled={busy || !modelId || !voice.trim() || !included.length || !!error || included.some(r => !r.dialogue.trim() || r.dialogue.length > 9500 || (r.speechType==='character'&&!r.speaker.trim()))}
       onClick={() => perform(async () => { await submit({revision:snapshot.revision,batchId:batch,model:modelId,voiceId:voice.trim(),estimate:perAttempt,plans:included.map(r => ({frameId:r.frameId,dialogue:r.dialogue,speechType:r.speechType,speaker:r.speaker}))}); close(); })}>
@@ -2818,7 +2822,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <div className="generation-total"><div><span>Будет создано</span><strong>{included.length} картинок</strong></div>
         <div><span>Оценка всей серии</span><strong>{money(total)}</strong></div></div>
       {costError && <p role="alert">{costError}</p>}
-      <p className="muted">Кадры обрабатываются параллельно. Держите приложение открытым; очередь продолжится при следующем открытии, если вы её закроете. Все попытки учитываются в расходах.</p>
+      <p className="muted">Кадры обрабатываются параллельно. На самостоятельном сервере очередь работает и после закрытия вкладки; на сайте для непрерывной обработки нужен фоновый вызов сервера или открытая вкладка. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
           await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:[], referenceMode:'selected', estimate, ...(isGrok?{imageSettings}:{}),
@@ -3043,6 +3047,8 @@ function Budget({ p, action, perform, replace }: any) {
           Скачать CSV
         </Button>
       </div>
+      <CostReport project={p}/>
+      <QueueSettingsEditor project={p} onSave={async settings=>{const next=await request(`/api/projects/${p.id}/queue`,'POST',{revision:p.revision,settings});replace(next);}}/>
       <div className="metrics">
         <div>
           <span>Подтверждено</span>

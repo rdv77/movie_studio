@@ -6,9 +6,11 @@ import {animaticManifestSchema,type AnimaticManifest} from './animatic-manifest'
 import {syncVideoPlans} from './video';
 import {versionSignature} from './creative-versions';
 import type {KeyframeRole} from './keyframes';
+import {frameCropTransformSchema,type FrameCropTransform} from './frame-crop';
 
-export type PreparedFrame={variantId:string;assetId:string};
-export type VideoPreparation={animaticVariantId:string;manifestBasis:string;shotId?:string;startFrame:PreparedFrame;endFrame?:PreparedFrame;middleFrame?:PreparedFrame;duration:number;overriddenRoles?:KeyframeRole[]};
+export type PreparedFrame={variantId:string;assetId:string;transform?:FrameCropTransform};
+export type PreparedFrameHistory={role:KeyframeRole;frame:PreparedFrame;created:string};
+export type VideoPreparation={animaticVariantId:string;manifestBasis:string;shotId?:string;startFrame:PreparedFrame;endFrame?:PreparedFrame;middleFrame?:PreparedFrame;duration:number;overriddenRoles?:KeyframeRole[];frameHistory?:PreparedFrameHistory[]};
 export type PreparedVideoItem=Item&{videoPreparation?:VideoPreparation};
 export function selectedAnimaticManifest(p:Project,variantId=p.animatic?.selectedId):{variant:Variant;manifest:AnimaticManifest}{
   const variant=p.animatic?.variants.find(v=>v.id===variantId),manifest=(variant as Variant&{animaticManifest?:AnimaticManifest}|undefined)?.animaticManifest;
@@ -17,7 +19,16 @@ export function selectedAnimaticManifest(p:Project,variantId=p.animatic?.selecte
 }
 function assertOriginalFrame(p:Project,itemId:string,frame:PreparedFrame){
   const item=p.items.find(i=>i.id===itemId),v=item?.variants.find(v=>v.id===frame.variantId)??p.removedVariants?.find(r=>r.itemId===itemId&&r.variant.id===frame.variantId)?.variant;
-  if(!item||!v||v.kind!=='image'||v.assetId!==frame.assetId)throw Error('Исходный ключевой кадр изменился или недоступен. Откройте раскадровку и проверьте выбранную версию.');
+  const originalAssetId=frame.transform?frameCropTransformSchema.parse(frame.transform).sourceAssetId:frame.assetId;
+  if(!item||!v||v.kind!=='image'||v.assetId!==originalAssetId)throw Error('Исходный ключевой кадр изменился или недоступен. Откройте раскадровку и проверьте выбранную версию.');
+}
+/** Only preparation changes; original animatic records and storyboard variants are never rewritten. */
+function retainPreparedFrames(previous:VideoPreparation|undefined,next:VideoPreparation):VideoPreparation{
+  const history=[...(previous?.frameHistory??[])];
+  for(const role of ['start','middle','end'] as const){const key=`${role}Frame` as 'startFrame'|'middleFrame'|'endFrame',frame=previous?.[key];
+    if(frame&&versionSignature(frame)!==versionSignature(next[key])&&!history.some(row=>row.role===role&&versionSignature(row.frame)===versionSignature(frame)))history.push({role,frame:structuredClone(frame),created:new Date().toISOString()});
+  }
+  return {...next,...(history.length?{frameHistory:history}:{})};
 }
 /** Uses original files recorded in this animatic, never a screenshot or a newer implicit approval. */
 export function prepareVideosFromAnimatic(p:Project,variantId:string){
@@ -28,7 +39,7 @@ export function prepareVideosFromAnimatic(p:Project,variantId:string){
     if(!item)throw Error(`Не найден видеоплан: ${clip.title}. Подготовьте текущий сценарий.`);
     const frame=(role:KeyframeRole)=>{const f=clip.frames.find(f=>f.role===role);if(!f)return undefined;const value={variantId:f.variantId,assetId:f.assetId};assertOriginalFrame(p,clip.itemId,value);return value;};
     const startFrame=frame('start');if(!startFrame)throw Error(`«${clip.title}»: нет первого кадра.`);
-    const data:VideoPreparation={animaticVariantId:variantId,manifestBasis:versionSignature(manifest),shotId:clip.shotId,startFrame,endFrame:frame('end'),middleFrame:frame('middle'),duration:clip.duration};
+    const data:VideoPreparation=retainPreparedFrames(item.videoPreparation,{animaticVariantId:variantId,manifestBasis:versionSignature(manifest),shotId:clip.shotId,startFrame,endFrame:frame('end'),middleFrame:frame('middle'),duration:clip.duration});
     if(versionSignature(item.videoPreparation)!==versionSignature(data)){item.videoPreparation=data;changed.push(item.id);}
   }
   return changed;
@@ -37,7 +48,16 @@ export function overridePreparedVideoFrame(p:Project,itemId:string,role:'start'|
   const item=p.items.find(i=>i.id===itemId&&i.stage===7&&!i.planArchive&&!i.removedAt) as PreparedVideoItem|undefined;if(!item?.videoPreparation)throw Error('Сначала подготовьте видеоплан из аниматика.');
   const source=p.items.find(i=>i.stage===5&&!i.planArchive&&!i.removedAt&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.title===item.sourceShot?.title));
   const v=source?.variants.find(v=>v.id===variantId);if(!v?.assetId||v.kind!=='image'||((v as Variant&{keyframe?:KeyframeRole}).keyframe??'start')!==role)throw Error('Выберите соответствующий ключевой кадр этого плана.');
-  item.videoPreparation={...item.videoPreparation,[role+'Frame']:{variantId:v.id,assetId:v.assetId},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]};
+  item.videoPreparation=retainPreparedFrames(item.videoPreparation,{...item.videoPreparation,[role+'Frame']:{variantId:v.id,assetId:v.assetId},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]});
+}
+export function cropPreparedVideoFrame(p:Project,itemId:string,role:'start'|'end',data:{sourceVariantId:string;expectedAssetId:string;assetId:string;transform:FrameCropTransform}){
+  const item=p.items.find(i=>i.id===itemId&&i.stage===7&&!i.planArchive&&!i.removedAt) as PreparedVideoItem|undefined;
+  if(!item?.videoPreparation)throw Error('Сначала подготовьте видеоплан из аниматика.');const issue=videoPreparationIssue(p,item);if(issue)throw Error(issue);
+  const current=role==='start'?item.videoPreparation.startFrame:item.videoPreparation.endFrame;
+  if(!current||current.assetId!==data.expectedAssetId||current.variantId!==data.sourceVariantId)throw Error('Выбранный кадр изменился. Откройте его подготовку заново.');
+  const transform=frameCropTransformSchema.parse(data.transform);
+  if(transform.sourceAssetId!==(current.transform?.sourceAssetId??current.assetId)||data.assetId===transform.sourceAssetId||data.assetId===current.assetId)throw Error('Сохраните область отдельным PNG из текущего исходного кадра.');
+  item.videoPreparation=retainPreparedFrames(item.videoPreparation,{...item.videoPreparation,[role+'Frame']:{variantId:data.sourceVariantId,assetId:data.assetId,transform},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]});
 }
 export function videoPreparationIssue(p:Project,item:PreparedVideoItem){
   const value=item.videoPreparation;if(!value)return '';

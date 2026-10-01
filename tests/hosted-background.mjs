@@ -1,0 +1,26 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+const templates=Object.fromEntries(await Promise.all(['background-kick','jobs-route','worker-tick-route'].map(async name=>[name,await readFile('platform/hosted/'+name+'.ts.template','utf8')])));
+const server=`export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw new HttpError('Unauthorized',401);return 'owner';};`;
+const worker=`export const projectWorkerTick=async()=>{globalThis.allTicks++;};export const projectWorkerTickFor=async(owner,id)=>{globalThis.projectTicks.push({owner,id});};`;
+const media=`export const executeMediaJob=async(owner,id,jobId,action)=>{globalThis.executed.push({owner,id,jobId,action});return {id};};`;
+await build({stdin:{resolveDir:process.cwd(),contents:`export {kickProjectQueue} from 'hosted-background-kick';export {POST} from 'hosted-jobs-route';export {POST as cron} from 'hosted-worker-tick-route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/hosted-background.mjs',plugins:[{name:'mock-platform',setup(b){
+ b.onResolve({filter:/^vinext\/shims\/request-context$/},()=>({path:'context',namespace:'mock'}));b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'cloudflare',namespace:'mock'}));
+ b.onResolve({filter:/^@\/lib\/(server|project-worker|media-job-runner)$/},a=>({path:a.path,namespace:'mock'}));
+ b.onResolve({filter:/^hosted-(background-kick|jobs-route|worker-tick-route)$/},a=>({path:a.path.slice(7),namespace:'platform'}));
+ b.onResolve({filter:/^@\/lib\/background-kick$/},()=>({path:'background-kick',namespace:'platform'}));
+ b.onLoad({filter:/.*/,namespace:'platform'},a=>({contents:templates[a.path],loader:'ts',resolveDir:process.cwd()}));
+ b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='context'?`export const getRequestExecutionContext=()=>globalThis.context;`:a.path==='cloudflare'?`export const env=new Proxy({},{get:(_,key)=>key==='QUEUE_WORKER_SECRET'?globalThis.secret:undefined});`:a.path.endsWith('server')?server:a.path.endsWith('project-worker')?worker:media}));
+}}]});
+const {kickProjectQueue,POST,cron}=await import('../work/tests/hosted-background.mjs');
+globalThis.denied=false;globalThis.context=null;globalThis.projectTicks=[];globalThis.executed=[];globalThis.allTicks=0;globalThis.secret=undefined;
+const waited=[],req=(body={},headers={})=>new Request('https://hosted.test/api',{method:'POST',body:JSON.stringify(body),headers}),ctx={params:Promise.resolve({id:'film',jobId:'attempt'})};
+assert.equal(kickProjectQueue('owner','film'),false);await Promise.resolve();assert.equal(projectTicks.length,0,'Missing request context never launches an untracked promise');
+context={waitUntil:p=>waited.push(p)};denied=true;await assert.rejects(()=>POST(req({}, {'x-owner':'owner'}),ctx),e=>e.status===401);assert.equal(executed.length,0);assert.equal(waited.length,0);
+denied=false;assert.deepEqual(await (await POST(req({action:'check-wait'}),ctx)).json(),{id:'film'});await Promise.all(waited.splice(0));assert.deepEqual(executed,[{owner:'owner',id:'film',jobId:'attempt',action:'check-wait'}]);assert.deepEqual(projectTicks,[],'Jobs wrapper never bypasses the central API hook for a watchdog');
+assert.equal(kickProjectQueue('owner','film'),true);await Promise.all(waited.splice(0));assert.deepEqual(projectTicks,[{owner:'owner',id:'film'}]);
+await assert.rejects(()=>cron(req({owner:'somebody'}),{}),e=>e.status===401);assert.equal(allTicks,0);secret='0123456789abcdef0123456789abcdef';await assert.rejects(()=>cron(req({}, {'x-queue-worker-secret':'bad'}),{}),e=>e.status===401);
+const accepted=await (await cron(req({owner:'stranger'}, {'x-queue-worker-secret':secret}),{})).json();assert.deepEqual(accepted,{ok:true,background:true,windowSeconds:30});await Promise.all(waited.splice(0));assert.equal(allTicks,1);
+context=null;assert.deepEqual(await (await cron(req({}, {'x-queue-worker-secret':secret}),{})).json(),{ok:true,background:false});assert.equal(allTicks,2);
+console.log('PASS hosted platform wrappers: owner-checked public jobs, request-scoped waitUntil only, no detached promise without context, separate environment-bound cron secret, ignored user/owner payload and explicit 30-second hosted limit. Mock platform/paid executor only.');

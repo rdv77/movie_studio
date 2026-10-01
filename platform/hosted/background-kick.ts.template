@@ -1,0 +1,9 @@
+import {getRequestExecutionContext} from 'vinext/shims/request-context';
+import {scheduleBackgroundWork} from '@/lib/background-work';
+import {projectWorkerTickFor} from '@/lib/project-worker';
+
+// Called only after an authorized enqueue/advance. HTTP waitUntil has a limited
+// lifetime; it does not turn this hosted site into an unattended Node worker.
+export function kickProjectQueue(owner:string,projectId:string):boolean{
+  return scheduleBackgroundWork(getRequestExecutionContext(),()=>projectWorkerTickFor(owner,projectId));
+}

@@ -22,7 +22,7 @@ await run(payload);assert.equal(state.jobs.length,2);assert.equal(state.jobs[0].
 await run(payload);assert.equal(state.jobs.length,2,'Same batch retry must be idempotent');
 await assert.rejects(()=>run({...payload,batchId:D.id(),revision:state.revision}),/этого плана/);
 const live=structuredClone(state);
-for(const mutate of [x=>{x.jobs[0].status='unknown'},x=>{x.jobs[0].status='saving'},x=>{x.jobs[0].kind='video'}]) {
+for(const mutate of [x=>{x.jobs[0].status='unknown'},x=>{x.jobs[0].status='saving'}]) {
  state=structuredClone(p);mutate(state);
  const input={...payload,itemId:state.jobs[0].kind==='video'?b.id:a.id};const before=structuredClone(state);
  await assert.rejects(()=>run(input));assert.deepEqual(state,before);
@@ -35,7 +35,7 @@ const flights=new Set([job.id]);const attempted=new Map([[job.id,100]]);
 assert.equal(Q.runnableJobs(queue,flights,attempted).length,2);assert(Q.runnableJobs(queue,flights,attempted).every(j=>j.id!==job.id));
 assert.equal(Q.runnableJobs(queue,new Set(queue.jobs.slice(0,3).map(j=>j.id)),attempted).length,0);
 assert.equal(Q.runnableJobs(live,new Set(),attempted)[0].itemId,b.id);
-const serial=structuredClone(queue);serial.jobs[0].kind='video';assert.equal(Q.runnableJobs(serial,new Set(),attempted).length,1);assert.equal(Q.runnableJobs(serial,flights,attempted).length,0);
+const mixed=structuredClone(queue);mixed.jobs[0].kind='video';assert.equal(Q.runnableJobs(mixed,new Set(),attempted).length,3);assert.equal(Q.runnableJobs(mixed,flights,attempted).length,2,'Mixed stages share the pool without serial blocking');
 assert.equal(Q.newestProject({...p,revision:10},{...p,revision:9}).revision,10);
 assert.equal(Q.newestProject({...p,revision:9},{...p,revision:10}).revision,10);
 // Simulate a background result winning CAS while the new plan is being saved.

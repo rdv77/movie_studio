@@ -1,3 +1,4 @@
+import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
 import {applyMontageProposal} from '../../../../lib/montage-review';
 import {animaticManifestSchema,manifestAssets} from '../../../../lib/animatic-manifest';
 import { approveReview } from '@/lib/review-center';
@@ -107,6 +108,11 @@ export const PATCH = api(async (req, ctx) => {
     case 'moveStoryboardPlan': {
       const {toIndex}=z.object({toIndex:z.number().int().min(0).max(119)}).parse(d);
       moveStoryboardPlan(p,body.itemId!,toIndex);break;
+    }
+    case 'recordAudioQc': {
+      const report=audioQcReportSchema.parse(d);assertAudioQcReportSource(p,report);
+      const source=await asset(user,report.source.assetId,p);if(!source.mime.startsWith('video/'))throw Error('Проверка звука относится к недоступному видеофайлу.');
+      if(!p.audioQc?.some(r=>r.id===report.id)){if((p.audioQc?.length??0)>=200)throw Error('В проекте уже сохранено 200 проверок звука.');(p.audioQc??=[]).push(report);}break;
     }
     case 'applyMontageProposal': {const {reviewId,index}=z.object({reviewId:z.string().uuid(),index:z.number().int().min(0).max(19)}).parse(d);applyMontageProposal(p,reviewId,index);break;}
     case 'saveAssemblyCuts': {

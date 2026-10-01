@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+await build({stdin:{resolveDir:process.cwd(),contents:`export {QueueSettingsEditor} from './app/queue-settings';export {newProject} from './lib/domain';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/queue-settings.mjs',external:['react','react-dom','@ffmpeg/ffmpeg'],banner:{js:`import {createRequire} from 'node:module';const require=createRequire(import.meta.url);`}});
+const {QueueSettingsEditor,newProject}=await import('../work/tests/queue-settings.mjs');
+const p=newProject('Очередь'),before=structuredClone(p);let saves=0;
+let html=renderToStaticMarkup(React.createElement(QueueSettingsEditor,{project:p,onSave:()=>saves++}));assert.match(html,/value="3"/);assert.match(html,/Ограничения провайдеров/);assert.match(html,/не запускается повторно/);assert.equal(saves,0);assert.deepEqual(p,before);
+p.queueSettings={concurrency:5,providerLimits:{fal:2}};html=renderToStaticMarkup(React.createElement(QueueSettingsEditor,{project:p,onSave:()=>saves++,disabled:true}));assert.match(html,/value="5"/);assert.match(html,/value="2"/);assert.match(html,/disabled/);assert.equal(saves,0);
+console.log('PASS queue settings SSR: inherited/default concurrency, provider limits, disabled editor and no automatic saves or provider calls.');

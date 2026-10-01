@@ -7,7 +7,7 @@ const p=D.newProject('Без платных запросов');const item=p.item
 await Promise.all([runDirectorStep('owner',p.id),runDirectorStep('owner',p.id)]);A.equal(calls,1);A.equal(state.jobs.length,1);A.equal(state.jobs[0].status,'done');A.equal(state.jobs[0].actual,null);A.equal(state.jobs[0].requestId,'receipt');A.equal(state.directing.critic.review,'Проверено');
 const rev=state.revision;await runDirectorStep('owner',p.id);A.equal(calls,1);A.equal(state.revision,rev,'Idle ticks do not write project blobs');
 R.newDirectorRun(state,'grok-4.6','critic');globalThis.fail=true;await runDirectorStep('owner',p.id);A.equal(state.jobs.at(-1).status,'unknown');await runDirectorStep('owner',p.id);A.equal(calls,2,'An uncertain paid request is never retried automatically');
-globalThis.fail=false;R.newDirectorRun(state,'grok-4.6','critic');const late=runDirectorStep('owner',p.id);
+state.jobs.at(-1).newSeriesAllowedAt=D.now();globalThis.fail=false;R.newDirectorRun(state,'grok-4.6','critic');const late=runDirectorStep('owner',p.id);
 await new Promise(r=>setTimeout(r,5));state.jobs.at(-1).started=new Date(Date.now()-16*60*1000).toISOString();await runDirectorStep('owner',p.id);A.equal(state.jobs.at(-1).status,'unknown');
 await late;A.equal(state.jobs.at(-1).status,'done');A.equal(state.directing.runs.at(-1).tasks[0].error,undefined);A.equal(calls,3);
 console.log('PASS director executor: duplicate consumers send once, persistent receipt/unknown cost, idle no-op, uncertain request no retry, late success clears timeout.');

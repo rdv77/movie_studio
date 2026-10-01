@@ -17,7 +17,7 @@ export const retrieve=async()=>({bytes:new Uint8Array([1]),mime:'video/mp4'});
 `;
 await build({entryPoints:['lib/domain.ts','lib/generation-queue.ts','app/api/projects/[id]/generate/route.ts','app/api/projects/[id]/generate-remaining/route.ts','app/api/projects/[id]/jobs/[jobId]/route.ts'],bundle:true,platform:'node',format:'esm',outbase:'.',outdir:'work/tests/parallel-video',outExtension:{'.js':'.mjs'},plugins:[{name:'mock',setup(b){
  b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));
- b.onResolve({filter:/^@\/lib\/providers$/},args=>args.importer.includes('jobs')?{path:'provider',namespace:'mock'}:undefined);
+ b.onResolve({filter:/^@\/lib\/providers$/},args=>/jobs|media-job-runner/.test(args.importer)?{path:'provider',namespace:'mock'}:undefined);
  b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:args.path==='server'?server:provider}));
 }}]});
 const root='../work/tests/parallel-video/',D=await import(root+'lib/domain.mjs'),Q=await import(root+'lib/generation-queue.mjs');
@@ -37,7 +37,7 @@ const twoModels=structuredClone(state);await generate(req(input(b)),ctx);assert.
 await generate(req(first),ctx);assert.equal(state.jobs.length,5,'Idempotent retry');
 await assert.rejects(()=>generate(req(input(a)),ctx),/этого плана/);
 state.jobs[0].status='unknown';assert(Q.videoAdmissionIssue(state,a.id));
-state=structuredClone(p);state.jobs=[{...twoModels.jobs[0],lipsync:{}}];assert(Q.videoAdmissionIssue(state,b.id));
+state=structuredClone(p);state.jobs=[{...twoModels.jobs[0],lipsync:{}}];assert.equal(Q.videoAdmissionIssue(state,b.id),'','Independent sync and video plans share capacity');
 state=structuredClone(p);state.limit='399';await assert.rejects(()=>generate(req({...first,revision:state.revision}),ctx),/лимит/);assert.equal(state.jobs.length,0);
 // Concurrent enqueue merges other plans' results and validates budget on CAS retry.
 const ja=twoModels.jobs.slice(0,1),jb=[{...twoModels.jobs[1],id:D.id(),batchId:D.id(),itemId:b.id}];

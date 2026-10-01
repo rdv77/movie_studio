@@ -14,7 +14,7 @@ export const poll=async j=>finished.has(j.id)?{bytes:new Uint8Array([1]),mime:'i
 export const retrieve=async()=>({bytes:new Uint8Array([1]),mime:'image/png'});`;
 await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as Q from './lib/generation-queue';export {POST as generate} from './app/api/projects/[id]/generate/route';export {POST as tick} from './app/api/projects/[id]/jobs/[jobId]/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/parallel-concepts.mjs',plugins:[{name:'mock',setup(b){
  b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));
- b.onResolve({filter:/^@\/lib\/providers$/},a=>a.importer.includes('jobs')?{path:'provider',namespace:'mock'}:undefined);
+ b.onResolve({filter:/^@\/lib\/providers$/},a=>/jobs|media-job-runner/.test(a.importer)?{path:'provider',namespace:'mock'}:undefined);
  b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='server'?server:provider}));
 }}]});
 const {D,Q,generate,tick}=await import('../work/tests/parallel-concepts.mjs');
@@ -33,7 +33,7 @@ for(const stage of [1,2,3]){
  state.jobs[0].status='unknown';assert(Q.conceptImageAdmissionIssue(state,a.id));
  const queued=structuredClone(state);queued.jobs[0].status='pending';assert.equal(Q.runnableJobs(queued,new Set([queued.jobs[0].id]),new Map()).length,2,'Slow provider does not block other slots');
  state=structuredClone(p);state.limit='399';await assert.rejects(()=>run(body(a,input.models,2)),/лимит/);assert.equal(state.jobs.length,0);
- state=structuredClone(p);state.jobs=[{...queued.jobs[0],kind:'text'}];assert(Q.conceptImageAdmissionIssue(state,b.id),'Text stays serial');
+ state=structuredClone(p);state.jobs=[{...queued.jobs[0],kind:'text'}];assert.equal(Q.conceptImageAdmissionIssue(state,b.id),'','Independent text uses the shared pool');
 }
 const {p,a,b}=fixture();state=structuredClone(p);await run(body(a,['grok-imagine-image-2.0','image-01'],2));const batch=structuredClone(state);
 // Server-wide reservation: even simultaneous requests from different tabs cannot exceed three.
