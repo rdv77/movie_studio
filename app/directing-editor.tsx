@@ -26,9 +26,11 @@ const F=({label,children}:{label:string;children:React.ReactNode})=><label class
 export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const d=p.directing;
   const [brief,setBriefState]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
-  const briefDirty=useRef(false);const setBrief=(value:typeof brief)=>{briefDirty.current=true;setBriefState(value);};
-  const savedBrief=JSON.stringify(d?.brief);useEffect(()=>{if(!briefDirty.current&&d)setBriefState(d.brief);},[p.id,savedBrief]);
-  const [order,setOrder]=useState(p.productionOrder??'voice-first');
+  const [briefDirty,setBriefDirty]=useState(false),draftVersion=useRef(0);
+  const setBrief=(value:typeof brief)=>{draftVersion.current++;setBriefDirty(true);setBriefState(value);};
+  const [order,setOrderState]=useState(p.productionOrder??'voice-first');
+  const setOrder=(value:typeof order)=>{draftVersion.current++;setBriefDirty(true);setOrderState(value);};
+  const savedBrief=JSON.stringify(d?.brief);useEffect(()=>{if(!briefDirty&&d){setBriefState(d.brief);setOrderState(p.productionOrder??'voice-first');}},[p.id,savedBrief,p.productionOrder,briefDirty]);
   const [model,setModel]=useState(MODELS.find(m=>m.kind==='text'&&m.provider==='openai')!.id);
   const [sceneId,setSceneId]=useState(d?.scenes[0]?.id??'');
   const [editing,setEditing]=useState<Scene>();
@@ -57,7 +59,8 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const selectScene=(id:string,checked:boolean)=>setSelectedSceneIds(ids=>checked?[...new Set([...ids,id])]:ids.filter(v=>v!==id));
   const selectShot=(id:string,checked:boolean)=>setSelectedShotIds(ids=>checked?[...new Set([...ids,id])]:ids.filter(v=>v!==id));
   const roles:{id:DirectorRole;label:string}[]=[{id:'story',label:'Сценарий'},{id:'camera',label:'Оператор'},{id:'art',label:'Художник'},{id:'dialogue',label:'Реплики'},{id:'performance',label:'Актёрская работа'},{id:'scene-expressive-reviewer',label:'Выразительность сцены'}];
-  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId);await call('restoreCreativeVersion',{versionId});if(v){briefDirty.current=false;setBriefState(v.snapshot.brief);setOrder(v.snapshot.productionOrder??'voice-first');}};
+  const saveBrief=async()=>{const version=draftVersion.current;await call('brief',{brief,productionOrder:order});if(version===draftVersion.current)setBriefDirty(false);};
+  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId),version=draftVersion.current;await call('restoreCreativeVersion',{versionId});if(v&&version===draftVersion.current){setBriefDirty(false);setBriefState(v.snapshot.brief);setOrderState(v.snapshot.productionOrder??'voice-first');}};
   const sceneText=(s:Scene)=>[s.title,`Задача: ${s.purpose}`,`Локация: ${s.location}`,`Конфликт: ${s.conflict}`,`Поворот: ${s.turn}`,`Начало: ${s.stateIn}`,`Конец: ${s.stateOut}`,...s.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`),...s.shots.map(shot=>`${shot.title} · ${shot.duration} сек\n${shot.story}\nОператор: ${shot.cinematography}\nХудожник: ${shot.productionDesign}\nРечь: ${shot.dialogue.speaker}: ${shot.dialogue.text}\nПодача: ${shot.dialogue.delivery}\nНачало: ${shot.stateIn}\nКонец: ${shot.stateOut}${shot.direction?'\n'+readableShotDirection(shot.direction):''}`)].join('\n\n');
   const shotField=(key:keyof DirectingShot,value:unknown)=>setShotEdit(e=>e?{...e,shot:{...e.shot,[key]:value}}:e);
   const patchPreview=(patch:EditorPatch)=>{const target=scenes.find(s=>s.shots.some(v=>v.id===patch.shotId)),shot=target?.shots.find(s=>s.id===patch.shotId);return <details key={patch.id} className="border rounded p-3"><summary>{target?.title} · {shot?.title??'План'} · {EDITOR_SECTION_NAMES[patch.section]} {patch.applied&&'✓ Применено'}</summary><p>{patch.reason}</p><p className="whitespace-pre-wrap"><b>Было:</b> {patch.before||'Пусто'}</p><p className="whitespace-pre-wrap"><b>Предложение:</b> {patch.after||'Пусто'}</p></details>;};
@@ -92,9 +95,9 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
       <details><summary>Промпт рецензента по текущим настройкам</summary><p className="muted">Ниже полный запрос без отправки. Сохраните задание перед запуском. Редактируйте приёмы и дополнительные инструкции выше.</p><pre className="whitespace-pre-wrap max-h-96 overflow-auto text-sm">{directorPrompt({...p,directing:{...(d??{scenes:[],runs:[],issues:[],patches:[]}),brief}}, {id:'preview',created:'',basis:'',model,mode:'critic',tasks:[],sceneIds:[]},{id:'preview',role:'critic',requires:[]})}</pre></details>
       <label className="row"><input type="checkbox" checked={brief.factual} onChange={e=>setBrief({...brief,factual:e.target.checked})}/>Неигровое кино: сохранять факты, отмечать сведения для проверки</label>
-      <div className="row wrap"><Button disabled={locked} onClick={async()=>{await call('brief',{brief,productionOrder:order});briefDirty.current=false;}}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d||briefDirty.current} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
-      {briefDirty.current&&<p role="status">Есть несохранённые настройки. Сохраните творческое задание перед запуском команды.</p>}
-      <ScriptWorkflowEditor p={p} model={model} busy={busy||briefDirty.current} submit={call}/>
+      <div className="row wrap"><Button disabled={locked} onClick={saveBrief}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d||briefDirty} onClick={()=>generate('critic')}>Рецензия сценария</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
+      {briefDirty&&<p role="status">Есть несохранённые настройки. Сохраните творческое задание перед запуском команды.</p>}
+      <ScriptWorkflowEditor p={p} model={model} busy={busy||briefDirty} submit={call}/>
       {d?.critic&&<div className="space-y-3"><h3>Рецензия</h3><p className="whitespace-pre-wrap">{d.critic.review}</p>{d.critic.alternatives.map((a,index)=><details key={index}><summary>{a.title}</summary><p className="whitespace-pre-wrap">{a.text}</p><Button disabled={locked} variant="outline" onClick={()=>call('useAlternative',{index})}>Добавить как вариант сценария</Button></details>)}</div>}
     </>}
     {stage===12&&<>

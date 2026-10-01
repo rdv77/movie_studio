@@ -23,6 +23,8 @@ export function ScriptWorkflowEditor({p,model,busy,submit}:Props){
   const [operation,setOperation]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [promptPreview,setPromptPreview]=useState('');
   useEffect(()=>{setSourceVariantId(item?.selectedId??sources[0]?.id??'');setBranch(undefined);setError('');setNotice('');},[p.id]);
+  const preferredSourceId=item?.selectedId??sources[0]?.id??'';
+  useEffect(()=>{setSourceVariantId(current=>current||preferredSourceId);},[preferredSourceId]);
   useEffect(()=>{setPromptPreview('');},[p,model,sourceVariantId,branch?.taskId,roles,methodologyIds,promptOverrides]);
   const runs=(p.directing?.runs??[]).flatMap(r=>isScriptWorkflowRun(r)?[r]:[]);
   const running=(p.directing?.runs??[]).some(directorRunActive);
