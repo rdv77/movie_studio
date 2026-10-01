@@ -1,5 +1,6 @@
 import type { Job, Kind } from './domain';
 import { googleSeconds } from './google-models';
+import { VIDEO_DURATION_CONTRACTS } from './video-duration';
 
 // Public REST catalog, checked 2026-09-16. Prices are estimates in credits,
 // never USD receipts. Account access is checked against /tools before sending.
@@ -38,7 +39,7 @@ export function zenProfile(id: string) { return profiles.find(p=>`zencreator:${p
 export const ZEN_IMAGE_PROMPT_LIMIT=5000;
 export function isZenCreatorImage(id:string) { return zenProfile(id)?.kind==='image'; }
 export function zenCredits(id: string, refs = 0) { const p=zenProfile(id); return p ? (refs ? p.editCredits??p.credits : p.credits) : undefined; }
-export function generationSeconds(id: string) { return googleSeconds(id)??zenProfile(id)?.seconds??6; }
+export function generationSeconds(id: string) { return googleSeconds(id)??zenProfile(id)?.seconds??(Object.hasOwn(VIDEO_DURATION_CONTRACTS,id)?VIDEO_DURATION_CONTRACTS[id].max:6); }
 export function zenTool(id: string, refs = 0) { const p=zenProfile(id); return p?.kind==='text'?'run_any_llm':p?.kind==='video'?'videogen':refs?'image_editor':'by_prompt'; }
 export function prepareZenJobs(jobs: Job[], assets: {mime:string;size:number}[] = []) {
   for(const j of jobs) {

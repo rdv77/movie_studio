@@ -103,9 +103,9 @@ try {
   assert(!middleImage.criticalText.includes('Самое начало текущего плана') && !middleImage.criticalText.includes('Начальный ключевой кадр'));
   assert(middleImage.criticalText.includes('Промежуточная на пути') && middleImage.criticalText.includes('Одна промежуточная поза'));
   const movie = C.compilePrompt(p, video, 'MiniMax-H3', { kind: 'video', prompt: 'Сохраняй рисунок.', startFrameId: first, endFrameId: end, references: [ids.anna, ids.yard] });
-  assert.deepEqual(movie.references.map(r => [r.assetId, r.role]), [[first, 'first-frame']]);
-  assert(movie.warnings.some(w => w.includes('конечный кадр')));
-  assert(movie.compression.omitted.some(r => r.assetId === end && r.reason === 'unsupported'));
+  assert.deepEqual(movie.references.map(r => [r.assetId, r.role]), [[first, 'first-frame'], [end, 'last-frame']]);
+  assert(!movie.warnings.some(w => w.includes('не передаёт конечный кадр')));
+  assert(!movie.compression.omitted.some(r => r.assetId === end && r.reason === 'unsupported'));
   assert(movie.criticalText.includes(current.stateOut) && movie.criticalText.includes(current.direction.endFrame));
   assert(movie.criticalText.includes('Куда: Лицо Анны') && movie.criticalText.includes('0–2 сек'));
   assert(movie.prompt.includes('Все персонажи держат рты закрытыми весь план'));
@@ -163,7 +163,7 @@ try {
   assert(noOne.criticalText.includes('Персонажей нет') && !noOne.references.some(r => r.role === 'character'));
   for (const m of MODELS.filter(m => m.kind === 'image' || m.kind === 'video')) assert(C.promptModelCapability(m.id).promptLimit > 0);
   assert.equal(C.promptModelCapability('grok-imagine-video-1.5').upstream.lastFrame, true);
-  assert.equal(C.promptModelCapability('grok-imagine-video-1.5').adapter.lastFrame, false);
+  assert.equal(C.promptModelCapability('grok-imagine-video-1.5').adapter.lastFrame, true);
   assert.equal(C.promptModelCapability('MiniMax-H3').promptLimit, 7000);
   assert.equal(C.promptModelCapability('MiniMax-Hailuo-2.3').newDirecting, false);
   assert.equal(providerCalls, 0);

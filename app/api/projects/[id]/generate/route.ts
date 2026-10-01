@@ -1,3 +1,4 @@
+import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import {prepareKeyframeGeneration,keyframeRoleInstruction,type KeyframeRole} from '@/lib/keyframes';
 import { planCharacterIds } from '@/lib/plan-references';
 import { stampGenerationVersions } from '@/lib/creative-versions';
@@ -61,7 +62,7 @@ export const POST = api(async (req, ctx) => {
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
   if (kind === 'video') {
     if (item.stage === 7 && !shot) throw Error('Подтяните планы из утверждённого подробного сценария и выберите нужный план.');
-    if (shot && videoDurationIssue(item.title, shot.duration, s.models)) throw Error(videoDurationIssue(item.title, shot.duration, s.models));
+    for(const m of ms){const duration=preparedVideoInputs(p,item,m.id,s.refs[0]).duration??shot?.duration;if(duration&&videoDurationIssue(item.title,duration,[m.id]))throw Error(videoDurationIssue(item.title,duration,[m.id]));}
     if (s.refs.length !== 1) throw Error('Для видео выберите ровно один первый кадр.');
   }
   const speechSource = kind === 'audio' ? resolveSpeechSource(p, s.speechSource) : undefined;
@@ -73,12 +74,14 @@ export const POST = api(async (req, ctx) => {
   }
   if (kind === 'audio' && info.speechType === 'character' && !item.sourceShot) throw Error('Для реплик героев сначала нажмите «Подготовить озвучку по планам». Общая дорожка предназначена для закадрового текста.');
   if (kind === 'video') assertSpeech(info, '');
-  if (kind === 'audio' && (!s.voiceId.trim() || !dialogue)) throw Error('Укажите voice_id и произносимую реплику. Служебные пометки не озвучиваются.');
+  if (kind === 'audio' && (!s.voiceId.trim() || !dialogue)) throw Error('Укажите voice_id или профиль голоса и произносимую реплику. Служебные пометки не озвучиваются.');
   const linked = p.items.find(i => i.stage === 5 && !i.planArchive && i.title === item.title);
   const basis = chosen(item) ?? linked?.variants.find(v => v.id === linked.approvedId);
   const jobs: Job[] = ms.flatMap(m => Array.from({ length: s.count }, (_, n) => {
     const prepared=keyframeRole?prepareKeyframeGeneration(p,item.id,keyframeRole,{model:m.id,refs,imageSettings:m.id===GROK_IMAGE_MODEL?s.imageSettings??FINAL_IMAGE_SETTINGS:undefined}):undefined;
+    const videoInput=kind==='video'?preparedVideoInputs(p,item,m.id,refs[0]):undefined;
     const job: Job = {
+      ...(videoInput?{videoPreparationBasis:videoInput.basis,endFrameAssetId:videoInput.endFrameId}:{}),
       ...(prepared?{keyframe:prepared.keyframe,pairId:prepared.pairId,sourceFrameVariantId:prepared.sourceFrameVariantId,keyframeSourceBasis:prepared.keyframeSourceBasis,keyframeReviewBasis:prepared.keyframeReviewBasis}:{}),
       id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind,
       shotSource: fields?.shotSource ?? (kind === 'audio' ? scriptVideo(p).variant?.id : undefined),
@@ -86,12 +89,12 @@ export const POST = api(async (req, ctx) => {
       ...(['audio', 'image', 'video'].includes(kind) && item.stage >= 5 ? info : {}),
       brief: s.prompt, prompt: ['image', 'video'].includes(kind) ? '' : promptFor(p, item,
         (item.character ? characterPrompt(item.character) + '\n\nПравки к этой попытке: ' : '') + s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`, basis),
-      refs:prepared?.refs??refs, characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
+      refs:prepared?.refs??(videoInput?.startFrameId?[videoInput.startFrameId]:refs), characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
       characterIds, character: item.stage === 1 ? item.character : undefined,
       location: item.stage === 3 ? item.location ?? chosen(item)?.location : undefined,
       camera: fields?.camera ?? basis?.camera ?? 'Статичная камера', continuity: fields?.continuity ?? basis?.continuity ?? '',
       offset: speechSource?.offset ?? basis?.offset ?? 0, volume: basis?.volume ?? 1, dialogue, voiceId: s.voiceId,
-      duration: kind === 'video' ? shot?.duration ?? Math.min(basis?.duration ?? 6, 6) : speechSource?.duration ?? fields?.duration ?? basis?.duration ?? 5,
+      duration: kind === 'video' ? videoInput?.duration??shot?.duration ?? Math.min(basis?.duration ?? 6, 6) : speechSource?.duration ?? fields?.duration ?? basis?.duration ?? 5,
       deps: dependencies(p, item.stage), created: now(), status: 'queued', transportVersion: 2,
       estimate: s.estimates[m.id] ?? null, actual: null,
     };

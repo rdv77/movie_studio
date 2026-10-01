@@ -1,4 +1,5 @@
 import type { Job } from './domain';
+import { modernVideoTiming, videoRequestTiming } from './video-duration';
 
 export const FAL_QWEN = 'fal-qwen-image-edit-2511';
 export const FAL_ENDPOINT = 'fal-ai/qwen-image-edit-2511';
@@ -28,7 +29,7 @@ export function falRefIssue(refs: { mime: string; size: number }[]) {
   if (refs.reduce((n,r) => n+r.size,0) > 20*1024*1024) return 'Qwen Image Edit: выберите референсы суммарно до 20 МБ.';
   return '';
 }
-export function prepareFalJobs(jobs: Job[], refs: {mime:string;size:number}[]) {
+export function prepareFalJobs(jobs: Job[], refs: {mime:string;size:number}[], loadedEndFrame = false) {
   for (const j of jobs.filter(j => isFalImage(j.model) || isFalVideo(j.model))) {
     const video = isFalVideo(j.model);
     const issue = video ? falVideoRefIssue(refs) : falRefIssue(refs);
@@ -36,8 +37,7 @@ export function prepareFalJobs(jobs: Job[], refs: {mime:string;size:number}[]) {
     if (video) {
       if (j.kind !== 'video' || !j.prompt.trim() || j.prompt.length > 5000)
         throw new Error('fal.ai: для видеоплана нужен промпт от 1 до 5000 символов (бюджет студии). Запрос не отправлен.');
-      if (!Number.isFinite(j.duration) || j.duration! <= 0 || j.duration! > 6)
-        throw new Error('fal.ai: длительность плана должна быть до 6 секунд. Запрос не отправлен.');
+      videoRequestTiming(j.model,j.duration,loadedEndFrame || modernVideoTiming(j));
     } else if (j.kind !== 'image' || !j.prompt.trim() || j.prompt.length > FAL_PROMPT_BUDGET)
       throw new Error('Qwen Image Edit: сократите задачу и описания до бюджета студии — 5000 символов. Запрос не отправлен.');
   }

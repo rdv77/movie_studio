@@ -1,3 +1,5 @@
+import type {VideoPreparation} from './video-from-animatic';
+import {versionSignature} from './creative-versions';
 import type {AnimaticManifest} from './animatic-manifest';
 import type {KeyframeRole,KeyframeSelection,KeyframeApproval} from './keyframes';
 import {hasKeyframeConfig,keyframesApproved,approveKeyframes,selectedKeyframe,keyframeFoundationBasis} from './keyframes';
@@ -39,6 +41,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  providerDuration?:number;videoPreparationBasis?:string;
   animaticManifest?:AnimaticManifest;
   keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;characterDraft?:boolean;
@@ -75,6 +78,7 @@ export type Variant = {
   lipsync?: LipsyncBasis;
 };
 export type Item = {
+  videoPreparation?:VideoPreparation;
   keyframeMode?:'single'|'pair'|'triple';keyframeSelection?:KeyframeSelection;approvedKeyframes?:KeyframeApproval;
   location?:LocationProfile;
   characterHistory?: CharacterVersion[];
@@ -92,6 +96,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  providerDuration?:number;videoPreparationBasis?:string;
   keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;
   basisVersion?: 2;
@@ -263,11 +268,13 @@ export function independentApproval(stage: number) {
   return stage >= 1 && stage <= 3;
 }
 export function variantCurrent(p: Project, item: Item, variant: Variant) {
+  if(variant.videoPreparationBasis&&variant.videoPreparationBasis!==versionSignature(item.videoPreparation))return false;
   if(item.stage===5&&variant.keyframeReviewBasis)return variant.keyframeReviewBasis===keyframeFoundationBasis(p,item,variant.keyframe??'start',variant);
   if(variant.reviewBasis&&[5,6,7].includes(item.stage))return variant.reviewBasis===materialBasis(p,item,variant);
   return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
 }
 export function jobCurrent(p: Project, item: Item, job: Job) {
+  if(job.videoPreparationBasis&&job.videoPreparationBasis!==versionSignature(item.videoPreparation))return false;
   if(job.basisVersion===2&&job.reviewBasis&&[5,6,7].includes(item.stage))
     return job.reviewBasis===materialBasis(p,item,job);
   return job.deps===dependencies(p,item.stage);

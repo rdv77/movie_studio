@@ -1,3 +1,4 @@
+import {videoPreparationIssue} from '@/lib/video-from-animatic';
 import {keyframeQueueIssue} from '@/lib/keyframes';
 import {mediaReviewCurrent,parseMediaReview} from '@/lib/media-review';
 import {generateMediaReview} from '@/lib/media-review-provider';
@@ -101,6 +102,7 @@ export const POST = api(async (req, ctx) => {
       // CAS in mutate makes the slot reservation global across browser tabs.
       // A full pool leaves the request queued; it has not reached the provider.
       if(parallelJob(p,job)&&p.jobs.filter(j=>j.id!==job.id&&parallelJob(p,j)&&generationInProgress(j)).length>=PARALLEL_GENERATIONS)return;
+      if(job.videoPreparationBasis){const issue=videoPreparationIssue(p,getItem(p,job.itemId));if(issue){job.status='cancelled';job.actual='0';job.error=issue;return;}}
       const i = job.purpose==='voice-test'||job.purpose==='media-review'||isMusicJob(job)?undefined:getItem(p, job.itemId);
       if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review||review.removedAt||!mediaReviewCurrent(p,review)){job.status='cancelled';job.actual='0';job.actualSource='Материал проверки изменился до отправки';return;}}
       if(job.keyframe){const issue=keyframeQueueIssue(p,job);if(issue){job.status='cancelled';job.actual='0';job.actualSource='Основа ключевого кадра изменилась до отправки';job.error=issue;return;}}
@@ -140,6 +142,7 @@ export const POST = api(async (req, ctx) => {
         ? []
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
+    const endFrame=polling||saving||j.lipsync||!j.endFrameAssetId?undefined:await imageData(user,j.endFrameAssetId,p);
     const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):refreshZen ? await poll(j, key) : saving
       ? j.output!
       : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
@@ -154,7 +157,7 @@ export const POST = api(async (req, ctx) => {
             video = new Blob([await v.arrayBuffer()], {type: va.mime}); audio = new Blob([await a.arrayBuffer()], {type: aa.mime});
           } catch { throw new ProviderError('Не удалось загрузить файлы синхронизации. Запрос не отправлен.', true, true); }
           return generateSync(j, key, video, audio);
-        })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs));
+        })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs,endFrame));
     await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (result.actual != null) {

@@ -1,4 +1,8 @@
 'use client';
+import {VideoPreparationPanel} from './video-preparation';
+import {videoPreparationIssue} from '../lib/video-from-animatic';
+import {grokVideoReservation,scaledVideoReservation} from '../lib/video-duration';
+import {supportsEndFrame} from '../lib/video-end-frame';
 import {AnimaticTimeline} from './animatic-timeline';
 import {manifestAssets} from '../lib/animatic-manifest';
 
@@ -1019,6 +1023,7 @@ function Workspace() {
                   perform={perform}
                 />
               )}
+              {step===7&&<VideoPreparationPanel p={p} busy={busy} submit={async value=>{replace(await request(`/api/projects/${p.id}/video-preparation`,'POST',value));}}/>}
               {step===9&&<AnimaticTimeline p={p} busy={busy} save={value=>action('setAnimaticSettings',value)} jump={id=>{setStep(5);setItemId(id);}}/>}
               {step===9&&<AnimaticPanel p={p} busy={busy} perform={perform} action={action} onContinue={()=>{setStep(7);setItemId('');}}/>}
               {step === 6 && voiceView==='plans' && <div className="editor-surface p-5 mb-5">
@@ -1999,20 +2004,21 @@ function GenerateDialog({
   const effectiveRefs=pinnedStart?[pinnedStart,...baseRefs.filter(r=>r!==pinnedStart)]:baseRefs;
   const visibleReferenceIds=[5,7].includes(item.stage)?new Set([...(kind==='video'?planFrameIds(p,item):[...planReferenceIds(p,item),...planFrameIds(p,item)]),...effectiveRefs]):undefined;
   const effectiveCharacters=[5,7].includes(item.stage)?planCharacterIds(p,item,characterIds):characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
-  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',keyframe:frameRole,keyframeInstruction:frameRole?keyframeRoleInstruction(p,item,frameRole):undefined,prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:shot?.duration,allowLegacyModel:!p.directing});
+  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',keyframe:frameRole,keyframeInstruction:frameRole?keyframeRoleInstruction(p,item,frameRole):undefined,prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,endFrameId:kind==='video'&&supportsEndFrame(m.id)?item.videoPreparation?.endFrame?.assetId:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:item.videoPreparation?.duration??shot?.duration,allowLegacyModel:!p.directing});
   const compiledModels=new Map<string,{result?:CompiledPrompt,error?:string}>();
   if(kind==='image'||kind==='video')for(const m of selected){try{compiledModels.set(m.id,{result:compilePrompt(p,item,m.id,mediaInput(m))});}catch(error){compiledModels.set(m.id,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'});}}
   const imagePromptError=[...compiledModels.values()].map(x=>x.error).find(Boolean)??'';
   const miniRefError=selected.map(m=>{const ids=compiledModels.get(m.id)?.result?.references.map(x=>x.assetId)??[];const files=ids.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a);return isFalImage(m.id)?falRefIssue(files):isMiniMaxImage(m.id)?miniMaxImageRefIssue(files):'';}).find(Boolean)??'';
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError='';
-  const computed = (m: (typeof MODELS)[number]) => m.id === GROK_IMAGE_MODEL ? grokImageEstimate(imageSettings, compiledModels.get(m.id)?.result?.references.length??0) : googleEstimate(m.id,
+  const baseComputed = (m: (typeof MODELS)[number]) => m.id === GROK_IMAGE_MODEL ? grokImageEstimate(imageSettings, compiledModels.get(m.id)?.result?.references.length??0) : googleEstimate(m.id,
     estimates[m.id] !== undefined
       ? estimates[m.id]
         ? ticks(estimates[m.id])
         : null
       : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
         : m.estimate);
+  const computed=(m:(typeof MODELS)[number])=>{const cost=baseComputed(m),c=compiledModels.get(m.id)?.result;if(kind==='video'&&item.videoPreparation&&c?.capability.duration)return m.id==='grok-imagine-video-1.5'?grokVideoReservation(c.capability.duration.requestedSeconds,c.references.length,cost):scaledVideoReservation(m.estimate,cost,c.capability.duration.requestedSeconds);return cost;};
   let total: string | null = null;
   try {
     const costs = selected.map(computed);
@@ -2305,7 +2311,8 @@ function GenerateDialog({
         </div>
         {queueIssue&&<p role="status">{queueIssue}</p>}
         {queueIssue&&unresolved.length>0&&<section className="note" aria-label="Запросы с неизвестным исходом"><strong>Запуск блокирует прежняя попытка, а не фотография</strong><p>Провайдер мог выполнить запрос и списать оплату. Разрешение новой серии сохранит прежнюю попытку и расходы в журнале. Само разрешение ничего не генерирует; новая серия оплачивается отдельно.</p>{unresolved.map((j:Job)=><div key={j.id}><p>{[...MODELS,...SYNC_MODELS].find(m=>m.id===j.model)?.name??j.model} · {new Date(j.created).toLocaleString('ru-RU')} · {j.error}</p><Button variant="outline" disabled={busy} onClick={()=>perform(()=>allowNewSeries(j.id))}>Разрешить новую серию после этой попытки</Button></div>)}</section>}
-        {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,shot.duration,models)}</p></section>}
+        {kind==='video'&&videoPreparationIssue(p,item)&&<p role="alert">{videoPreparationIssue(p,item)}</p>}
+        {kind==='video'&&shot&&models.length>0&&videoDurationIssue(item.title,item.videoPreparation?.duration??shot.duration,models)&&<section className="note" role="alert"><strong>Почему запуск недоступен</strong><p>{videoDurationIssue(item.title,item.videoPreparation?.duration??shot.duration,models)}</p></section>}
         <p className="muted small">
           {([1,2,3,5].includes(item.stage)&&kind==='image'||item.stage===7&&kind==='video')?`До ${PARALLEL_GENERATIONS} генераций одновременно, включая варианты разных моделей. Пока идёт генерация, можно открыть другую карточку и запустить её. Остальные попытки ждут свободного места.`:'Запросы выбранных моделей выполняются по очереди.'} Оценка не равна списанию. Неудачные и невыбранные попытки также
           попадут в журнал расходов.
@@ -2322,7 +2329,7 @@ function GenerateDialog({
               prompt.trim().length>20000 || !!imagePromptError ||
               !Number.isInteger(count) || count < 1 ||
               count > 4 ||
-              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
+              !!referenceError || (kind==='video'&&!!videoPreparationIssue(p,item)) || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || !shot || !!videoDurationIssue(item.title,item.videoPreparation?.duration??shot.duration,models))) ||
               (kind === 'audio' && (!voice.trim() || !spoken || speech.length > 9500 || models.length > 1))
             }
             onClick={() =>
@@ -2367,7 +2374,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
   const m = selectedVideoModel(snapshot, source)!;
   const [batch] = useState(() => crypto.randomUUID());
   const [rows, setRows] = useState(() => remainingVideoPlans(snapshot).map(i => ({
-    itemId: i.id, title: i.title, duration: videoShot(snapshot, i)!.duration,
+    itemId: i.id, title: i.title, duration: i.videoPreparation?.duration??videoShot(snapshot, i)!.duration,
     ref: videoFrame(snapshot, i) ?? '', prompt: videoPrompt(snapshot, i), include: true,
     frames: videoFrameOptions(snapshot, i),
   })));
@@ -2378,13 +2385,9 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
   try { if (estimate.trim()) perAttempt = ticks(estimate.trim()); }
   catch { costError = 'Укажите стоимость в USD, например 0.85.'; }
   perAttempt=googleEstimate(m.id,perAttempt);
-  const total = perAttempt === null ? null : (BigInt(perAttempt) * BigInt(included.length)).toString();
-  const budget = totals(p);
-  if (!costError && p.limit !== null) {
-    if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
-    else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
-  }
-  const videoInput=(r:(typeof rows)[number]):PromptInput=>({kind:'video',prompt:r.prompt.trim(),references:[...(r.ref?[{assetId:r.ref,role:'first-frame' as const}]:[]),...videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).map(assetId=>({assetId,role:'character' as const}))],startFrameId:r.ref||undefined,characterIds:planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds),duration:r.duration,allowLegacyModel:!snapshot.directing});
+  const videoInput=(r:(typeof rows)[number]):PromptInput=>({kind:'video',endFrameId:supportsEndFrame(m.id)?snapshot.items.find(i=>i.id===r.itemId)?.videoPreparation?.endFrame?.assetId:undefined,prompt:r.prompt.trim(),references:[...(r.ref?[{assetId:r.ref,role:'first-frame' as const}]:[]),...videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).map(assetId=>({assetId,role:'character' as const}))],startFrameId:r.ref||undefined,characterIds:planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds),duration:r.duration,allowLegacyModel:!snapshot.directing});
+  let total:string|null=null;try{const prices=included.map(r=>{const item=snapshot.items.find(i=>i.id===r.itemId)!;if(!item.videoPreparation)return perAttempt;const c=compilePrompt(snapshot,item,m.id,videoInput(r));return m.id==='grok-imagine-video-1.5'?grokVideoReservation(c.capability.duration!.requestedSeconds,c.references.length,perAttempt):scaledVideoReservation(m.estimate,perAttempt,c.capability.duration!.requestedSeconds);});if(prices.every(x=>x!==null))total=prices.reduce((s,x)=>s+BigInt(x!),0n).toString();}catch{}
+  const budget=totals(p);if(!costError&&p.limit!==null){if(total===null||budget.unknown)costError='При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';else if(BigInt(total)+BigInt(budget.actual)+BigInt(budget.reserved)>BigInt(p.limit))costError='Эта серия превысит лимит проекта.';}
   const blockReasons=included.flatMap(r=>{const errors=videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim(),20000,[m.id]);try{compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,m.id,videoInput(r));}catch(e){errors.push(r.title+': '+(e instanceof Error?e.message:'Не удалось подготовить запрос.'));}return errors;});
   const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
@@ -2400,7 +2403,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
           <Input aria-label="Оценка одной попытки, USD" value={estimate} inputMode="decimal" onChange={e => setEstimate(e.target.value)} />
         </Field>
         <ZenCost modelId={m.id} refs={1} count={included.length}/>
-        <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. В монтаж войдёт длительность соответствующего плана.</p>
+        <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. Для подготовленных кадров время запроса показано в предпросмотре. В финальной сборке по умолчанию сохраняется весь ролик; участок можно выбрать вручную.</p>
         {m.provider==='google'&&<p className="muted">Один первый кадр и текстовые описания выбранных героев. Оценку можно увеличить, но нельзя уменьшить ниже расчётной. Списание сверяйте в Google AI Studio; встроенный звук не заменяет утверждённые голоса.</p>}
         <p className="muted">Каждый план получает только образы своих участников и собственный первый кадр.</p>
         {rows.map((r, index) => (

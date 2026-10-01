@@ -1,3 +1,4 @@
+import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import { planCharacterIds } from '@/lib/plan-references';
 import { compileMediaJob } from '@/lib/prompt-jobs';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
@@ -47,12 +48,13 @@ export const POST = api(async (req, ctx) => {
     const characterRefs=videoCharacterRefs(p,m.provider,characterIds);
     const shot = videoShot(p, item)!;
     const info=planSpeech(p,item);assertSpeech(info,'');
-    if (videoDurationIssue(item.title,shot.duration,[m.id])) throw new Error(videoDurationIssue(item.title,shot.duration,[m.id]));
+    const prep=preparedVideoInputs(p,item,m.id,row.ref);const duration=prep.duration??shot.duration;
+    if(videoDurationIssue(item.title,duration,[m.id]))throw Error(videoDurationIssue(item.title,duration,[m.id]));
     const job:Job={ id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind: 'video',
-      prompt:'', brief: row.prompt, refs: [row.ref], characterRefs:characterRefs.length?characterRefs:undefined, camera: shot.camera,
+      videoPreparationBasis:prep.basis,endFrameAssetId:prep.endFrameId,prompt:'', brief: row.prompt, refs: [prep.startFrameId??row.ref], characterRefs:characterRefs.length?characterRefs:undefined, camera: shot.camera,
       characterIds,
       ...info,
-      continuity: shot.continuity, duration: shot.duration, offset: 0, volume: 1,
+      continuity: shot.continuity, duration, offset: 0, volume: 1,
       dialogue: shot.dialogue, voiceId: '', shotSource: scriptVideo(p).variant?.id, deps: dependencies(p, 7), created: now(),
       status: 'queued', transportVersion: 2, estimate: s.estimate, actual: null,
     };

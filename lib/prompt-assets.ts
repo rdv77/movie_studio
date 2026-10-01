@@ -4,15 +4,18 @@ import { isMiniMaxImage, miniMaxImageRefIssue } from './minimax-image';
 import { prepareFalJobs } from './fal-models';
 import { prepareGoogleJobs } from './google-models';
 import { prepareZenJobs } from './zencreator-models';
+import { assertEndFrameModel, validateEndFrameAsset } from './video-end-frame';
 
 export type PromptAsset = { mime: string; size: number };
 
 /** Caller supplies a project-scoped loader. Compile/filter IDs BEFORE this function. */
 export async function validateCompiledMediaAssets(job: Job, load: (id: string) => Promise<PromptAsset>): Promise<void> {
-  const allIds = [...new Set([...job.refs, ...(job.characterRefs ?? [])])];
+  if (job.endFrameAssetId) assertEndFrameModel(job);
+  const allIds = [...new Set([...job.refs, ...(job.characterRefs ?? []), ...(job.endFrameAssetId ? [job.endFrameAssetId] : [])])];
   const all = await Promise.all(allIds.map(async id => ({ id, data: await load(id) })));
   if (all.some(({ data }) => !data.mime.startsWith('image/'))) throw Error('Референс должен быть изображением.');
   const refs = job.refs.map(id => all.find(a => a.id === id)!.data);
+  if (job.endFrameAssetId) validateEndFrameAsset(job, all.find(a => a.id === job.endFrameAssetId)!.data);
   if (isOpenAIImage(job.model) && (refs.some(a => !['image/png', 'image/jpeg', 'image/webp'].includes(a.mime) || a.size > 10 * 1024 * 1024) || refs.reduce((n, a) => n + a.size, 0) > OPENAI_IMAGE_REFS_BYTES))
     throw Error('GPT Image: каждый референс PNG, JPEG или WebP до 10 МБ, суммарно до 20 МБ. Запрос не отправлен.');
   if (isMiniMaxImage(job.model)) { const issue = miniMaxImageRefIssue(refs); if (issue) throw Error(issue); }

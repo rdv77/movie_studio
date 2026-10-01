@@ -9,7 +9,8 @@ for(const model of ['zencreator:video:kling@2.6','zencreator:video:wan@2.7']) {
   assert.equal(R.videoDurationIssue('План 14',6.5,[model]),'');
   assert.equal(R.videoDurationIssue('План 14',10,[model]),'');
   assert.match(R.videoDurationIssue('План 14',10.1,[model]),/допустимо 10 сек/);
-  assert.match(R.videoDurationIssue('План 14',6.5,[model,'grok-imagine-video-1.5']),/допустимо 6 сек/);
+  assert.equal(R.videoDurationIssue('План 14',6.5,[model,'grok-imagine-video-1.5']),'');
+  assert.match(R.videoDurationIssue('План 14',10.1,[model,'grok-imagine-video-1.5']),/допустимо 10 сек/);
 }
 const message=R.videoDurationIssue('План 14 — Война приходит в Польшу',6.5);
 for(const text of ['План 14','6,5 сек','допустимо 6 сек','0,5 сек','Снимите галочку'])assert(message.includes(text));
@@ -32,9 +33,9 @@ const other={...video,sourceShot:{scriptId:D.id(),title:'План 0'}};assert.eq
 const {POST:single}=await import(root+'app/api/projects/[id]/generate/route.mjs'),{POST:batch}=await import(root+'app/api/projects/[id]/generate-remaining/route.mjs');
 const req=body=>new Request('https://test/api',{method:'POST',body:JSON.stringify(body)}),ctx={params:Promise.resolve({id:p.id})};
 globalThis.state=structuredClone(p);
-await assert.rejects(()=>single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:['grok-imagine-video-1.5'],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
+await assert.rejects(()=>single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:['grok-imagine-video-1.5'],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx),/до 6 сек/);assert.equal(state.jobs.length,0);
 const example={id:D.id(),stage:7,title:'Пример',variants:[]};state.items.push(example);D.addVariant(state,example.id,{kind:'video',assetId:D.id(),model:'grok-imagine-video-1.5'});
-await assert.rejects(()=>batch(req({revision:state.revision,batchId:D.id(),sourceItemId:example.id,sourceVariantId:example.selectedId,estimate:'100',plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx),/План.*6,5 сек.*превышение 0,5 сек/);assert.equal(state.jobs.length,0);
+await assert.rejects(()=>batch(req({revision:state.revision,batchId:D.id(),sourceItemId:example.id,sourceVariantId:example.selectedId,estimate:'100',plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx),/до 6 сек/);assert.equal(state.jobs.length,0);
 for(const model of ['zencreator:video:kling@2.6','zencreator:video:wan@2.7']) {
   globalThis.state=structuredClone(p);
   await single(req({revision:p.revision,batchId:D.id(),itemId:video.id,models:[model],count:1,prompt:'Лес',refs:[D.id()],dialogue:'',voiceId:'',estimates:{}}),ctx);
@@ -44,4 +45,4 @@ for(const model of ['zencreator:video:kling@2.6','zencreator:video:wan@2.7']) {
   await batch(req({revision:state.revision,batchId:D.id(),sourceItemId:source.id,sourceVariantId:source.selectedId,estimate:null,plans:[{itemId:video.id,ref:D.id(),prompt:'Лес'}]}),ctx);
   assert.equal(state.jobs.length,1);assert.equal(state.jobs[0].duration,6.5);
 }
-console.log('PASS video readiness: specific blockers, measured speech timing, approved source linkage; 6.5s plan allowed on single/batch Kling and Wan 10s, still blocked on 6s and mixed selections.');
+console.log('PASS video readiness: variable Grok/H3 catalog, fixed/mixed-model blockers, measured speech timing, approved source linkage; legacy 6s calls remain guarded before enqueue.');

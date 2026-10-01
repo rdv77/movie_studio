@@ -10,6 +10,8 @@ import { zenProfile } from './zencreator-models';
 import type { ActorProfile, LocationProfile, LocationState } from './world-assets';
 import { videoPrompt } from './video';
 import { planFields, storyboardPrompt } from './storyboard';
+import { supportsEndFrame } from './video-end-frame';
+import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -37,18 +39,18 @@ export function promptModelCapability(modelId: string): PromptCapability {
   const m = model(modelId);
   if (m.kind !== 'image' && m.kind !== 'video' || m.provider === 'sync') throw new PromptCompilationError('model_kind', 'Выберите модель генерации изображения или видеоплана.');
   const cap = promptCapacity(modelId, m.kind);
-  const video = m.kind === 'video', maxAdditional = video && m.provider === 'xai' ? 7 : 0;
+  const video = m.kind === 'video', maxAdditional = video && m.provider === 'xai' ? 7 : 0, lastFrame = video && supportsEndFrame(modelId);
   const requestedSeconds = googleSeconds(modelId) ?? zenProfile(modelId)?.seconds ?? 6;
   const result: PromptCapability = {
     modelId, provider: m.provider, kind: m.kind, promptLimit: cap.limit, limitSource: cap.source,
     newDirecting: availableForDirecting(modelId) && cap.limit >= 5000,
-    adapter: { firstFrame: video, lastFrame: false, requiresFirstFrame: video,
-      maxImageReferences: video ? 1 + maxAdditional : m.provider === 'xai' ? 5 : 8,
+    adapter: { firstFrame: video, lastFrame, requiresFirstFrame: video,
+      maxImageReferences: video ? 1 + Number(lastFrame) + maxAdditional : m.provider === 'xai' ? 5 : 8,
       maxAdditionalReferences: maxAdditional, camera: 'text',
       nativeAudio: !video ? 'none' : modelId === 'fal-wan-2.2-a14b' || modelId === 'MiniMax-Hailuo-2.3' ? 'none'
         : modelId === 'grok-imagine-video-1.5' || modelId === 'MiniMax-H3' || modelId === 'fal-minimax-h3-max' || modelId.startsWith('veo-') ? 'possible' : 'unknown' },
     upstream: { lastFrame: 'unknown' },
-    ...(video ? { duration: { requestedSeconds, planMaxSeconds: requestedSeconds, variableResult: modelId === 'gemini-omni-1.1-flash' } } : {}),
+    ...(video ? { duration: { requestedSeconds, planMaxSeconds: Object.hasOwn(VIDEO_DURATION_CONTRACTS,modelId)?VIDEO_DURATION_CONTRACTS[modelId].max:requestedSeconds, variableResult: modelId === 'gemini-omni-1.1-flash' } } : {}),
   };
   if (modelId === 'grok-imagine-video-1.5') result.upstream = { lastFrame: true, lastFrameField: 'last_frame', checked: '2026-10-01', source: 'https://docs.x.ai/developers/model-capabilities/video/reference-to-video' };
   if (modelId === 'MiniMax-H3') result.upstream = { lastFrame: true, lastFrameField: 'content[].role=last_frame', checked: '2026-10-01', source: 'https://platform.minimax.io/docs/guides/video-generation' };
@@ -144,8 +146,11 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const speech = plan && typeof plan.dialogue === 'object' ? speechInfo({ speechType: plan.dialogue.speechType, speaker: plan.dialogue.speaker, dialogue: plan.dialogue.text })
     : speechInfo({ speechType: plan?.speechType, speaker: plan?.speaker, dialogue: typeof plan?.dialogue === 'string' ? plan.dialogue : '' });
   const duration = input.duration ?? plan?.duration;
-  if (input.kind === 'video' && duration !== undefined && (!Number.isFinite(duration) || duration <= 0 || duration > capability.duration!.planMaxSeconds))
-    throw new PromptCompilationError('duration_fit', `План длится ${duration} сек, а подключённый адаптер этой модели создаёт до ${capability.duration!.planMaxSeconds} сек. Разделите план или выберите другую модель. Речь не ускоряется и не обрезается.`);
+  if (input.kind === 'video' && duration !== undefined) {
+    const modern = !!(input.endFrameId || item.videoPreparation || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'last-frame'));
+    try { const timing=videoRequestTiming(modelId,duration,modern,capability.duration!.requestedSeconds); capability.duration={...capability.duration!,requestedSeconds:timing.requestedSeconds,planMaxSeconds:timing.planMaxSeconds}; }
+    catch(e) { throw new PromptCompilationError('duration_fit',(e as Error).message); }
+  }
   if (input.kind === 'video' && direction && duration !== undefined) {
     const conflict = validateShotDirection({ id: plan?.id ?? item.id, duration, direction }).find(issue => issue.severity === 'conflict');
     if (conflict) throw new PromptCompilationError('direction_timing', `${conflict.message} Исправьте постановку перед запуском.`);
@@ -337,7 +342,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (typeof id !== 'string' || !id.trim() || id.length > 100 || /^(?:data:|https?:)/i.test(id) || candidate.role !== undefined && !REFERENCE_ROLES.includes(candidate.role))
       throw new PromptCompilationError('reference_id', 'Передавайте только ID сохранённых референсов и поддерживаемую роль изображения, без URL или встроенных файлов.');
     if (!selectedReferences(p, [id]).length) { omitted.push({ key: `ref.${id}`, label: 'Референс', reason: 'hidden', assetId: id }); continue; }
-    let role: ReferenceRole | undefined = id === startFrame ? 'first-frame' : id === endFrame ? 'last-frame' : hero ? 'character' : location ? 'location'
+    let role: ReferenceRole | undefined = candidate.role === 'last-frame' && id === endFrame ? 'last-frame' : id === startFrame ? 'first-frame' : id === endFrame ? 'last-frame' : hero ? 'character' : location ? 'location'
       : frameAssets.has(id) ? candidate.role === 'last-frame' ? 'last-frame' : 'reference' : !owner ? ['first-frame', 'last-frame', 'style'].includes(candidate.role ?? '') ? candidate.role : 'reference'
         : (candidate.role === 'style' || candidate.role === undefined) && owner.stage === 2 && active(owner) ? 'style' : undefined;
     if (owner && (!active(owner) || owner.excludedAt || !hero && !location && !frameAssets.has(id) && role !== 'style') ||
@@ -351,20 +356,25 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       if (role === 'last-frame') warnings.push('Подключённый адаптер не передаёт конечный кадр. Конец описан текстом; изображение не заменяется референсом героя.');
       continue;
     }
-    if (seen.has(id)) { omitted.push({ key: `ref.${id}`, label: 'Повторный референс', reason: 'duplicate', assetId: id }); continue; }
-    seen.add(id); references.push({ assetId: id, role, itemId: hero?.item.id ?? location?.id ?? owner?.id, label: hero?.profile.name ?? location?.title ?? candidate.label ?? owner?.title });
+    const referenceKey = role === 'first-frame' || role === 'last-frame' ? `${role}:${id}` : id;
+    if (seen.has(referenceKey)) { omitted.push({ key: `ref.${id}`, label: 'Повторный референс', reason: 'duplicate', assetId: id }); continue; }
+    seen.add(referenceKey); references.push({ assetId: id, role, itemId: hero?.item.id ?? location?.id ?? owner?.id, label: hero?.profile.name ?? location?.title ?? candidate.label ?? owner?.title });
   }
   const roleOrder: Record<ReferenceRole, number> = { 'first-frame': 0, 'last-frame': 1, character: 2, location: 3, style: 4, reference: 5 };
   references.sort((a, b) => roleOrder[a.role] - roleOrder[b.role]);
   if (input.kind === 'video' && !references.some(ref => ref.role === 'first-frame'))
     throw new PromptCompilationError('first_frame', 'Выберите первый кадр именно текущего плана. Он скрыт, удалён или относится к другой карточке.');
+  if (input.kind === 'video' && endFrame && capability.adapter.lastFrame && !references.some(ref => ref.role === 'last-frame'))
+    throw new PromptCompilationError('last_frame', 'Выберите конечный кадр именно текущего плана. Он скрыт, удалён или относится к другой карточке.');
   if (input.kind === 'image' && modelId === 'fal-qwen-image-edit-2511' && !references.length)
     throw new PromptCompilationError('references_required', 'Qwen Image Edit нужен хотя бы один относящийся к плану референс. Выберите героя, локацию или начальный кадр.');
-  if (references.length > capability.adapter.maxImageReferences || input.kind === 'video' && references.filter(ref => ref.role !== 'first-frame').length > capability.adapter.maxAdditionalReferences)
+  if (references.length > capability.adapter.maxImageReferences || input.kind === 'video' && references.filter(ref => ref.role !== 'first-frame' && ref.role !== 'last-frame').length > capability.adapter.maxAdditionalReferences)
     throw new PromptCompilationError('reference_count', `Выбрано ${references.length} подходящих изображений, но адаптер допускает ${capability.adapter.maxImageReferences}. Снимите лишние референсы или выберите другую модель; обязательные образы не исключаются автоматически.`);
   for (const [n, ref] of references.entries()) add(`ref-role.${n}`, `Изображение ${n + 1}`, ref.role === 'first-frame' ? 'Начальная композиция текущего плана; сохраняй лица и окружение.'
     : ref.role === 'last-frame' ? 'Конечная композиция текущего плана.' : ref.role === 'character' ? `Только постоянная внешность героя ${ref.label}; не копируй позу или фон.`
     : ref.role === 'location' ? `Локация ${ref.label}; не переноси посторонних персонажей.` : ref.role === 'style' ? 'Только техника изображения, свет и цвет; не переносить чужих героев или композицию.' : 'Выбранный режиссёром прообраз только для текущего плана.', true);
+  if (input.kind === 'video' && references.some(ref => ref.role === 'last-frame') && duration !== undefined && duration !== capability.duration!.requestedSeconds)
+    warnings.push(`Модель запрашивается на ${capability.duration!.requestedSeconds} сек, а план рассчитан на ${duration} сек. Конечный кадр закреплён в конце полного клипа. Обрезка конца может убрать выбранную композицию; проверьте фактическое время перед монтажом.`);
   if (capability.adapter.nativeAudio === 'possible') warnings.push('Модель может создать свой звук. Утверждённая озвучка накладывается отдельно; промпт запрещает самостоятельную речь и пение.');
   if (capability.duration?.variableResult) warnings.push('Фактическая длительность результата может отличаться от запрошенной; проверьте файл перед озвучкой и монтажом.');
 

@@ -2,6 +2,8 @@ import type { Job } from './domain';
 import type { Result } from './providers';
 import { call, json, ProviderError } from './provider-http';
 import { FAL_ENDPOINTS, FAL_H3, isFalImage, isFalVideo, prepareFalJobs } from './fal-models';
+import { validateEndFrameData } from './video-end-frame';
+import { modernVideoTiming, videoRequestTiming } from './video-duration';
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const headers = (key:string) => ({Authorization:`Key ${key}`, 'Content-Type':'application/json'});
@@ -20,7 +22,8 @@ function resultUrl(model:string, id:string, supplied:unknown) {
     throw new ProviderError('fal.ai: неожиданный адрес результата. Повторная генерация не запускается.', true);
   return supplied;
 }
-export async function generateFal(j:Job,key:string,refs:string[],format:string):Promise<Result> {
+export async function generateFal(j:Job,key:string,refs:string[],format:string,endFrame?:string):Promise<Result> {
+  validateEndFrameData(j,endFrame);
   if (!isFalImage(j.model) && !isFalVideo(j.model))
     throw new ProviderError('fal.ai: модель не поддерживается. Запрос не отправлен.', true, true);
   const info = refs.map(ref => {
@@ -28,7 +31,7 @@ export async function generateFal(j:Job,key:string,refs:string[],format:string):
     if (!m || m[2].length%4) throw new ProviderError('fal.ai: неверный формат референса. Запрос не отправлен.',true,true);
     return {mime:m[1],size:m[2].length*3/4-(m[2].endsWith('==')?2:m[2].endsWith('=')?1:0)};
   });
-  try { prepareFalJobs([j],info); } catch(e) { throw new ProviderError((e as Error).message,true,true); }
+  try { prepareFalJobs([j],info,!!endFrame); } catch(e) { throw new ProviderError((e as Error).message,true,true); }
   const sizes:Record<string,{width:number;height:number}> = {'16:9':{width:1024,height:576},'9:16':{width:576,height:1024},'1:1':{width:1024,height:1024}};
   if (!sizes[format]) throw new ProviderError('fal.ai: неподдерживаемый формат кадра.',true,true);
   const body = isFalImage(j.model) ? {
@@ -36,7 +39,8 @@ export async function generateFal(j:Job,key:string,refs:string[],format:string):
     num_inference_steps:28,guidance_scale:4.5,output_format:'png',acceleration:'regular',
     enable_safety_checker:true,sync_mode:false,
   } : j.model === FAL_H3 ? {
-    prompt:j.prompt,image_url:refs[0],duration:6,resolution:'768P',
+    prompt:j.prompt,image_url:refs[0],duration:videoRequestTiming(j.model,j.duration,!!endFrame||modernVideoTiming(j)).requestedSeconds,resolution:'768P',
+    ...(endFrame ? {end_image_url:endFrame} : {}),
     prompt_expansion_mode:'disabled',enable_safety_checker:true,sync_mode:false,
   } : {
     prompt:j.prompt,image_url:refs[0],num_frames:97,frames_per_second:16,

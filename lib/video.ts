@@ -75,6 +75,7 @@ export function videoGenerationPrompt(p: Project, item: Item, prompt: string, ch
   return withSpeechDirection(withCharacterIdentity(p,prompt,planCharacterIds(p,item,characterIds)),planSpeech(p,item));
 }
 export function videoFrame(p: Project, item: Item) {
+  if(item.videoPreparation)return item.videoPreparation.startFrame.assetId;
   const title = item.sourceShot?.title ?? item.title;
   const frame = p.items.find(i => i.stage === 5 &&
     (i.sourceShot ? i.sourceShot.scriptId === item.sourceShot?.scriptId && i.sourceShot.title === title : i.title === title) && isApproved(p, i));
@@ -87,7 +88,7 @@ export function videoFrameOptions(p: Project, item: Item) {
     (i.sourceShot ? i.sourceShot.scriptId === item.sourceShot?.scriptId && i.sourceShot.title === title : i.title === title))));
   const images = new Map<string, {assetId: string; title: string; model: string; approved: boolean}>();
   for (const card of cards) for (const v of card.variants) {
-    if (v.kind !== 'image' || !v.assetId) continue;
+    if (v.kind !== 'image' || !v.assetId || v.keyframe&&v.keyframe!=='start') continue;
     const approved = card.approvedId === v.id && isApproved(p, card);
     const existing = images.get(v.assetId);
     if (existing) existing.approved ||= approved;

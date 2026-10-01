@@ -10,6 +10,8 @@ import { model } from './models';
 import { VIDEO_PROMPT_LIMIT } from './video';
 import { isMiniMaxImage, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from './minimax-image';
 import { isOpenAIImage, openAIImageSize, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from './openai-image';
+import { validateEndFrameData } from './video-end-frame';
+import { VIDEO_DURATION_CONTRACTS, modernVideoTiming, videoRequestTiming } from './video-duration';
 export type Result = {
   error?: string;
   pending?: boolean;
@@ -45,13 +47,20 @@ export async function generate(
   refs: string[],
   format: string,
   characterRefs: string[] = [],
+  endFrame?: string,
 ): Promise<Result> {
+  validateEndFrameData(j, endFrame);
+  if (endFrame && refs.length !== 1) throw new ProviderError('Для видео с конечным кадром нужен ровно один первый кадр. Запрос не отправлен.', true, true);
+  if (endFrame && characterRefs.length && j.model !== 'grok-imagine-video-1.5')
+    throw new ProviderError('Этот режим передаёт только первый и конечный кадры. Отдельные референсы нельзя смешивать с ними. Запрос не отправлен.', true, true);
   if (j.kind === 'video' && j.prompt.length > videoPromptLimit(j.model))
     throw new ProviderError(`Видеопромпт длиннее ${videoPromptLimit(j.model)} символов. Сократите его и запустите новую серию. Запрос не отправлен.`, true, true);
   const m = model(j.model),
     h = headers(m.provider, key);
+  const videoSeconds = j.kind === 'video' && Object.hasOwn(VIDEO_DURATION_CONTRACTS, j.model)
+    ? videoRequestTiming(j.model, j.duration, !!endFrame || modernVideoTiming(j)).requestedSeconds : 6;
   if (m.provider === 'sync') throw new ProviderError('Используйте отдельное окно синхронизации губ.', true, true);
-  if(m.provider==='fal')return generateFal(j,key,refs,format);
+  if(m.provider==='fal')return generateFal(j,key,refs,format,endFrame);
   if(m.provider==='google')return generateGoogle(j,key,refs,format);
   if(m.provider==='zencreator')return generateZen(j,key,refs,format);
   let d: any;
@@ -214,8 +223,9 @@ export async function generate(
         throw new ProviderError('MiniMax H3: выберите один первый кадр PNG/JPEG/WebP до 10 МБ. Отдельные референсы нельзя смешивать с первым кадром. Запрос не отправлен.',true,true);
       if(!j.prompt.trim())throw new ProviderError('MiniMax H3: добавьте описание действия. Запрос не отправлен.',true,true);
       d=await json(await call('https://api.minimax.io/v2/video_generation',h,{
-        model:'MiniMax-H3',content:[{type:'text',text:j.prompt},{type:'image_url',image_url:{url:refs[0]},role:'first_frame'}],
-        resolution:'768P',duration:6,ratio:'adaptive',
+        model:'MiniMax-H3',content:[{type:'text',text:j.prompt},{type:'image_url',image_url:{url:refs[0]},role:'first_frame'},
+          ...(endFrame ? [{type:'image_url',image_url:{url:endFrame},role:'last_frame'}] : [])],
+        resolution:'768P',duration:videoSeconds,ratio:'adaptive',
       }));
       if(typeof d.task_id!=='string'||!d.task_id)
         throw new ProviderError('MiniMax H3 не вернул номер задачи. Проверьте исход запроса в кабинете; автоматического повтора не будет.');
@@ -227,8 +237,9 @@ export async function generate(
           model: j.model,
           prompt: j.prompt,
           image: { url: refs[0] },
+          ...(endFrame ? {last_frame:{url:endFrame}} : {}),
           ...(characterRefs.length ? {reference_images:characterRefs.map(url=>({url}))} : {}),
-          duration: 6,
+          duration: videoSeconds,
           resolution: '720p',
           aspect_ratio: format,
         }),

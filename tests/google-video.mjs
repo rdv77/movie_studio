@@ -44,7 +44,7 @@ try {
  mock(()=>new Response('oops',{headers:{'content-type':'text/html'}}));await assert.rejects(()=>G.retrieveGoogle(base+'/files/test',key),/другой формат/);
  mock(()=>Response.json({error:{message:key}},{status:403}));await assert.rejects(()=>P.generate({kind:'video',model:M.GOOGLE_OMNI,prompt:'Test',duration:5,refs:['r']},key,[frame],'16:9'),e=>!e.message.includes(key));
  assert.equal(R.videoDurationIssue('План',7,['veo-3.1-generate-preview']),'');assert(R.videoDurationIssue('План',9,['veo-3.1-generate-preview']));
- assert.equal(R.videoDurationIssue('План',10,[M.GOOGLE_OMNI]),'');assert(R.videoDurationIssue('План',7,[M.GOOGLE_OMNI,'grok-imagine-video-1.5']));
+ assert.equal(R.videoDurationIssue('План',10,[M.GOOGLE_OMNI]),'');assert.equal(R.videoDurationIssue('План',7,[M.GOOGLE_OMNI,'grok-imagine-video-1.5']),'');assert(R.videoDurationIssue('План',11,[M.GOOGLE_OMNI,'grok-imagine-video-1.5']));
  // Both entry points admit a 7-second plan, enforce budget and preserve idempotency.
  const p=D.newProject('Google'),shots=Array.from({length:10},(_,n)=>({title:'План '+n,description:'Лес',duration:n===0?7:n===1?3:5,camera:'Наезд',dialogue:'',speechType:'none',continuity:'Склейка'}));
  for(const i of p.items.filter(i=>i.stage<7).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){D.addVariant(p,i.id,{text:i.stage===4?JSON.stringify({shots}):'Основа'});D.approve(p,i.id);}

@@ -2,6 +2,8 @@ import type { Job, Project } from './domain';
 import { getItem } from './domain';
 import { GROK_IMAGE_MODEL, grokImageEstimate } from './image-quality';
 import { compilePrompt, type CompiledPrompt, type PromptInput } from './prompt-compiler';
+import { model } from './models';
+import { grokVideoReservation, modernVideoTiming, scaledVideoReservation } from './video-duration';
 
 /** Compact provenance saved with both the attempt and its resulting variant. */
 export type PromptCompilationSnapshot = {
@@ -13,8 +15,9 @@ export type PromptCompilationSnapshot = {
   compression: CompiledPrompt['compression'];
   warnings: string[];
   references: CompiledPrompt['references'];
+  duration?: CompiledPrompt['capability']['duration'];
 };
-export type CompiledMediaJob = Job & { compilation: PromptCompilationSnapshot; endFrameAssetId?: string };
+export type CompiledMediaJob = Job & { compilation: PromptCompilationSnapshot; endFrameAssetId?: string; providerDuration?: number };
 export type MediaJobInput = Partial<Omit<PromptInput, 'kind' | 'prompt'>> & { variantIndex?: number; variantCount?: number };
 
 export function mediaVariantPrompt(brief: string, index = 1, count = 1): string {
@@ -29,6 +32,7 @@ export function compilationSnapshot(result: CompiledPrompt, keyframe?: 'start' |
     budget: { ...result.budget },
     compression: { ...result.compression, omitted: result.compression.omitted.map(x => ({ ...x })), includedKeys: [...result.compression.includedKeys] },
     warnings: [...result.warnings], references: result.references.map(x => ({ ...x })),
+    ...(result.capability.duration?{duration:{...result.capability.duration}}:{}),
   };
 }
 
@@ -59,8 +63,12 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
     refs: job.kind === 'video' ? [first!.assetId] : result.references.map(ref => ref.assetId),
     characterRefs: job.kind === 'video' && auxiliary.length ? auxiliary : undefined,
     compilation: compilationSnapshot(result, job.kind === 'image' ? input.keyframe ?? 'start' : undefined),
-    ...(job.kind === 'video' && last ? { endFrameAssetId: last.assetId } : {}),
+    endFrameAssetId: job.kind === 'video' ? last?.assetId : undefined,
+    ...(job.kind==='video'?{providerDuration:result.capability.duration!.requestedSeconds}:{}),
   };
   if (job.model === GROK_IMAGE_MODEL) output.estimate = grokImageEstimate(job.imageSettings, output.refs.length);
+  if (job.kind==='video' && (last || modernVideoTiming(job) || item.videoPreparation))
+    output.estimate=job.model==='grok-imagine-video-1.5'?grokVideoReservation(output.providerDuration!,result.references.length,job.estimate)
+      : scaledVideoReservation(model(job.model).estimate,job.estimate,output.providerDuration!);
   return output;
 }
