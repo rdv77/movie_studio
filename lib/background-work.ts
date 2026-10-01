@@ -1,4 +1,4 @@
-import type {Project} from './domain';
+import type {Project,Job} from './domain';
 import {queueRunnableJobs} from './queue-policy';
 import {waitExpired} from './job-wait';
 
@@ -10,6 +10,7 @@ export type BackgroundAdapters={
   executeVoiceJob:(owner:string,id:string,jobId:string)=>Promise<Project>;
   executeSoundJob?:(owner:string,id:string,jobId:string)=>Promise<Project>;
   runDirectorStep:(owner:string,id:string)=>Promise<Project>;
+  watchDirector?:(owner:string,id:string)=>Promise<Project>;
   now?:()=>number;
   onError?:(error:unknown)=>void;
 };
@@ -20,7 +21,7 @@ export function scheduleBackgroundWork(context:BackgroundExecutionContext|null|u
   context.waitUntil(Promise.resolve().then(work).catch(error=>{onError?.(error);}));return true;
 }
 /** Trusted worker adapter uses owners read from the database, never forged HTTP auth headers. */
-export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxFlights?:number}={}){
+export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxFlights?:number;dispatchQueued?:(job:Job,project:Project)=>boolean;dispatchDirectors?:boolean}={}){
   const maxFlights=options.maxFlights??8;if(!Number.isInteger(maxFlights)||maxFlights<1||maxFlights>32)throw Error('Неверное число фоновых операций.');
   const flights=new Map<string,Promise<unknown>>(),attempted=new Map<string,number>(),now=adapters.now??Date.now;
   const prefix=(owner:string,id:string)=>JSON.stringify([owner,id]);
@@ -35,9 +36,14 @@ export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxF
       const key=scope+':watch:'+job.id;pending.push(launch(key,()=>adapters.executeMediaJob(owner,id,job.id,'check-wait')));
     }
     const directorKey=scope+':director',hasDirector=p.directing?.runs.some(r=>!r.stopped&&r.tasks.some(t=>!t.result&&!t.error));
-    if(hasDirector&&!flights.has(directorKey)&&flights.size<maxFlights)pending.push(launch(directorKey,()=>adapters.runDirectorStep(owner,id)));
+    const director=options.dispatchDirectors===false?adapters.watchDirector:adapters.runDirectorStep;
+    if(hasDirector&&director&&!flights.has(directorKey)&&flights.size<maxFlights)pending.push(launch(directorKey,()=>director(owner,id)));
     const inputFlights=new Set(p.jobs.filter(j=>flights.has(scope+':job:'+j.id)).map(j=>j.id));
-    for(const job of queueRunnableJobs(p,inputFlights,attempted,now())){
+    // Filter BEFORE fair selection; held synchronous jobs must not starve
+    // asynchronous submissions. The executor still rechecks the full saved
+    // project in CAS. Existing receipts and saved files are never filtered.
+    const queueProject=options.dispatchQueued?{...p,jobs:p.jobs.filter(j=>j.status!=='queued'||options.dispatchQueued!(j,p))}:p;
+    for(const job of queueRunnableJobs(queueProject,inputFlights,attempted,now())){
       if(flights.size>=maxFlights)break;
       const key=scope+':job:'+job.id;if(flights.has(key))continue;
       // Expired dispatches are handled by the watchdog above, not resent.

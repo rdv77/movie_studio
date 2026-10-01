@@ -20,12 +20,12 @@ export const SCENE_SPECIALIST_INSTRUCTIONS:Record<SceneSpecialistRole,string>={
 };
 
 /** Preflight every row before returning immutable, owned-field updates. */
-export function specialistUpdates(scene:StructuredScene,role:SceneSpecialistRole,result:unknown,shotId?:string):StructuredShot[]{
+export function specialistUpdates(scene:StructuredScene,role:SceneSpecialistRole,result:unknown,shotId?:string|string[]):StructuredShot[]{
   const row=role==='camera'?z.object({id:z.string(),cinematography:text,direction:cameraDirectionSchema.optional()}):
     role==='art'?z.object({id:z.string(),productionDesign:text}):
       role==='dialogue'?z.object({id:z.string(),dialogue}):z.object({id:z.string(),performance:performanceSchema});
   const data=z.object({shots:z.array(row).min(1).max(40)}).parse(result);
-  const expected=shotId?scene.shots.filter(s=>s.id===shotId):scene.shots;
+  const expected=shotId?scene.shots.filter(s=>Array.isArray(shotId)?shotId.includes(s.id):s.id===shotId):scene.shots;
   if(!expected.length||data.shots.length!==expected.length||new Set(data.shots.map(s=>s.id)).size!==expected.length||expected.some(s=>!data.shots.some(v=>v.id===s.id)))
     throw Error('Специалист должен вернуть все запрошенные планы с прежними ID.');
   return data.shots.map(value=>{

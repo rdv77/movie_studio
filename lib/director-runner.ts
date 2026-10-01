@@ -7,10 +7,10 @@ import { directorBasis, directorRunBasis, directorJob, taskReady, parseDirectorJ
 
 // All admission and task dependencies are decided on the server. CAS claims
 // prevent two tabs/workers from sending the same paid request twice.
-export async function runDirectorStep(user:string,projectId:string){
+export async function runDirectorStep(user:string,projectId:string,options:{dispatch?:boolean}={}){
   const snapshot=await loadProject(user,projectId);
   const expired=snapshot.jobs.some(j=>j.purpose==='directing'&&j.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000);
-  const ready=snapshot.directing?.runs.some(r=>!r.stopped&&(r.basis!==directorRunBasis(snapshot,r)||r.tasks.some(t=>taskReady(r,t))));
+  const ready=options.dispatch!==false&&snapshot.directing?.runs.some(r=>!r.stopped&&(r.basis!==directorRunBasis(snapshot,r)||r.tasks.some(t=>taskReady(r,t))));
   if(!expired&&!ready)return snapshot;
   const claimed:string[]=[];
   let p=await mutate(user,projectId,p=>{
@@ -18,6 +18,7 @@ export async function runDirectorStep(user:string,projectId:string){
     const d=p.directing;if(!d)return;
     for(const run of d.runs){
       for(const t of run.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000){j.status='unknown';j.error='Прервалось ожидание ответа. Проверьте расход; автоматического повтора нет.';t.error=j.error;}}
+      if(options.dispatch===false)continue; // Hosted watchdog cannot claim a synchronous paid task.
       if(run.stopped)continue;
       if(run.basis!==directorRunBasis(p,run)){run.stopped=true;continue;}
       const waiting=run as typeof run&{queueIssue?:string};waiting.queueIssue=undefined;

@@ -11,7 +11,6 @@ export const POST=api(async(req,ctx)=>{
   if(p.jobs.some(j=>j.batchId===s.batchId))return Response.json(p);
   if(p.revision!==s.revision)throw new Error('Проект изменился. Проверьте сравнение ещё раз.');
   if(new Set(s.voices.map(v=>JSON.stringify([v.model,v.voiceId]))).size!==s.voices.length)throw new Error('Один голос одной модели можно включить в сравнение только один раз.');
-  if(p.jobs.some(j=>['queued','dispatching','pending','saving'].includes(j.status)))throw new Error('Дождитесь завершения текущей серии.');
   const comparisonId=id(),created=now(),providers=new Set<string>();
   const jobs:Job[]=s.voices.map(v=>{
     const m=model(v.model);if(m.kind!=='audio'||!['minimax','elevenlabs'].includes(m.provider))throw new Error('Выберите модель озвучки MiniMax или ElevenLabs.');

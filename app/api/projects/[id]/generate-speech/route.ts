@@ -21,7 +21,6 @@ export const POST = api(async (req, ctx) => {
   if (original.jobs.some(j => j.batchId === s.batchId)) return Response.json(original);
   if (original.revision !== s.revision) throw new Error('Проект изменился. Откройте окно озвучки заново.');
   if (!stageReady(original, 6)) throw new Error('Сначала утвердите все кадры раскадровки.');
-  if (original.jobs.some(j => ['queued','dispatching','pending','saving'].includes(j.status))) throw new Error('Дождитесь текущей серии.');
   const m = model(s.model);
   if (m.kind !== 'audio') throw new Error('Выберите модель озвучки.');
   if (new Set(s.plans.map(r => r.frameId)).size !== s.plans.length) throw new Error('Планы повторяются.');

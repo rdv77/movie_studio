@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { reviewRows } from '@/lib/review-center';
+import { reviewRows,reviewKeyframePreviews,reviewApprovalSelection,reviewVoiceItem } from '@/lib/review-center';
 import { STAGES,chosen,type Project } from '@/lib/domain';
 import { audioDuration,videoDuration } from '@/lib/audio-duration';
 export function ReviewCenter({p,stage,busy,submit,open}:{p:Project;stage?:number;busy:boolean;submit:(action:string,data:unknown)=>Promise<void>;open:(stage:number,itemId:string)=>void}){
@@ -21,10 +21,13 @@ export function ReviewCenter({p,stage,busy,submit,open}:{p:Project;stage?:number
     <div className="row wrap my-3">{!storyboard&&<Button variant="outline" disabled={busy||measuring} onClick={measure}>{measuring?'Проверяем файлы…':'Проверить длительность видео и речи'}</Button>}<Button variant="outline" disabled={busy} onClick={()=>setChecked(pending.filter(r=>r.status==='ready').map(r=>r.itemId))}>Выбрать все готовые</Button></div>
     {error&&<p role="alert">{error}</p>}
     <div className="space-y-3">{pending.map(row=><article key={row.itemId} className="border rounded p-3"><label className="row"><input type="checkbox" checked={checked.includes(row.itemId)} disabled={busy||['conflict','missing'].includes(row.status)} onChange={e=>setChecked(ids=>e.target.checked?[...ids,row.itemId]:ids.filter(id=>id!==row.itemId))}/><strong>{STAGES[row.stage]} · {row.title}</strong></label><p>{row.reason}</p>
-      {row.status==='review'&&(()=>{const v=chosen(p.items.find(i=>i.id===row.itemId)!);return v?.assetId?<details><summary>Посмотреть выбранный материал</summary>{v.kind==='image'?<img className="max-h-64" alt={row.title} src={'/api/assets/'+v.assetId}/>:v.kind==='audio'?<audio controls preload="none" src={'/api/assets/'+v.assetId}/>:<video controls preload="none" className="max-h-64" src={'/api/assets/'+v.assetId}/>}</details>:<p className="whitespace-pre-wrap">{v?.text}</p>;})()}
-      <Button size="sm" variant="link" onClick={()=>open(row.stage,row.itemId)}>Открыть карточку</Button>{row.status==='conflict'&&row.stage===7&&<Button size="sm" variant="link" onClick={()=>{const voice=p.items.find(i=>i.stage===6&&i.sourceShot?.title===p.items.find(i=>i.id===row.itemId)?.sourceShot?.title);open(6,voice?.id??'');}}>Переозвучить план</Button>}
+      {row.stage===5&&(()=>{const frames=reviewKeyframePreviews(p,row.itemId);return frames.length?<details open={row.status==='review'}><summary>Посмотреть выбранный набор · {frames.length} {frames.length===1?'кадр':'кадра'}</summary><p className="muted small">Одно утверждение относится ко всем показанным кадрам. Если основа изменилась, проверьте каждое отмеченное изображение перед подтверждением.</p><div className="grid gap-3 sm:grid-cols-2">{frames.map(frame=><figure key={frame.role} className="border rounded p-3" data-keyframe-role={frame.role} data-preview-variant={frame.variantId}>
+        <figcaption><strong>{frame.label}</strong> · {frame.status==='current'?'Актуален':frame.status==='review'?'Нужен пересмотр':frame.status==='missing'?'Нет изображения':'Конфликт'}</figcaption>{frame.assetId&&<a href={'/api/assets/'+frame.assetId} target="_blank" rel="noreferrer"><img className="max-h-64" alt={`${row.title}: ${frame.label}`} src={'/api/assets/'+frame.assetId}/></a>}<p className={frame.status==='current'?'muted small':'warning-text small'}>{frame.reason}</p>
+      </figure>)}</div></details>:null;})()}
+      {row.stage!==5&&row.status==='review'&&(()=>{const v=chosen(p.items.find(i=>i.id===row.itemId)!);return v?.assetId?<details><summary>Посмотреть выбранный материал</summary>{v.kind==='image'?<img className="max-h-64" alt={row.title} src={'/api/assets/'+v.assetId}/>:v.kind==='audio'?<audio controls preload="none" src={'/api/assets/'+v.assetId}/>:<video controls preload="none" className="max-h-64" src={'/api/assets/'+v.assetId}/>}</details>:<p className="whitespace-pre-wrap">{v?.text}</p>;})()}
+      <Button size="sm" variant="link" onClick={()=>open(row.stage,row.itemId)}>Открыть карточку</Button>{row.status==='conflict'&&row.stage===7&&(()=>{const voice=reviewVoiceItem(p,row.itemId);return voice?<Button size="sm" variant="link" onClick={()=>open(6,voice.id)}>Переозвучить план</Button>:null;})()}
     </article>)}</div>
-    <Button className="mt-4" disabled={busy||measuring||!selected.length} onClick={async()=>{await submit('approveReview',{selections:selected.map(r=>({itemId:r.itemId,variantId:r.variantId,reviewed:r.status==='review'}))});setChecked([]);}}>Утвердить отмеченные {storyboard?'кадры':'материалы'} ({selected.length})</Button>
+    <Button className="mt-4" disabled={busy||measuring||!selected.length} onClick={async()=>{await submit('approveReview',{selections:selected.map(reviewApprovalSelection)});setChecked([]);}}>Утвердить отмеченные {storyboard?'кадры':'материалы'} ({selected.length})</Button>
     {!storyboard&&<p className="muted small">Изменившийся аниматик нужно собрать заново: утверждение карточек не меняет уже сохранённый видеофайл.</p>}
   </details>;
 }

@@ -1,19 +1,44 @@
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
-await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export {ensureDirecting} from './lib/directing';export * as S from './lib/script-workflow';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/script-workflow.mjs'});
-const {D,S,ensureDirecting}=await import('../work/tests/script-workflow.mjs');
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export {ensureDirecting} from './lib/directing';export * as S from './lib/script-workflow';export {ScriptWorkflowEditor} from './app/script-workflow-editor';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/script-workflow.mjs',external:['react','react-dom']});
+const {D,S,ensureDirecting,ScriptWorkflowEditor}=await import('../work/tests/script-workflow.mjs');
 const fixture=()=>{const p=D.newProject('Сказка'),d=ensureDirecting(p);d.brief={...d.brief,locked:'Корона уже надета на лягушку.',targetSeconds:120,strengths:{genre:8,style:7,surprise:5},promptNotes:'Покажи тихое удивление вместо испуга.'};const item=p.items.find(i=>i.stage===0);const source=D.addVariant(p,item.id,{kind:'text',title:'Исходник',text:'  Мальчик находит лягушку с короной.\n'});D.approve(p,item.id);return {p,d,item,source};};
 const result=text=>({title:'Кандидат',text,changes:[],findings:[]});
 let checks=0;
 function test(name,fn){fn();checks++;console.log('PASS script workflow:',name);}
 test('seven source-backed method cards and strict input validation',()=>{
-  assert.equal(S.CINEMA_METHODS.length,7);assert.equal(new Set(S.CINEMA_METHOD_IDS).size,7);assert(S.CINEMA_METHODS.every(m=>m.sourceUrl.startsWith('https://')&&m.checks.length>0));
+  assert.equal(S.CINEMA_METHODS.length,7);assert.equal(new Set(S.CINEMA_METHOD_IDS).size,7);assert(S.CINEMA_METHODS.every(m=>m.sourceUrl.startsWith('https://')&&m.checks.length>0&&m.principle.length>30&&m.example.startsWith('Авторский пример приложения:')&&m.limits.length>30));
+  for(const field of ['principle','example','limits'])assert.equal(new Set(S.CINEMA_METHODS.map(m=>m[field])).size,7,'Method cards must have individual '+field);
   const {p,source}=fixture(),before=JSON.stringify(p);
   for(const roles of [[],['script-critic','script-critic'],['editor']])assert.throws(()=>S.createScriptWorkflowRun(p,'gpt-6-astra',roles,source.id));
   assert.throws(()=>S.createScriptWorkflowRun(p,'gpt-6-astra',['script-adaptation'],D.id()));
   assert.throws(()=>S.createScriptWorkflowRun(p,'gpt-6-astra',['script-adaptation'],source.id,undefined,{methodologyIds:['wrong']}));
   assert.throws(()=>S.createScriptWorkflowRun(p,'gpt-6-astra',['script-adaptation'],source.id,undefined,{methodologyIds:['cause_effect','cause_effect']}));
   assert.equal(JSON.stringify(p),before,'Rejected admission must be atomic');
+});
+test('actual role prompts contain complete selected method cards, sources and limits, without adopting sample plots',()=>{
+  for(const method of S.CINEMA_METHODS){
+    const {p,source,item}=fixture(),before=JSON.stringify({items:p.items,jobs:p.jobs}),role=method.roles[0];
+    const run=S.createScriptWorkflowRun(p,'gpt-6-astra',[role],source.id,undefined,{methodologyIds:[method.id]}),task=run.tasks[0];
+    const prompt=S.scriptWorkflowPrompt(p,run,task),context=JSON.parse(prompt.split('Задание и замороженный контекст:\n').at(-1));
+    assert.deepEqual(context.methods,[{id:method.id,title:method.title,principle:method.principle,example:method.example,limits:method.limits,checks:method.checks,sourceTitle:method.sourceTitle,sourceUrl:method.sourceUrl}]);
+    assert.equal(context.currentText,source.text);assert.equal(item.selectedId,source.id);assert.equal(item.approvedId,source.id);assert.equal(JSON.stringify({items:p.items,jobs:p.jobs}),before);
+    assert(prompt.includes('Примеры поясняют метод и не должны автоматически переноситься в сценарий'));
+    assert(prompt.includes('не гарантия качества'));assert(prompt.includes(method.limits));
+  }
+  const {p,source}=fixture(),run=S.createScriptWorkflowRun(p,'gpt-6-astra',['script-adaptation'],source.id,undefined,{methodologyIds:['character_drive']});
+  const context=JSON.parse(S.scriptWorkflowPrompt(p,run,run.tasks[0]).split('Задание и замороженный контекст:\n').at(-1));assert.deepEqual(context.methods,[],'A method not applicable to this role is omitted');
+});
+test('actual UI exposes principles, application examples, limits and original links without calls or mutations',()=>{
+  const {p}=fixture(),before=JSON.stringify(p),originalFetch=globalThis.fetch;let submissions=0;
+  globalThis.fetch=()=>{throw Error('Reading method cards must not contact a provider');};
+  try{
+    const html=renderToStaticMarkup(createElement(ScriptWorkflowEditor,{p,model:'gpt-6-astra',busy:false,submit:()=>{submissions++;throw Error('SSR must not enqueue');}}));
+    for(const method of S.CINEMA_METHODS){assert(html.includes(method.principle));assert(html.includes(method.example));assert(html.includes(method.limits));assert(html.includes(method.sourceUrl));}
+    assert(html.includes('Границы применения:'));assert(html.includes('не гарантия качества'));assert.equal(submissions,0);assert.equal(JSON.stringify(p),before);
+  }finally{globalThis.fetch=originalFetch;}
 });
 test('subset ordered as DAG, ready tasks and frozen input regardless of project edits',()=>{
   const {p,d,item,source}=fixture(),run=S.createScriptWorkflowRun(p,'gpt-6-astra',['script-control','script-adaptation','script-producer'],source.id);

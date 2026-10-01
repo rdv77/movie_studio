@@ -7,10 +7,11 @@ import {syncVideoPlans} from './video';
 import {versionSignature} from './creative-versions';
 import type {KeyframeRole} from './keyframes';
 import {frameCropTransformSchema,type FrameCropTransform} from './frame-crop';
+import {captureVideoPreparationBasis,legacyPreparationSignature,preparationMediaBasis,preparationShotBasis,preparationOriginalFramesIssue,videoBasisUsesEnd} from './video-preparation-basis';
 
 export type PreparedFrame={variantId:string;assetId:string;transform?:FrameCropTransform};
 export type PreparedFrameHistory={role:KeyframeRole;frame:PreparedFrame;created:string};
-export type VideoPreparation={animaticVariantId:string;manifestBasis:string;shotId?:string;startFrame:PreparedFrame;endFrame?:PreparedFrame;middleFrame?:PreparedFrame;duration:number;overriddenRoles?:KeyframeRole[];frameHistory?:PreparedFrameHistory[]};
+export type VideoPreparation={animaticVariantId:string;manifestBasis:string;shotId?:string;startFrame:PreparedFrame;endFrame?:PreparedFrame;middleFrame?:PreparedFrame;duration:number;overriddenRoles?:KeyframeRole[];frameHistory?:PreparedFrameHistory[];shotBasis?:string;sourceFrames?:{startFrame:PreparedFrame;endFrame?:PreparedFrame};sourceDuration?:number;legacyBases?:string[]};
 export type PreparedVideoItem=Item&{videoPreparation?:VideoPreparation};
 export function selectedAnimaticManifest(p:Project,variantId=p.animatic?.selectedId):{variant:Variant;manifest:AnimaticManifest}{
   const variant=p.animatic?.variants.find(v=>v.id===variantId),manifest=(variant as Variant&{animaticManifest?:AnimaticManifest}|undefined)?.animaticManifest;
@@ -28,7 +29,19 @@ function retainPreparedFrames(previous:VideoPreparation|undefined,next:VideoPrep
   for(const role of ['start','middle','end'] as const){const key=`${role}Frame` as 'startFrame'|'middleFrame'|'endFrame',frame=previous?.[key];
     if(frame&&versionSignature(frame)!==versionSignature(next[key])&&!history.some(row=>row.role===role&&versionSignature(row.frame)===versionSignature(frame)))history.push({role,frame:structuredClone(frame),created:new Date().toISOString()});
   }
-  return {...next,...(history.length?{frameHistory:history}:{})};
+  // A real source/timing change must never inherit old full-object aliases.
+  const {legacyBases:_,...safe}=next;
+  const unchanged=previous&&preparationMediaBasis(previous)===preparationMediaBasis(next)&&previous.shotBasis===next.shotBasis;
+  return {...safe,...(unchanged&&previous.legacyBases?.length?{legacyBases:previous.legacyBases}:{}),...(history.length?{frameHistory:history}:{})};
+}
+function compatiblePreparation(p:Project,item:PreparedVideoItem,next:VideoPreparation):VideoPreparation{
+  const previous=item.videoPreparation;if(!previous)return next;
+  const manifest=p.animatic?.variants.find(v=>v.id===previous.animaticVariantId)?.animaticManifest;
+  const oldShotBasis=previous.shotBasis??preparationShotBasis(p,item,{scriptVariantId:manifest?.scriptVariantId,shotOrder:manifest?.clips.map(c=>c.shotId??c.title)});
+  if(preparationMediaBasis(previous)!==preparationMediaBasis(next)||oldShotBasis!==next.shotBasis)return next;
+  const candidates=new Set([legacyPreparationSignature(previous),...(previous.legacyBases??[])]);
+  const used=[...item.variants,...p.jobs.filter(j=>j.itemId===item.id)].flatMap(v=>v.videoPreparationBasis&&!v.videoPreparationBasis.startsWith('vp2:')&&candidates.has(v.videoPreparationBasis)?[v.videoPreparationBasis]:[]);
+  return {...next,...(used.length?{legacyBases:[...new Set(used)]}:{})};
 }
 /** Uses original files recorded in this animatic, never a screenshot or a newer implicit approval. */
 export function prepareVideosFromAnimatic(p:Project,variantId:string){
@@ -39,7 +52,8 @@ export function prepareVideosFromAnimatic(p:Project,variantId:string){
     if(!item)throw Error(`Не найден видеоплан: ${clip.title}. Подготовьте текущий сценарий.`);
     const frame=(role:KeyframeRole)=>{const f=clip.frames.find(f=>f.role===role);if(!f)return undefined;const value={variantId:f.variantId,assetId:f.assetId};assertOriginalFrame(p,clip.itemId,value);return value;};
     const startFrame=frame('start');if(!startFrame)throw Error(`«${clip.title}»: нет первого кадра.`);
-    const data:VideoPreparation=retainPreparedFrames(item.videoPreparation,{animaticVariantId:variantId,manifestBasis:versionSignature(manifest),shotId:clip.shotId,startFrame,endFrame:frame('end'),middleFrame:frame('middle'),duration:clip.duration});
+    const endFrame=frame('end');
+    const data:VideoPreparation=compatiblePreparation(p,item,retainPreparedFrames(item.videoPreparation,{animaticVariantId:variantId,manifestBasis:versionSignature(manifest),shotId:clip.shotId,startFrame,endFrame,middleFrame:frame('middle'),duration:clip.duration,shotBasis:preparationShotBasis(p,item),sourceFrames:{startFrame:structuredClone(startFrame),endFrame:endFrame&&structuredClone(endFrame)},sourceDuration:clip.duration}));
     if(versionSignature(item.videoPreparation)!==versionSignature(data)){item.videoPreparation=data;changed.push(item.id);}
   }
   return changed;
@@ -48,7 +62,7 @@ export function overridePreparedVideoFrame(p:Project,itemId:string,role:'start'|
   const item=p.items.find(i=>i.id===itemId&&i.stage===7&&!i.planArchive&&!i.removedAt) as PreparedVideoItem|undefined;if(!item?.videoPreparation)throw Error('Сначала подготовьте видеоплан из аниматика.');
   const source=p.items.find(i=>i.stage===5&&!i.planArchive&&!i.removedAt&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.title===item.sourceShot?.title));
   const v=source?.variants.find(v=>v.id===variantId);if(!v?.assetId||v.kind!=='image'||((v as Variant&{keyframe?:KeyframeRole}).keyframe??'start')!==role)throw Error('Выберите соответствующий ключевой кадр этого плана.');
-  item.videoPreparation=retainPreparedFrames(item.videoPreparation,{...item.videoPreparation,[role+'Frame']:{variantId:v.id,assetId:v.assetId},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]});
+  item.videoPreparation=compatiblePreparation(p,item,retainPreparedFrames(item.videoPreparation,{...item.videoPreparation,[role+'Frame']:{variantId:v.id,assetId:v.assetId},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]}));
 }
 export function cropPreparedVideoFrame(p:Project,itemId:string,role:'start'|'end',data:{sourceVariantId:string;expectedAssetId:string;assetId:string;transform:FrameCropTransform}){
   const item=p.items.find(i=>i.id===itemId&&i.stage===7&&!i.planArchive&&!i.removedAt) as PreparedVideoItem|undefined;
@@ -59,19 +73,30 @@ export function cropPreparedVideoFrame(p:Project,itemId:string,role:'start'|'end
   if(transform.sourceAssetId!==(current.transform?.sourceAssetId??current.assetId)||data.assetId===transform.sourceAssetId||data.assetId===current.assetId)throw Error('Сохраните область отдельным PNG из текущего исходного кадра.');
   item.videoPreparation=retainPreparedFrames(item.videoPreparation,{...item.videoPreparation,[role+'Frame']:{variantId:data.sourceVariantId,assetId:data.assetId,transform},overriddenRoles:[...new Set([...(item.videoPreparation.overriddenRoles??[]),role])]});
 }
-export function videoPreparationIssue(p:Project,item:PreparedVideoItem){
+export function videoPreparationIssue(p:Project,item:PreparedVideoItem,request?:{videoPreparationBasis?:string;endFrameAssetId?:string;model?:string}){
   const value=item.videoPreparation;if(!value)return '';
-  try{const {manifest}=selectedAnimaticManifest(p,value.animaticVariantId);if(versionSignature(manifest)!==value.manifestBasis)return 'Состав выбранного аниматика изменился. Подготовьте видеопланы снова.';
+  try{
+    // Existing preparations depend on their OWN original clip. Whole-film
+    // validation is reserved for a new prepare, not every unaffected video.
+    const saved=p.animatic?.variants.find(v=>v.id===value.animaticVariantId),manifest=!value.sourceFrames&&saved?.animaticManifest?animaticManifestSchema.parse(saved.animaticManifest):undefined;
+    if(!value.sourceFrames&&(!saved?.assetId||!manifest||manifest.projectId!==p.id||versionSignature(manifest)!==value.manifestBasis))return 'Состав выбранного аниматика недоступен. Подготовьте видеопланы снова.';
     const source=p.items.find(i=>i.stage===5&&!i.planArchive&&!i.removedAt&&(value.shotId?i.sourceShot?.shotId===value.shotId:i.sourceShot?.title===item.sourceShot?.title));
     if(!source||source.excludedAt)return 'Этот план исключён из текущего фильма.';
-    assertOriginalFrame(p,source.id,value.startFrame);if(value.endFrame)assertOriginalFrame(p,source.id,value.endFrame);
+    const clip=manifest?.clips.find(c=>c.itemId===source.id),duration=value.sourceDuration??clip?.duration;
+    if(duration===undefined||Math.abs(duration-value.duration)>.001)return 'Длительность подготовленного плана изменилась. Подготовьте видеоплан из текущего аниматика.';
+    const oldBasis=value.shotBasis??preparationShotBasis(p,item,{scriptVariantId:manifest?.scriptVariantId,shotOrder:manifest?.clips.map(c=>c.shotId??c.title)});
+    if(oldBasis!==preparationShotBasis(p,item))return 'Постановка или стыковка этого плана изменилась. Проверьте его кадры и подготовьте текущий аниматик.';
+    const useEnd=request?request.videoPreparationBasis?videoBasisUsesEnd(request):!!request.model&&supportsEndFrame(request.model):true;
+    const frameIssue=preparationOriginalFramesIssue(p,item,request,useEnd);if(frameIssue)return frameIssue;
+    assertOriginalFrame(p,source.id,value.startFrame);if(useEnd&&value.endFrame)assertOriginalFrame(p,source.id,value.endFrame);
     return '';
   }catch(e){return (e as Error).message;}
 }
 
 export function preparedVideoInputs(p:Project,item:Item,modelId:string,startOverride?:string,endOverride?:string){
  const data=(item as PreparedVideoItem).videoPreparation;if(!data)return {startFrameId:startOverride,endFrameId:endOverride,duration:undefined,basis:undefined};
- const issue=videoPreparationIssue(p,item);if(issue)throw Error(issue);
+ const issue=videoPreparationIssue(p,item,{model:modelId});if(issue)throw Error(issue);
  const startFrameId=startOverride??data.startFrame.assetId;
- return {startFrameId,endFrameId:supportsEndFrame(modelId)?endOverride??data.endFrame?.assetId:undefined,duration:data.duration,basis:versionSignature(data)};
+ const endFrameId=supportsEndFrame(modelId)?endOverride??data.endFrame?.assetId:undefined;
+ return {startFrameId,endFrameId,duration:data.duration,basis:captureVideoPreparationBasis(p,item,{model:modelId,refs:[startFrameId],endFrameAssetId:endFrameId})};
 }

@@ -22,13 +22,20 @@ export function providerQueueLimit(p:QueueProject,provider:string):number{
 }
 export const queueActive=(job:Job)=>['queued','dispatching','pending','saving'].includes(job.status);
 export const queueOccupied=(job:Job)=>['dispatching','pending','saving'].includes(job.status);
-export type DirectorQueueTask={role:string;sceneId?:string;shotId?:string};
+export type DirectorQueueTask={role:string;sceneId?:string;shotId?:string;shotIds?:string[]};
+function directorScopeParts(p:Project,job:Job,task?:DirectorQueueTask){
+  const run=p.directing?.runs.find(r=>r.id===job.batchId),source=task??run?.tasks.find(t=>t.jobId===job.id);
+  const settings=job.versionInfo?.settings as {role?:string;sceneId?:string;shotId?:string;shotIds?:string[]}|undefined;
+  const shotIds=source?source.shotIds:settings?.shotIds,shotId=source?source.shotId:settings?.shotId;
+  return {role:source?source.role:settings?.role??'legacy-directing',scene:source?source.sceneId??'':settings?.sceneId??'',shots:shotIds?.length?[...shotIds]:shotId?[shotId]:undefined,item:run?.characterInput?.itemId??run?.scriptInput?.itemId??job.itemId};
+}
 /** Specialist requests share an output item but own distinct scene/shot fields. */
 export function directorQueueScope(p:Project,job:Job,task?:DirectorQueueTask):string{
-  const run=p.directing?.runs.find(r=>r.id===job.batchId),storedTask=run?.tasks.find(t=>t.jobId===job.id),source=task??storedTask;
-  const settings=job.versionInfo?.settings as {role?:string;sceneId?:string;shotId?:string}|undefined;
-  return JSON.stringify([source?.role??settings?.role??'legacy-directing',source?.sceneId??settings?.sceneId??'',source?.shotId??settings?.shotId??'',
-    run?.characterInput?.itemId??run?.scriptInput?.itemId??job.itemId]);
+  const s=directorScopeParts(p,job,task);return JSON.stringify([s.role,s.scene,s.shots?.slice().sort().join('\u001f')??'',s.item]);
+}
+export function directorQueueScopesOverlap(p:Project,a:Job,b:Job,task?:DirectorQueueTask){
+  const x=directorScopeParts(p,a,task),y=directorScopeParts(p,b);
+  return x.role===y.role&&x.scene===y.scene&&x.item===y.item&&(!x.shots||!y.shots||x.shots.some(id=>y.shots!.includes(id)));
 }
 /** Admission concerns this item only. Independent stages may use the same pool. */
 export function queueAdmissionIssue(p:Project,itemId:string,batchId?:string):string{
@@ -40,7 +47,7 @@ export function queueAdmissionIssue(p:Project,itemId:string,batchId?:string):str
 export function queueSlotIssue(p:QueueProject,job:Job,locallyClaimed:ReadonlySet<string>=new Set(),directorTask?:DirectorQueueTask):string{
   if(job.status!=='queued')return '';
   if(job.purpose==='directing'){
-    const scope=directorQueueScope(p,job,directorTask),same=p.jobs.filter(j=>j.id!==job.id&&j.purpose==='directing'&&directorQueueScope(p,j)===scope);
+    const same=p.jobs.filter(j=>j.id!==job.id&&j.purpose==='directing'&&directorQueueScopesOverlap(p,job,j,directorTask));
     if(same.some(unresolvedJobBlocks))return 'У этой роли агента для сцены/плана есть запрос с неизвестным исходом. Проверьте журнал и явно разрешите новую серию; другие сцены и роли можно прорабатывать.';
     if(same.some(j=>queueActive(j)&&j.batchId!==job.batchId))return 'Эту роль для сцены/плана уже выполняет другая серия. Дождитесь результата; другие сцены и роли могут работать параллельно.';
   }else{

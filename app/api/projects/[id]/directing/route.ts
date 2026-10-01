@@ -13,6 +13,8 @@ import {applyEditorSolutions} from '@/lib/directing-solutions';
 import {validateScenePlan,validateShotDirection} from '@/lib/shot-direction';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 import {assertSceneLocations} from '@/lib/world-assets';
+import {directorScopeSchema,assertDirectingShotReady} from '@/lib/directing-workflow';
+import {allowNewSeries} from '@/lib/job-wait';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -55,17 +57,19 @@ export const POST=api(async(req,ctx)=>{
     }
     case 'brief':d.brief=creativeBriefSchema.parse(v.brief);if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
     case 'run':{
-      const s=z.object({model:z.string(),mode:z.enum(['critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).parse(v);
+      const s=z.object({model:z.string(),mode:z.enum(['critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
+      const scoped=s.scope!==undefined||s.sceneIds!==undefined||s.shotIds!==undefined?{scope:s.scope,sceneIds:s.sceneIds,shotIds:s.shotIds}:undefined;
       if(model(s.model).kind!=='text'||!['openai','xai','minimax'].includes(model(s.model).provider))throw Error('Выберите текстовую модель OpenAI, Grok или MiniMax.');
       await getKey(user,model(s.model).provider);
       if(p.limit!==null)throw Error('Для текстовых агентов стоимость определяется по токенам. Снимите денежный лимит на время проработки и сверяйте расход в журнале.');
-      if(s.mode==='scenes'&&d.scenes.length&&!v.replaceScenes)throw Error('Структура уже существует. Для замены используйте явное повторное разбиение.');
-      newDirectorRun(p,s.model,s.mode,s.sceneId,s.role as DirectorRole,s.shotId);break;
+      if(s.mode==='scenes'&&d.scenes.length&&!v.replaceScenes&&(!scoped||s.scope==='all'&&s.sceneIds===undefined))throw Error('Структура уже существует. Для замены используйте явное повторное разбиение.');
+      newDirectorRun(p,s.model,s.mode,s.sceneId,s.role as DirectorRole,s.shotId,scoped);break;
     }
     case 'stop':{const r=d.runs.find(r=>r.id===v.runId);if(!r)throw Error('Запуск не найден.');r.stopped=true;for(const t of r.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'){j.status='unknown';j.error='Ожидание остановлено. Запрос мог быть оплачен; поздний ответ будет сохранён.';}if(!t.result&&!t.error)t.error='Проработка остановлена.';}break;}
     case 'retry':{
       const r=d.runs.find(r=>r.id===v.runId),t=r?.tasks.find(t=>t.id===v.taskId);if(!r||!t?.error)throw Error('Выберите неудавшееся задание.');
       const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='unknown'&&!v.acknowledgeCost)throw Error('Исход неизвестен: подтвердите возможность повторного списания.');
+      if(j?.status==='unknown')allowNewSeries(j);
       t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;r.stopped=false;break;
     }
     case 'saveScene':{
@@ -83,17 +87,15 @@ export const POST=api(async(req,ctx)=>{
     }
     case 'approveShots':{
       const reviewed=d.editorBasis===editorBasis(p);
-      const ids=z.array(z.string()).max(120).parse(v.ids);let count=0;
+      const ids=z.array(z.string()).max(120).parse(v.ids);
       // Older clients may submit an empty list after every shot was approved.
       // Return the current project without modifying approvals or its revision.
       if(!ids.length)return Response.json(p);
-      for(const s of d.scenes)for(const shot of s.shots)if(ids.includes(shot.id)){
-        const conflict=validateScenePlan(s).find(i=>i.severity==='conflict'&&(!i.shotId||i.shotId===shot.id));if(conflict)throw Error(`«${shot.title}»: ${conflict.message}`);
-        if(!shot.story.trim()||!shot.cinematography.trim()||!shot.productionDesign.trim())throw Error('Заполните сценарий, операторскую работу и художественное решение.');
-        if(shot.dialogue.speechType==='character'&&(!shot.dialogue.speaker||!shot.cast.includes(shot.dialogue.speaker)))throw Error('Укажите присутствующего в кадре говорящего.');
-        if(d.issues.some(i=>i.severity==='conflict'&&!i.resolved&&(!i.shotId||i.shotId===shot.id)&&(!i.sceneId||i.sceneId===s.id)))throw Error('Сначала разрешите конфликт редактора.');
-        dialogueSchema.parse(shot.dialogue);shot.characterIds??=relevantHeroItems(p,shot).map(i=>i.id);shot.locationIds??=relevantLocationItems(p,s,shot).map(i=>i.id);shot.approvalVersion=2;shot.approved=shotApproval(s,shot);shot.approvedFoundation=shotFoundationBasis(p,s,shot);count++;
-      }if(count!==new Set(ids).size)throw Error('Состав планов изменился.');if(reviewed)d.editorBasis=editorBasis(p);break;
+      const targets=d.scenes.flatMap(scene=>scene.shots.filter(shot=>ids.includes(shot.id)).map(shot=>({scene,shot})));
+      if(targets.length!==new Set(ids).size)throw Error('Состав планов изменился.');
+      for(const {scene,shot} of targets)assertDirectingShotReady(p,scene,shot);
+      for(const {scene,shot} of targets){shot.characterIds??=relevantHeroItems(p,shot).map(i=>i.id);shot.locationIds??=relevantLocationItems(p,scene,shot).map(i=>i.id);shot.approvalVersion=2;shot.approved=shotApproval(scene,shot);shot.approvedFoundation=shotFoundationBasis(p,scene,shot);}
+      if(reviewed)d.editorBasis=editorBasis(p);break;
     }
     case 'resolveIssue':{const issue=d.issues.find(i=>i.id===v.issueId);if(!issue)throw Error('Замечание не найдено.');issue.resolution=z.string().trim().min(1).max(2000).parse(v.resolution);issue.resolved=true;break;}
     case 'applyPatch':{

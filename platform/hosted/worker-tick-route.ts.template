@@ -8,7 +8,7 @@ export const POST=api(async(req)=>{
   const secret=(env as unknown as {QUEUE_WORKER_SECRET?:string}).QUEUE_WORKER_SECRET;
   if(!await workerSecretMatches(secret,req.headers.get('x-queue-worker-secret')))
     throw new HttpError('Фоновый доступ не разрешён.',401);
-  const scheduled=scheduleBackgroundWork(getRequestExecutionContext(),()=>projectWorkerTick());
-  if(!scheduled)await projectWorkerTick();
+  const scheduled=scheduleBackgroundWork(getRequestExecutionContext(),()=>projectWorkerTick('hosted'));
+  if(!scheduled)await projectWorkerTick('hosted');
   return Response.json({ok:true,background:scheduled,windowSeconds:scheduled?30:undefined},{headers:{'Cache-Control':'no-store'}});
 });

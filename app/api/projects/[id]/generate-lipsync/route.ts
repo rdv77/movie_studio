@@ -1,3 +1,4 @@
+import {queueAdmissionIssue} from '@/lib/queue-policy';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
 import { assertBudget, dependencies, id, now, type Job } from '@/lib/domain';
@@ -24,9 +25,9 @@ export const POST = api(async (req, ctx) => {
   const model = SYNC_MODELS.find(m => m.id === s.model);
   if (!model || BigInt(s.rate) <= 0n) throw new Error('Выберите модель sync.so и положительную оценку тарифа.');
   if (new Set(s.plans.map(r => r.itemId)).size !== s.plans.length) throw new Error('Выберите каждый план один раз.');
-  if (p.jobs.some(j => ['queued','dispatching','pending','saving'].includes(j.status))) throw new Error('Дождитесь завершения текущей серии.');
   const jobs: Job[] = [];
   for (const row of s.plans) {
+    const admissionIssue=queueAdmissionIssue(p,row.itemId);if(admissionIssue)throw new Error(admissionIssue);
     const prompt=row.inputType==='image'?withCharacterIdentity(p,row.prompt):'';
     if(prompt.length>SYNC_IMAGE_PROMPT_LIMIT)throw new Error(`Описание вместе с героями содержит ${prompt.length} символов. Сократите задачу до общего лимита ${SYNC_IMAGE_PROMPT_LIMIT}.`);
     const source = row.inputType === 'image' ? lipsyncImageSource(p,row.itemId) : lipsyncSource(p, row.itemId, row.videoVariantId);

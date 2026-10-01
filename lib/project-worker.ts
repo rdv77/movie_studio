@@ -5,6 +5,7 @@ import {executeMediaJob} from './media-job-runner';
 import {runVoiceWorkflowStep} from './voice-design-runner';
 import {runSoundscapeStep} from './soundscape-runner';
 import {runDirectorStep} from './director-runner';
+import {hostedQueuedDispatchEligible} from './hosted-background-policy';
 
 // The database supplies every owner. A caller cannot choose a different owner
 // or turn a public HTTP handler into an authenticated internal request.
@@ -27,11 +28,14 @@ async function ownedActiveProjects():Promise<OwnedProjectRow[]>{
   }
   return picked;
 }
-const worker=createBackgroundWorker({listProjects:ownedActiveProjects,loadProject,executeMediaJob,
-  executeVoiceJob:runVoiceWorkflowStep,executeSoundJob:runSoundscapeStep,runDirectorStep}, {maxFlights:8});
+const adapters={listProjects:ownedActiveProjects,loadProject,executeMediaJob,
+  executeVoiceJob:runVoiceWorkflowStep,executeSoundJob:runSoundscapeStep,runDirectorStep,
+  watchDirector:(owner:string,id:string)=>runDirectorStep(owner,id,{dispatch:false})};
+const worker=createBackgroundWorker(adapters, {maxFlights:8});
+const hostedWorker=createBackgroundWorker(adapters,{maxFlights:8,dispatchQueued:hostedQueuedDispatchEligible,dispatchDirectors:false});
 
 /** One trusted tick. Repeated/overlapping calls share in-flight guards. */
-export const projectWorkerTick=()=>worker.tickAll();
+export const projectWorkerTick=(mode?:'hosted')=>(mode==='hosted'?hostedWorker:worker).tickAll();
 /** Authorized enqueue endpoints may kick only their own project. */
-export const projectWorkerTickFor=(owner:string,id:string)=>worker.tickProject(owner,id);
-export const projectWorkerFlights=()=>worker.inFlightCount();
+export const projectWorkerTickFor=(owner:string,id:string,mode?:'hosted')=>(mode==='hosted'?hostedWorker:worker).tickProject(owner,id);
+export const projectWorkerFlights=()=>worker.inFlightCount()+hostedWorker.inFlightCount();

@@ -3,10 +3,43 @@ import { materialBasis } from './material-basis';
 import { stagePosition } from './stage-order';
 import { unchangedSpeechReason } from './speech-approval';
 import { resolveFinalClip } from './render';
-import {hasKeyframeConfig,type KeyframeSelection} from './keyframes';
-import {storyboardSelection,storyboardSetReview,assertStoryboardSelection,approveStoryboardSelection,type StoryboardSelection} from './storyboard-approval';
+import {hasKeyframeConfig,planKeyframeMode,requiredKeyframeRoles,selectedKeyframe,KEYFRAME_ROLE_NAMES,type KeyframeRole,type KeyframeSelection} from './keyframes';
+import {storyboardSelection,storyboardSetIssues,storyboardSetReview,assertStoryboardSelection,approveStoryboardSelection,type StoryboardSelection} from './storyboard-approval';
 export type ReviewRow={itemId:string;variantId?:string;stage:number;title:string;status:'ready'|'review'|'conflict'|'missing'|'approved';reason:string;keyframes?:KeyframeSelection;};
-export function pairedItem(p:Project,item:Item,stage:number){return p.items.find(i=>i.stage===stage&&participates(p,i)&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.scriptId===item.sourceShot?.scriptId&&i.sourceShot?.title===item.sourceShot?.title));}
+export type ReviewKeyframePreview={role:KeyframeRole;label:string;variantId?:string;assetId?:string;status:'current'|'review'|'conflict'|'missing';reason:string};
+/** Preview the actual selected role set, never the first image or generation history alone. */
+export function reviewKeyframePreviews(p:Project,itemId:string):ReviewKeyframePreview[]{
+  const item=p.items.find(i=>i.id===itemId&&i.stage===5&&participates(p,i));if(!item)return [];
+  if(!hasKeyframeConfig(p,item)){
+    const v=chosen(item);if(v?.kind!=='image'||!v.assetId)return [];
+    const current=variantCurrent(p,item,v);
+    return [{role:'start',label:KEYFRAME_ROLE_NAMES.start,variantId:v.id,assetId:v.assetId,status:current?'current':'review',reason:current?'Актуальный выбранный кадр.':'Основа изменилась. Просмотрите этот кадр перед подтверждением.'}];
+  }
+  const issues=storyboardSetIssues(p,item);
+  return requiredKeyframeRoles(planKeyframeMode(p,item)).map(role=>{
+    const v=selectedKeyframe(item,role),local=issues.filter(issue=>!issue.role||issue.role===role);
+    const structural=local.find(issue=>!['foundation_changed','missing_basis'].includes(issue.code));
+    const status=!v?'missing':structural?'conflict':local.length?'review':'current';
+    return {role,label:KEYFRAME_ROLE_NAMES[role],variantId:v?.id,assetId:v?.assetId,status,
+      reason:!v?'Выбранное изображение отсутствует.':structural?.message??local[0]?.message??'Актуальный выбранный кадр.'};
+  });
+}
+/** Pin all role IDs shown in the centre so a changed endpoint cannot be approved by an old selection. */
+export function reviewApprovalSelection(row:ReviewRow):StoryboardSelection&{reviewed:boolean}{
+  if(!row.variantId||!['ready','review'].includes(row.status))throw Error('Выберите готовый материал для утверждения.');
+  return {itemId:row.itemId,variantId:row.variantId,...(row.keyframes?{keyframes:{...row.keyframes}}:{}),reviewed:row.status==='review'};
+}
+export function pairedItem(p:Project,item:Item,stage:number){
+  const shot=item.sourceShot;if(!shot)return undefined;
+  const matches=p.items.filter(i=>i.stage===stage&&participates(p,i)&&i.sourceShot&&(shot.shotId?i.sourceShot.shotId===shot.shotId:
+    !i.sourceShot.shotId&&!!shot.scriptId&&i.sourceShot.scriptId===shot.scriptId&&i.sourceShot.title===shot.title));
+  // Ambiguous legacy names cannot identify a target. Never open an arbitrary first match.
+  return matches.length===1?matches[0]:undefined;
+}
+export function reviewVoiceItem(p:Project,itemId:string):Item|undefined{
+  const item=p.items.find(i=>i.id===itemId&&i.stage===7&&participates(p,i));
+  return item?.sourceShot?pairedItem(p,item,6):undefined;
+}
 export function timingConflict(p:Project,item:Item){
   if(![6,7].includes(item.stage)||!item.sourceShot)return '';
   const video=item.stage===7?item:pairedItem(p,item,7),audio=item.stage===6?item:pairedItem(p,item,6);

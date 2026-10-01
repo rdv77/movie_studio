@@ -20,6 +20,7 @@ import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, assertSpeech } from '@/lib/speech-mode';
 import { compileMediaJob } from '@/lib/prompt-jobs';
 import {voiceDeliverySchema} from '@/lib/voice-direction';
+import {queueAdmissionIssue} from '@/lib/queue-policy';
 import {freezeVoiceJob} from '@/lib/voice-tts';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
 
@@ -48,10 +49,8 @@ export const POST = api(async (req, ctx) => {
   const parallelStoryboard = item.stage === 5 && ms.every(m => m.kind === 'image');
   const parallelVideo = item.stage === 7 && ms.every(m => m.kind === 'video' && m.provider !== 'sync');
   const parallelConcept = [1, 2, 3].includes(item.stage) && ms.every(m => m.kind === 'image');
-  const queueIssue = parallelConcept ? conceptImageAdmissionIssue(p, item.id) : parallelStoryboard ? storyboardAdmissionIssue(p, item.id) : parallelVideo ? videoAdmissionIssue(p, item.id) : '';
+  const queueIssue = parallelConcept ? conceptImageAdmissionIssue(p, item.id) : parallelStoryboard ? storyboardAdmissionIssue(p, item.id) : parallelVideo ? videoAdmissionIssue(p, item.id) : queueAdmissionIssue(p,item.id);
   if (queueIssue) throw Error(queueIssue);
-  if (!parallelConcept && !parallelStoryboard && !parallelVideo && p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
-    throw Error('Дождитесь текущей серии или отмените неотправленные попытки.');
   if (ms.some(m => m.kind !== ms[0].kind)) throw Error('Сравнивайте модели одного типа.');
   if (ms.some(m => m.provider === 'sync')) throw Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   const kind = ms[0].kind;

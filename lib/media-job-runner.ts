@@ -102,7 +102,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status !== 'queued')
         throw new Error('Попытка уже обрабатывается.');
-      if(job.videoPreparationBasis){const issue=videoPreparationIssue(p,getItem(p,job.itemId));if(issue){job.status='cancelled';job.actual='0';job.error=issue;return;}}
+      if(job.videoPreparationBasis){const issue=videoPreparationIssue(p,getItem(p,job.itemId),job);if(issue){job.status='cancelled';job.actual='0';job.error=issue;return;}}
       const i = job.purpose==='voice-test'||job.purpose==='media-review'||isMusicJob(job)?undefined:getItem(p, job.itemId);
       if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review||review.removedAt||!mediaReviewCurrent(p,review)){job.status='cancelled';job.actual='0';job.actualSource='Материал проверки изменился до отправки';return;}}
       if(job.keyframe){const issue=keyframeQueueIssue(p,job);if(issue){job.status='cancelled';job.actual='0';job.actualSource='Основа ключевого кадра изменилась до отправки';job.error=issue;return;}}

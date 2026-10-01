@@ -71,3 +71,13 @@ await remaining(req(batch),ctx);assert.equal(state.jobs.length,2);
 const bad=structuredClone(state);bad.configVersion++;state=bad;
 await assert.rejects(()=>remaining(req({...batch,batchId:D.id()}),ctx),/Проект изменился/);
 console.log('PASS parallel video: multi-model/plan admission, diverse fair scheduling, global three-task provider bound under concurrent workers, polling/release, atomic CAS budgets, idempotency and remaining-batch revision checks. Zero paid calls.');
+
+// Full/problematic batches require explicit all mode; the legacy endpoint stays remaining-only.
+state=structuredClone(p);D.addVariant(state,a.id,{kind:'video',assetId:D.id(),model:'grok-imagine-video-1.5'});
+const existing={revision:state.revision,basis:D.dependencies(state,7),batchId:D.id(),sourceItemId:a.id,sourceVariantId:D.chosen(D.getItem(state,a.id)).id,estimate:'100',characterIds:[],plans:[{itemId:a.id,ref:D.id(),prompt:'Лес'}]};
+await assert.rejects(()=>remaining(req(existing),ctx),/Состав/);assert.equal(state.jobs.length,0,'Default does not regenerate existing video');
+await remaining(req({...existing,mode:'all'}),ctx);assert.equal(state.jobs.length,1,'Explicit marked existing plan creates one additional authorized attempt');
+await remaining(req({...existing,mode:'all'}),ctx);assert.equal(state.jobs.length,1,'Same batch remains idempotent');
+state.jobs[0].status='unknown';await assert.rejects(()=>remaining(req({...existing,batchId:D.id(),revision:state.revision,mode:'all'}),ctx),/Состав|неизвест|этого плана/);assert.equal(state.jobs.length,1,'Unknown never repeats via full-stage mode');
+globalThis.denied=true;await assert.rejects(()=>remaining(req({...existing,batchId:D.id(),mode:'all'}),ctx),/Unauthorized/);globalThis.denied=false;
+console.log('PASS explicit all-mode video scope: existing files retained, selected independent new job, default protection, idempotency, unknown and owner guards.');

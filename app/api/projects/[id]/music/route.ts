@@ -1,3 +1,4 @@
+import {queueAdmissionIssue} from '@/lib/queue-policy';
 import {z} from 'zod';
 import {api,owner,loadProject,saveProject,getKey,asset,storeAsset} from '@/lib/server';
 import {id,now,makeVariant,assertBudget,type Job} from '@/lib/domain';
@@ -5,17 +6,19 @@ import {model,MODELS} from '@/lib/models';
 import {DEFAULT_MUSIC,MUSIC_MODELS,MUSIC_LIBRARY,musicIdeasPrompt,musicBasis,musicSettings,libraryAudio,libraryCredit} from '@/lib/music';
 import {retrieve} from '@/lib/providers';
 
+const generationInput=z.object({batchId:z.string().uuid(),model:z.string(),prompt:z.string().trim().max(4100),duration:z.number().min(3).max(600).default(60),count:z.number().int().min(1).max(4).default(1),estimate:z.string().regex(/^\d+$/).nullable().default(null)});
 const settings=z.object({enabled:z.boolean(),volume:z.number().min(0).max(1),speechVolume:z.number().min(0).max(1),trim:z.number().min(0).max(3600),loop:z.boolean(),fade:z.number().min(0).max(10)});
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),p=await loadProject(user,(await ctx.params).id);
   const body=z.object({revision:z.number().int(),action:z.enum(['ideas','generate','upload','library','settings','select','approve','delete','restore']),data:z.unknown()}).parse(await req.json());
+  const generation=body.action==='ideas'||body.action==='generate'?generationInput.parse(body.data):undefined;
+  if(generation&&p.jobs.some(j=>j.batchId===generation.batchId))return Response.json(p);
   if(body.revision!==p.revision)throw Error('Проект изменился. Обновите данные и повторите действие.');
   p.music??={variants:[],settings:{...DEFAULT_MUSIC}};
   const m=p.music,d=body.data;
   if(body.action==='ideas'||body.action==='generate'){
-    const s=z.object({batchId:z.string().uuid(),model:z.string(),prompt:z.string().trim().max(4100),duration:z.number().min(3).max(600).default(60),count:z.number().int().min(1).max(4).default(1),estimate:z.string().regex(/^\d+$/).nullable().default(null)}).parse(d);
-    if(p.jobs.some(j=>j.batchId===s.batchId))return Response.json(p);
-    if(p.jobs.some(j=>['queued','dispatching','pending','saving'].includes(j.status)))throw Error('Дождитесь текущей серии перед созданием музыки.');
+    const s=generation!;
+    const admissionIssue=queueAdmissionIssue(p,p.id);if(admissionIssue)throw Error(admissionIssue);
     const ideas=body.action==='ideas',selected=model(s.model);
     if(ideas?!MODELS.some(x=>x.id===s.model&&x.kind==='text'):!MUSIC_MODELS.some(x=>x.id===s.model))throw Error('Выберите подходящую модель.');
     if(!ideas&&!s.prompt)throw Error('Добавьте описание музыки.');

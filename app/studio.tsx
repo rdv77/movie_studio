@@ -1,8 +1,11 @@
 'use client';
 import {AudioQcEditor} from './audio-qc-editor';
+import {BatchScopeSelector} from './batch-scope-selector';
+import {pairedItem} from '@/lib/review-center';
+import {mediaBatchCandidate,videoBatchPlans} from '@/lib/batch-scope';
 import {CostReport} from './cost-report';
 import {QueueSettingsEditor} from './queue-settings';
-import {queueSettings} from '@/lib/queue-policy';
+import {queueSettings,queueAdmissionIssue} from '@/lib/queue-policy';
 import {SoundscapeEditor} from './soundscape-editor';
 import {VoiceStudioShell} from './voice-studio-shell';
 import {VideoPreparationPanel} from './video-preparation';
@@ -937,7 +940,7 @@ function Workspace() {
                   </div>
                   <Button variant="outline" disabled={busy || !videoScript?.variant || active.length > 0}
                     onClick={() => perform(() => action('prepareShots'))}>Подтянуть карточки из сценария</Button>
-                  <Button className="h-auto whitespace-normal" disabled={busy || !ready || active.length > 0 || !storyboardBatchPlans(p).length}
+                  <Button className="h-auto whitespace-normal" disabled={busy || !ready || !storyboardBatchPlans(p).length}
                     onClick={() => setDialog('storyboard-batch')}><Sparkles />Создать кадры всех планов</Button>
                 </div>
               )}
@@ -963,15 +966,15 @@ function Workspace() {
                   <Button variant="outline" disabled={busy || !videoScript?.variant || active.length > 0}
                     onClick={() => perform(() => action('syncVideoPlans'))}>Подтянуть планы из сценария</Button>
                   <div className="w-full">
-                    <Button variant="outline" className="h-auto whitespace-normal mb-3" disabled={busy || active.length > 0}
+                    <Button variant="outline" className="h-auto whitespace-normal mb-3" disabled={busy}
                       onClick={() => setDialog('lipsync')}><Mic />Синхронизировать губы · sync-3</Button>
-                    <Button className="h-auto whitespace-normal" disabled={busy || !ready || !!videoAdmissionIssue(p) || !item || !selectedVideoModel(p, item) || !remainingVideoPlans(p).length}
+                    <Button className="h-auto whitespace-normal" disabled={busy || !ready || !!videoAdmissionIssue(p) || !item || !selectedVideoModel(p, item) || !videoBatchPlans(p).length}
                       onClick={() => setDialog('remaining-video')}>
                       <Sparkles />Создать оставшиеся планы выбранной моделью
                     </Button>
                     <p className="mt-2 muted">{!ready ? 'Сначала утвердите предыдущие этапы. Озвучка и раскадровка должны быть актуальными.'
                       : videoAdmissionIssue(p) ? videoAdmissionIssue(p)
-                      : !remainingVideoPlans(p).length ? 'Нет планов для этой серии: у всех уже есть видео либо попытка с неизвестным исходом. Проверьте журнал попыток.'
+                      : !remainingVideoPlans(p).length ? 'Все планы уже имеют видео или ожидают результата. В окне серии можно выбрать «Весь этап» либо «Требуют внимания»; неизвестные запросы проверяйте в журнале.'
                       : item && selectedVideoModel(p, item)
                       ? `Модель: ${selectedVideoModel(p, item)!.name}. Без видео: ${remainingVideoPlans(p).length}. Перед запуском — выбор первых кадров и оценка всей серии.`
                       : 'Сначала выберите готовый видеоролик в любой карточке: его модель будет использована для остальных планов.'}</p>
@@ -1037,7 +1040,7 @@ function Workspace() {
               {step === 6 && voiceView==='plans' && <div className="editor-surface p-5 mb-5">
                 <strong>Озвучка по планам</strong>
                 <p>Реплики из сценария, один выбранный голос. В аниматике кадр автоматически продлится до конца реплики, следующие кадры и голоса сдвинутся вместе. Общая длительность проверяется перед сборкой.</p>
-                <Button disabled={busy || !ready || active.length > 0} onClick={() => setDialog('speech-batch')}><Mic />Подготовить озвучку по планам</Button>
+                <Button disabled={busy || !ready} onClick={() => setDialog('speech-batch')}><Mic />Подготовить озвучку по планам</Button>
                 <Field label="Что звучит при сборке"><Drop label="Режим озвучки" value={p.speechMode ?? 'track'} options={[{value:'track',label:'Общая дорожка'},{value:'plans',label:'По планам'}]}
                   onChange={mode => perform(() => action('speechMode', {mode}))} /></Field>
                 {p.speechMode!=='plans'&&p.items.some(i=>i.stage===6&&i.sourceShot&&!i.planArchive)&&<div className="note"><p>Есть отдельные реплики планов, но сейчас включена общая дорожка. Чтобы использовать и учитывать утверждения этих реплик, переключите режим.</p><Button variant="outline" disabled={busy} onClick={()=>perform(()=>action('speechMode',{mode:'plans'}))}>Использовать озвучку по планам</Button></div>}
@@ -1944,7 +1947,7 @@ function GenerateDialog({
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
   const [batch, setBatch] = useState('');
-  const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):'';
+  const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):queueAdmissionIssue(p,item.id);
   const unresolved=p.jobs.filter((j:Job)=>j.itemId===item.id&&unresolvedJobBlocks(j));
   const allScriptAudio = scriptSpeech(p);
   const scriptAudio = {...allScriptAudio,sources:item.sourceShot?allScriptAudio.sources:allScriptAudio.sources.filter(s=>s.speechType==='voiceover')};
@@ -2378,12 +2381,12 @@ function GenerateDialog({
 function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, submit }: any) {
   const [snapshot] = useState<Project>(p);
   const [source] = useState<Item>(item);
-  const [characterIds,setCharacterIds]=useState(()=>[...new Set(remainingVideoPlans(snapshot).flatMap(i=>planCharacterIds(snapshot,i)))]);
+  const [characterIds,setCharacterIds]=useState(()=>[...new Set(videoBatchPlans(snapshot).flatMap(i=>planCharacterIds(snapshot,i)))]);
   const m = selectedVideoModel(snapshot, source)!;
   const [batch] = useState(() => crypto.randomUUID());
-  const [rows, setRows] = useState(() => remainingVideoPlans(snapshot).map(i => ({
+  const [rows, setRows] = useState(() => videoBatchPlans(snapshot).map(i => ({
     itemId: i.id, title: i.title, duration: i.videoPreparation?.duration??videoShot(snapshot, i)!.duration,
-    ref: videoFrame(snapshot, i) ?? '', prompt: videoPrompt(snapshot, i), include: true,
+    ref: videoFrame(snapshot, i) ?? '', prompt: videoPrompt(snapshot, i), include: remainingVideoPlans(snapshot).some(r=>r.id===i.id),
     frames: videoFrameOptions(snapshot, i),
   })));
   const [estimate, setEstimate] = useState(m.id==='grok-imagine-video-1.5'?(0.85+0.01*videoCharacterRefs(snapshot,'xai').length).toFixed(2):m.estimate === null ? '' : String(Number(BigInt(m.estimate)) / 1e10));
@@ -2404,7 +2407,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
       <DialogContent className="sm:max-w-3xl modal-scroll">
         <DialogHeader>
           <DialogTitle>Создать оставшиеся видеопланы</DialogTitle>
-          <DialogDescription>По одному ролику на отмеченный план. Готовые видео и попытки с неизвестным исходом пропущены. Результаты нужно будет просмотреть и утвердить по отдельности.</DialogDescription>
+          <DialogDescription>По одному ролику на отмеченный план. Готовые видео изначально не отмечены. Можно создать дополнительные варианты выбранных или устаревших планов. Неизвестные и выполняемые запросы пропущены; новые результаты нужно просмотреть и утвердить.</DialogDescription>
         </DialogHeader>
         <p><strong>{m.name}</strong> · модель выбранного варианта «{chosen(source)?.title}» в плане «{source.title}».</p>
         <Field label="Оценка одной попытки, USD" hint="Оценка не равна списанию. Если стоимость неизвестна, поле можно оставить пустым только при отсутствии лимита проекта.">
@@ -2414,6 +2417,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. Для подготовленных кадров время запроса показано в предпросмотре. В финальной сборке по умолчанию сохраняется весь ролик; участок можно выбрать вручную.</p>
         {m.provider==='google'&&<p className="muted">Один первый кадр и текстовые описания выбранных героев. Оценку можно увеличить, но нельзя уменьшить ниже расчётной. Списание сверяйте в Google AI Studio; встроенный звук не заменяет утверждённые голоса.</p>}
         <p className="muted">Каждый план получает только образы своих участников и собственный первый кадр.</p>
+        <BatchScopeSelector rows={rows.map(r=>mediaBatchCandidate(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,'video'))} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
         {rows.map((r, index) => (
           <section key={r.itemId} className="editor-surface p-4 mb-3">
             <label className="row mb-3"><Checkbox checked={r.include} onCheckedChange={v => update(r.itemId, { include: !!v })} />
@@ -2463,7 +2467,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {
             await submit({ revision: snapshot.revision, batchId: batch, sourceItemId: source.id, sourceVariantId: chosen(source)!.id,
-              estimate: perAttempt, characterIds, basis:dependencies(snapshot,7), plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
+              estimate: perAttempt, characterIds, mode:'all', basis:dependencies(snapshot,7), plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
             close();
           })}><Sparkles />Запустить {included.length} планов</Button></DialogFooter>
       </DialogContent>
@@ -2652,7 +2656,6 @@ function VoiceComparisonPanel({p,connections,busy,perform,action,replace,onConti
   const [batch,setBatch]=useState(()=>crypto.randomUUID());
   const [notice,setNotice]=useState('');
   const m=choices.find(m=>m.id===modelId);
-  const active=p.jobs.some((j:any)=>['queued','dispatching','pending','saving'].includes(j.status));
   let perAttempt:string|null=null,costIssue='';
   try{if(estimate.trim())perAttempt=ticks(estimate.trim());}catch{costIssue='Укажите оценку в USD, например 0.02.';}
   const total=perAttempt===null?null:(BigInt(perAttempt)*BigInt(voices.length)).toString();
@@ -2673,7 +2676,7 @@ function VoiceComparisonPanel({p,connections,busy,perform,action,replace,onConti
       <Field label="Оценка одной пробы, USD" hint="Для контроля бюджета. Если лимит не задан, можно оставить пустым."><Input aria-label="Оценка пробы голоса" inputMode="decimal" value={estimate} onChange={e=>{setEstimate(e.target.value);change();}}/></Field>
       <p>Будет создано {voices.length} проб · оценка {money(total)}. Генерация проб платная; расходы сохраняются в общем журнале. Повторное прослушивание готового файла не запускает генерацию.</p>
       {notice&&<p role="status">{notice}</p>}{costIssue&&<p role="alert">{costIssue}</p>}
-      <Button disabled={busy||active||!voices.length||!phrase.trim()||!!costIssue} onClick={()=>perform(async()=>{
+      <Button disabled={busy||!voices.length||!phrase.trim()||!!costIssue} onClick={()=>perform(async()=>{
         replace(await request(`/api/projects/${p.id}/generate-voice-tests`,'POST',{revision:p.revision,batchId:batch,phrase,voices:voices.map(v=>({...v,estimate:perAttempt}))}));
         setBatch(crypto.randomUUID());setNotice('Пробы добавлены в очередь. Результаты появятся ниже; держите студию открытой.');
       })}><Mic/>Создать пробы · {voices.length}</Button>
@@ -2732,8 +2735,7 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
       onChange={value => { setModelId(value); setVoice(''); }} /></Field>
     {!choices.length && <p role="alert">Добавьте ключ модели озвучки в «Подключениях».</p>}
     <VoiceSelector provider={choices.find(m => m.id === modelId)?.provider} value={voice} onChange={setVoice} />
-    <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked && !r.timingIssue})))}>Выбрать все планы</Button>
-      <Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({...r, include:!r.blocked && !r.timingIssue && !r.hasAudio})))}>Только без озвучки</Button></div>
+    <BatchScopeSelector rows={rows.map(r=>{const frame=snapshot.items.find(f=>f.id===r.frameId)!,audio=pairedItem(snapshot,frame,6);return {id:r.frameId,remaining:!r.hasAudio,needsAttention:!r.hasAudio||!!audio&&(!chosen(audio)||!variantCurrent(snapshot,audio,chosen(audio)!)),blocked:r.blocked||!!r.timingIssue};})} selected={included.map(r=>r.frameId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.frameId)})))}/>
     {rows.map((r,index) => <section className="editor-surface p-4" key={r.frameId}>
       <label className="row"><Checkbox disabled={r.blocked||!!r.timingIssue} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.frameId === r.frameId ? {...x,include:!!v} : x))} />
         <strong>{r.title} · {r.duration} сек · начало {r.offset} сек</strong></label>
@@ -2798,8 +2800,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
-      <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({ ...r, include: !r.blocked })))}>Выбрать все планы</Button>
-        <Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({ ...r, include: !r.hasImage && !r.blocked })))}>Только без картинок</Button></div>
+      <BatchScopeSelector rows={rows.map(r=>({...mediaBatchCandidate(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,'image'),blocked:r.blocked}))} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
       {rows.map((r, index) => <section key={r.itemId} className="editor-surface p-4">
         <label className="row"><Checkbox disabled={!!r.blocked} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, include: !!v } : x))} />
           <span><strong>{r.title}</strong><small className="block muted">{r.blocked || (r.hasImage ? 'Есть изображение · будет создан новый вариант' : 'Картинки пока нет')}</small></span></label>

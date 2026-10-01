@@ -2,6 +2,7 @@ import type {AudioQcReport} from './audio-qc';
 import {soundLayerApproved} from './soundscape';
 import type {SoundscapeState,SoundGeneration} from './soundscape';
 import type {VideoPreparation} from './video-from-animatic';
+import {videoPreparationCurrent} from './video-preparation-basis';
 import {versionSignature} from './creative-versions';
 import type {AnimaticManifest} from './animatic-manifest';
 import type {KeyframeRole,KeyframeSelection,KeyframeApproval} from './keyframes';
@@ -283,13 +284,13 @@ export function independentApproval(stage: number) {
   return stage >= 1 && stage <= 3;
 }
 export function variantCurrent(p: Project, item: Item, variant: Variant) {
-  if(variant.videoPreparationBasis&&variant.videoPreparationBasis!==versionSignature(item.videoPreparation))return false;
+  if(!videoPreparationCurrent(p,item,variant))return false;
   if(item.stage===5&&variant.keyframeReviewBasis)return variant.keyframeReviewBasis===keyframeFoundationBasis(p,item,variant.keyframe??'start',variant);
   if(variant.reviewBasis&&[5,6,7].includes(item.stage))return variant.reviewBasis===materialBasis(p,item,variant);
   return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
 }
 export function jobCurrent(p: Project, item: Item, job: Job) {
-  if(job.videoPreparationBasis&&job.videoPreparationBasis!==versionSignature(item.videoPreparation))return false;
+  if(!videoPreparationCurrent(p,item,job))return false;
   if(job.basisVersion===2&&job.reviewBasis&&[5,6,7].includes(item.stage))
     return job.reviewBasis===materialBasis(p,item,job);
   return job.deps===dependencies(p,item.stage);

@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
+import {queueAdmissionIssue} from '@/lib/queue-policy';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
@@ -21,27 +22,28 @@ export function MusicEditor({p,busy,connections,submit,upload,onContinue}:{p:Pro
   const persisted=JSON.stringify(musicSettings(p));
   useEffect(()=>{setDraft(JSON.parse(persisted));},[persisted]);
   useEffect(()=>{root.current?.querySelectorAll('audio').forEach(a=>a.volume=speechPreview?draft.speechVolume:draft.volume);},[speechPreview,draft.volume,draft.speechVolume,p.music?.variants.length]);
-  const jobs=p.jobs.filter(j=>j.purpose==='music'||j.purpose==='music-ideas'),active=p.jobs.some(j=>['queued','dispatching','pending','saving'].includes(j.status));
+  const jobs=p.jobs.filter(j=>j.purpose==='music'||j.purpose==='music-ideas'),generationIssue=queueAdmissionIssue(p,p.id);
   const disabled=busy||working,dirty=JSON.stringify(draft)!==persisted;
   const run=async(fn:()=>Promise<unknown>,success='Сохранено')=>{setWorking(true);setError('');setMessage('');try{await fn();setMessage(success);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setWorking(false);}};
   const send=(action:string,data:unknown={},success?:string)=>run(()=>submit(action,data),success);
   const field=(key:keyof MusicSettings,value:number|boolean)=>setDraft({...draft,[key]:value});
   const suggested=new Set(p.music?.ideas?.flatMap(i=>i.libraryIds)??[]);
   return <div ref={root} className="space-y-6" onPlayCapture={e=>{const target=e.target as HTMLAudioElement;if(target.tagName==='AUDIO'){root.current?.querySelectorAll('audio').forEach(a=>{if(a!==target)a.pause();});target.volume=speechPreview?draft.speechVolume:draft.volume;}}}>
+    {generationIssue&&<p className="note" role="status">{generationIssue}</p>}
     {error&&<p className="note" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
     <section className="editor-surface p-5 space-y-3"><h2>Музыкальное направление по сценарию</h2><p>ИИ прочитает утверждённый сценарий и визуальный стиль и предложит три разных подхода. Затем выберите описание для генерации или трек из библиотеки.</p>
       <label className="field">Модель для анализа<select aria-label="Модель для анализа музыки" className="border rounded p-2 bg-background" value={textModel||textModels[0]?.id||''} onChange={e=>setTextModel(e.target.value)}>{textModels.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
       <Textarea aria-label="Пожелания к музыке" placeholder="Например: сдержанное напряжение, дух 1930-х, без вокала и резких ударов" value={wishes} onChange={e=>setWishes(e.target.value)} maxLength={4100}/>
       <label className="field">Оценка одного запроса, USD (необязательно без лимита бюджета)<Input aria-label="Оценка музыкального запроса" value={estimate} onChange={e=>setEstimate(e.target.value)} placeholder="Например 0.50"/></label>
       <p className="muted small">Стоимость анализа и генерации учитывается в журнале. Если API не сообщает сумму, она останется «Неизвестно» до сверки. Оценка выше применяется к каждому запросу следующей серии.</p>
-      <Button disabled={disabled||active||!textModels.length} onClick={()=>void run(async()=>{const value=estimate.trim()?ticks(estimate.trim()):null;await submit('ideas',{batchId:crypto.randomUUID(),model:textModel||textModels[0].id,prompt:wishes,duration:seconds,count:1,estimate:value});},'ИИ читает сценарий. Три направления появятся ниже.')}>Предложить 3 направления с ИИ</Button>
+      <Button disabled={disabled||!!generationIssue||!textModels.length} onClick={()=>void run(async()=>{const value=estimate.trim()?ticks(estimate.trim()):null;await submit('ideas',{batchId:crypto.randomUUID(),model:textModel||textModels[0].id,prompt:wishes,duration:seconds,count:1,estimate:value});},'ИИ читает сценарий. Три направления появятся ниже.')}>Предложить 3 направления с ИИ</Button>
       {!textModels.length&&<p>Добавьте ключ текстовой модели в «Подключениях».</p>}
       <div className="grid gap-4 md:grid-cols-3">{p.music?.ideas?.map(i=><article className="editor-surface p-4 space-y-3" key={i.id}><h3>{i.title}</h3><p>{i.description}</p><details><summary>Описание для генерации</summary><p>{i.prompt}</p></details><Button variant="outline" onClick={()=>{setPrompt(i.prompt);setMessage('Описание перенесено в блок генерации.');}}>Использовать это направление</Button>{i.libraryIds.length>0&&<p className="muted small">Из библиотеки: {i.libraryIds.map(id=>MUSIC_LIBRARY.find(t=>t.id===id)?.title).join(', ')}</p>}</article>)}</div>
     </section>
     <section className="editor-surface p-5 space-y-3"><h2>Сгенерировать музыку</h2><p>ElevenLabs Music · инструментальный трек · используется ключ ElevenLabs из «Подключений».</p>
       <Textarea aria-label="Описание музыки для генерации" value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="Выберите направление выше или опишите музыку самостоятельно" maxLength={4100}/>
       <div className="grid gap-3 md:grid-cols-2"><label className="field">Длительность трека, сек<Input type="number" min={3} max={600} value={seconds} onChange={e=>setSeconds(Number(e.target.value))}/></label><label className="field">Количество вариантов<Input type="number" min={1} max={4} value={count} onChange={e=>setCount(Number(e.target.value))}/></label></div>
-      <Button disabled={disabled||active||!prompt.trim()||!configured('elevenlabs')} onClick={()=>void run(async()=>{await submit('generate',{batchId:crypto.randomUUID(),model:'music_v1',prompt,duration:seconds,count,estimate:estimate.trim()?ticks(estimate.trim()):null});},'Варианты добавлены в очередь. Оставьте студию открытой до завершения.')}>Создать музыкальные варианты</Button>
+      <Button disabled={disabled||!!generationIssue||!prompt.trim()||!configured('elevenlabs')} onClick={()=>void run(async()=>{await submit('generate',{batchId:crypto.randomUUID(),model:'music_v1',prompt,duration:seconds,count,estimate:estimate.trim()?ticks(estimate.trim()):null});},'Варианты добавлены в очередь. Оставьте студию открытой до завершения.')}>Создать музыкальные варианты</Button>
       {!configured('elevenlabs')&&<p>Для генерации добавьте ключ ElevenLabs. Свой файл и библиотека доступны без ключа.</p>}
       {jobs.slice(-8).reverse().map(j=><p className="text-sm" key={j.id}>{j.purpose==='music-ideas'?'Анализ сценария':'Музыка'} · {({queued:'В очереди',dispatching:'Генерация',pending:'Обработка',saving:'Сохранение',done:'Готово',failed:'Ошибка',unknown:'Исход неизвестен',cancelled:'Отменено'})[j.status]} · расход: {money(j.actual)}{j.error&&' · '+j.error}</p>)}
     </section>

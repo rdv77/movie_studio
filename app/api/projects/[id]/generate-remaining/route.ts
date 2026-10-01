@@ -1,3 +1,4 @@
+import {videoBatchPlans} from '@/lib/batch-scope';
 import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import { planCharacterIds } from '@/lib/plan-references';
 import { compileMediaJob } from '@/lib/prompt-jobs';
@@ -16,6 +17,7 @@ const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(),
   basis: z.string().max(20000).optional(),
   sourceItemId: z.string().uuid(), sourceVariantId: z.string().uuid(),
+  mode:z.enum(['remaining','all']).default('remaining'),
   estimate: z.string().regex(/^\d+$/).nullable(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), ref: z.string().uuid(),
@@ -38,12 +40,12 @@ export const POST = api(async (req, ctx) => {
     throw new Error('Выберите готовый видеоролик с доступной моделью и заново откройте окно создания оставшихся планов.');
   if (new Set(s.plans.map(x => x.itemId)).size !== s.plans.length)
     throw new Error('В серии один запрос на каждый план; удалите дубли.');
-  const remaining = remainingVideoPlans(p);
+  const remaining = s.mode==='all'?videoBatchPlans(p):remainingVideoPlans(p);
   videoCharacters(p,s.characterIds);
   const jobs: Job[] = [];
   for (const row of s.plans) {
     const item = remaining.find(i => i.id === row.itemId);
-    if (!item) throw new Error('Состав оставшихся планов изменился. Существующие ролики и попытки с неизвестным исходом не повторяются.');
+    if (!item) throw new Error('Состав выбранных планов изменился. Выполняемые и неизвестные запросы не повторяются; повтор готового материала нужно явно отметить в серии.');
     const characterIds=planCharacterIds(p,item,s.characterIds);
     const characterRefs=videoCharacterRefs(p,m.provider,characterIds);
     const shot = videoShot(p, item)!;

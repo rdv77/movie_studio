@@ -4,6 +4,7 @@ import { GROK_IMAGE_MODEL, grokImageEstimate } from './image-quality';
 import { compilePrompt, type CompiledPrompt, type PromptInput } from './prompt-compiler';
 import { model } from './models';
 import { grokVideoReservation, modernVideoTiming, scaledVideoReservation } from './video-duration';
+import {captureVideoPreparationBasis} from './video-preparation-basis';
 
 /** Compact provenance saved with both the attempt and its resulting variant. */
 export type PromptCompilationSnapshot = {
@@ -66,6 +67,7 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
     endFrameAssetId: job.kind === 'video' ? last?.assetId : undefined,
     ...(job.kind==='video'?{providerDuration:result.capability.duration!.requestedSeconds}:{}),
   };
+  if(job.kind==='video'&&item.videoPreparation)output.videoPreparationBasis=captureVideoPreparationBasis(p,item,output);
   if (job.model === GROK_IMAGE_MODEL) output.estimate = grokImageEstimate(job.imageSettings, output.refs.length);
   if (job.kind==='video' && (last || modernVideoTiming(job) || item.videoPreparation))
     output.estimate=job.model==='grok-imagine-video-1.5'?grokVideoReservation(output.providerDuration!,result.references.length,job.estimate)

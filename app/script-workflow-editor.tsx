@@ -56,6 +56,9 @@ export function ScriptWorkflowEditor({p,model,busy,submit}:Props){
     <details><summary className="cursor-pointer text-sm font-medium">Методические карточки · {methodologyIds.length}/{CINEMA_METHODS.length}</summary>
       <p className="my-3 text-xs text-muted-foreground">{CINEMA_METHODS_NOTE}</p><div className="space-y-3">{CINEMA_METHODS.map(method=><article key={method.id} className="space-y-2 rounded border border-border p-3">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={locked} checked={methodologyIds.includes(method.id)} onChange={e=>setMethodologyIds(current=>e.target.checked?[...current,method.id]:current.filter(v=>v!==method.id))}/><b>{method.title}</b></label>
+        <p className="text-sm"><b>Принцип:</b> {method.principle}</p>
+        <p className="text-xs text-muted-foreground">{method.example}</p>
+        <p className="text-xs text-muted-foreground"><b>Границы применения:</b> {method.limits}</p>
         <ul className="ml-5 list-disc space-y-1 text-xs text-muted-foreground">{method.checks.map(check=><li key={check}>{check}</li>)}</ul>
         <a className="text-xs underline" href={method.sourceUrl} target="_blank" rel="noreferrer">{method.sourceTitle}</a>
       </article>)}</div>

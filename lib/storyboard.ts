@@ -89,7 +89,6 @@ export function storyboardBatchPlans(p: Project) {
     item, hasImage: item.variants.some(v => v.kind === 'image' && v.assetId),
     blocked: p.jobs.some(j => j.itemId === item.id && ['queued', 'dispatching', 'pending', 'saving', 'unknown'].includes(j.status))
       ? 'Дождитесь результата или проверьте попытку с неизвестным исходом.'
-      : chosen(item) && chosen(item)!.deps !== dependencies(p, 5)
-        ? 'Основа изменилась. Обновите выбранное описание через «Правки».' : '',
+      : '',
   }));
 }

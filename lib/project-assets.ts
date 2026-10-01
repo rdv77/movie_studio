@@ -67,7 +67,7 @@ export function projectAssetIds(p: Project): Set<string> {
     location(item.location);
     // Prepared crops are owned derived files, not storyboard variants. Retain
     // the original and all previous derived frames without changing manifest.
-    for(const frame of [item.videoPreparation?.startFrame,item.videoPreparation?.middleFrame,item.videoPreparation?.endFrame,...(item.videoPreparation?.frameHistory??[]).map(row=>row.frame)]){
+    for(const frame of [item.videoPreparation?.startFrame,item.videoPreparation?.middleFrame,item.videoPreparation?.endFrame,item.videoPreparation?.sourceFrames?.startFrame,item.videoPreparation?.sourceFrames?.endFrame,...(item.videoPreparation?.frameHistory??[]).map(row=>row.frame)]){
       add(frame?.assetId);add(frame?.transform?.sourceAssetId);
     }
     for(const version of item.characterHistory??[])character(version.profile);

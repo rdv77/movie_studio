@@ -25,8 +25,6 @@ export const POST = api(async (req, ctx) => {
   if (p.jobs.some(j => j.batchId === s.batchId)) return Response.json(p);
   if (p.revision !== s.revision) throw new Error('Проект изменился. Закройте окно и заново проверьте серию.');
   if (!stageReady(p, 5)) throw new Error('Утвердите подробный сценарий и предыдущие этапы.');
-  if (p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
-    throw new Error('Дождитесь текущей серии или отмените неотправленные попытки.');
   const m = model(s.model);
   if (m.kind !== 'image') throw new Error('Выберите одну модель изображений.');
   if(new Set(s.plans.map(x=>x.itemId)).size!==s.plans.length)throw new Error('Один план указан дважды.');
