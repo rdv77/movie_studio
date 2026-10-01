@@ -1,3 +1,4 @@
+import {applyMontageProposal} from '../../../../lib/montage-review';
 import {animaticManifestSchema,manifestAssets} from '../../../../lib/animatic-manifest';
 import { approveReview } from '@/lib/review-center';
 import { recordCharacterVersion, restoreCharacterVersion, captureVersionInfo } from '@/lib/creative-versions';
@@ -107,6 +108,7 @@ export const PATCH = api(async (req, ctx) => {
       const {toIndex}=z.object({toIndex:z.number().int().min(0).max(119)}).parse(d);
       moveStoryboardPlan(p,body.itemId!,toIndex);break;
     }
+    case 'applyMontageProposal': {const {reviewId,index}=z.object({reviewId:z.string().uuid(),index:z.number().int().min(0).max(19)}).parse(d);applyMontageProposal(p,reviewId,index);break;}
     case 'saveAssemblyCuts': {
       const {cuts}=z.object({cuts:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),trim:z.number().min(0).max(600),duration:z.number().min(0.2).max(3600).nullable()})).max(120)}).parse(d);
       if(new Set(cuts.map(c=>c.itemId)).size!==cuts.length)throw new Error('План указан дважды.');

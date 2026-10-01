@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {strict as assert} from 'node:assert';
 const mock=`
+export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
 export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:e.status??400})}};
 export const owner=async req=>{if(req.headers.get('test-user')!=='owner')throw Object.assign(new Error('Unauthorized'),{status:401});return 'owner'};
 export const loadProject=async(user,id)=>{if(id!==state.id)throw new Error('Not found');return structuredClone(state)};

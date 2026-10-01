@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {strict as assert} from 'node:assert';
 const server=`
+export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
 export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw Error('Unauthorized');return 'owner'};
 export const loadProject=async()=>structuredClone(globalThis.state);
 export const saveProject=async(_,p,revision)=>{await Promise.resolve();if(revision!==state.revision)throw Object.assign(Error('conflict'),{status:409});p.revision++;globalThis.state=structuredClone(p);return p};

@@ -1,3 +1,7 @@
+import {runVoiceWorkflowStep} from '@/lib/voice-design-runner';
+import {generateDirectedSpeech,VoiceSpeechResponseError} from '@/lib/voice-tts';
+import {isSoundJob} from '@/lib/soundscape';
+import {runSoundscapeStep} from '@/lib/soundscape-runner';
 import {videoPreparationIssue} from '@/lib/video-from-animatic';
 import {keyframeQueueIssue} from '@/lib/keyframes';
 import {mediaReviewCurrent,parseMediaReview} from '@/lib/media-review';
@@ -59,6 +63,8 @@ export const POST = api(async (req, ctx) => {
   // A watchdog may run while the original HTTP request is still in flight.
   // It only checks the deadline; it must never dispatch or poll a provider.
   if(recoveryAction==='check-wait')return Response.json(p);
+  if(j.purpose==='voice-design')return Response.json(await runVoiceWorkflowStep(user,id,jobId));
+  if(isSoundJob(j))return Response.json(await runSoundscapeStep(user,id,jobId));
   // A byte-return TTS may already be paid and stored when the final project
   // write fails. Recover only that owned file; never call the provider again.
   if(j.purpose==='voice-test'&&['unknown','dispatching'].includes(j.status)&&
@@ -143,7 +149,8 @@ export const POST = api(async (req, ctx) => {
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
     const endFrame=polling||saving||j.lipsync||!j.endFrameAssetId?undefined:await imageData(user,j.endFrameAssetId,p);
-    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):refreshZen ? await poll(j, key) : saving
+    const directed=polling||saving||j.kind!=='audio'?undefined:await generateDirectedSpeech(j,key,model(j.model).provider as 'minimax'|'elevenlabs');
+    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await poll(j, key) : saving
       ? j.output!
       : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
           // Transfer private files directly; never grant public access to the asset library.
@@ -157,7 +164,7 @@ export const POST = api(async (req, ctx) => {
             video = new Blob([await v.arrayBuffer()], {type: va.mime}); audio = new Blob([await a.arrayBuffer()], {type: aa.mime});
           } catch { throw new ProviderError('Не удалось загрузить файлы синхронизации. Запрос не отправлен.', true, true); }
           return generateSync(j, key, video, audio);
-        })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs,endFrame));
+        })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs,endFrame)));
     await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (result.actual != null) {
@@ -253,6 +260,7 @@ export const POST = api(async (req, ctx) => {
           speechType:job.speechType,
           speaker:job.speaker,
           voiceId: job.voiceId,
+          voiceDelivery:job.voiceDelivery,voiceProfileId:job.voiceProfileId,ttsRequestText:job.ttsRequestText,
           duration: job.duration,
           camera: job.camera,
           continuity: job.continuity,
@@ -277,6 +285,7 @@ export const POST = api(async (req, ctx) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status === 'done') return;
       job.error = e instanceof Error ? e.message : 'Ошибка обработки.';
+      if(e instanceof VoiceSpeechResponseError){job.requestId=e.receipt.requestId??job.requestId;job.actual=e.receipt.actual??null;job.usage=e.receipt.usage;}
       if(job.waitStoppedAt){job.status='unknown';return;}
       if (!polling && e instanceof ProviderError && e.notSent) {
         job.actual = '0';

@@ -19,6 +19,8 @@ import { characterPrompt, characterImageRefs, videoCharacterRefs, videoCharacter
 import { planSpeech } from '@/lib/plan-speech';
 import { speechInfo, assertSpeech } from '@/lib/speech-mode';
 import { compileMediaJob } from '@/lib/prompt-jobs';
+import {voiceDeliverySchema} from '@/lib/voice-direction';
+import {freezeVoiceJob} from '@/lib/voice-tts';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
 
 export const POST = api(async (req, ctx) => {
@@ -31,6 +33,7 @@ export const POST = api(async (req, ctx) => {
     keyframe:z.enum(['start','middle','end']).optional(), refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
     referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(),
     dialogue: z.string().max(9500), voiceId: z.string().max(150), speechSource: z.string().max(200).optional(),
+    profileId:z.string().uuid().optional(),voiceDelivery:voiceDeliverySchema.optional(),
     speechType: z.enum(['voiceover', 'character', 'none']).optional(), speaker: z.string().trim().max(100).optional(),
     estimates: z.record(z.string(), z.string().regex(/^\d+$/).nullable()),
   }).parse(await req.json());
@@ -74,7 +77,7 @@ export const POST = api(async (req, ctx) => {
   }
   if (kind === 'audio' && info.speechType === 'character' && !item.sourceShot) throw Error('Для реплик героев сначала нажмите «Подготовить озвучку по планам». Общая дорожка предназначена для закадрового текста.');
   if (kind === 'video') assertSpeech(info, '');
-  if (kind === 'audio' && (!s.voiceId.trim() || !dialogue)) throw Error('Укажите voice_id или профиль голоса и произносимую реплику. Служебные пометки не озвучиваются.');
+  if (kind === 'audio' && ((!s.voiceId.trim()&&!s.profileId) || !dialogue)) throw Error('Укажите voice_id или профиль голоса и произносимую реплику. Служебные пометки не озвучиваются.');
   const linked = p.items.find(i => i.stage === 5 && !i.planArchive && i.title === item.title);
   const basis = chosen(item) ?? linked?.variants.find(v => v.id === linked.approvedId);
   const jobs: Job[] = ms.flatMap(m => Array.from({ length: s.count }, (_, n) => {
@@ -98,7 +101,7 @@ export const POST = api(async (req, ctx) => {
       deps: dependencies(p, item.stage), created: now(), status: 'queued', transportVersion: 2,
       estimate: s.estimates[m.id] ?? null, actual: null,
     };
-    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { keyframe:keyframeRole,keyframeInstruction:prepared?.roleInstruction,instruction:s.instruction, variantIndex: n + 1, variantCount: s.count }) : job;
+    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { keyframe:keyframeRole,keyframeInstruction:prepared?.roleInstruction,instruction:s.instruction, variantIndex: n + 1, variantCount: s.count }) : kind==='audio'?freezeVoiceJob(p,job,{profileId:s.profileId,delivery:s.voiceDelivery}):job;
   }));
   // Compile every model first. A critical conflict must stop the batch before storage reads or reservation.
   const loaded = new Map<string, Promise<PromptAsset>>();

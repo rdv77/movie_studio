@@ -72,7 +72,8 @@ assert(S.scriptSpeech(malformed).message.includes('Не удалось'));
 const projectPlugin = { name: 'in-memory-project', setup(b) {
     b.onResolve({ filter: /^@\/lib\/server$/ }, () => ({ path: 'server', namespace: 'test' }));
     b.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: `
-      export const api = fn => fn;
+      export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
+export const api = fn => fn;
       export const owner = async () => 'test';
       export const loadProject = async () => globalThis.speechProject;
       export const saveProject = async (_, p) => p;

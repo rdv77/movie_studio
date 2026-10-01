@@ -1,3 +1,4 @@
+import {readSoundscape,soundLayerApproved} from './soundscape';
 import {scenesBasis} from './directing';
 import { STAGES, chosen, isApproved, independentApproval, participates, stageReady, silentFilm, type Project } from './domain';
 import { animaticApproved } from './animatic';
@@ -12,7 +13,7 @@ export const nextStage=(stage:number,p?:Project)=>projectWorkflow(p)[projectWork
 export const workflowReady=(p:Project,stage:number)=>stage===12?true:stage===11?true:stage===10?p.items.some(i=>i.stage===5&&participates(p,i)):stageReady(p,stage===9?(p.animaticSettings?.sound==='silent'?5:6):stage);
 export function stageComplete(p:Project,stage:number) {
   if(stage===12)return !!p.directing?.scenesApproved&&p.directing.scenesApproved===scenesBasis(p);
-  if(stage===11)return !!p.music&&(!musicSettings(p).enabled||!musicIssue(p));
+  if(stage===11)return (!!p.music||readSoundscape(p).enabled)&&(!musicSettings(p).enabled||!musicIssue(p))&&(!readSoundscape(p).enabled||readSoundscape(p).layers.filter(l=>!l.removedAt&&l.settings.enabled).every(soundLayerApproved));
   if(stage===10)return !!p.captions?.some(c=>c.enabled&&c.text.trim()&&p.items.some(i=>i.id===c.planId&&participates(p,i)));
   if(stage===9)return animaticApproved(p);
   const items=p.items.filter(i=>i.stage===stage&&participates(p,i));

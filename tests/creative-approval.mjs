@@ -15,9 +15,11 @@ await build({
   plugins: [{ name: 'isolated-creative-approval', setup(builder) {
     builder.onResolve({ filter: /^@\/lib\/(server|providers|sync-provider)$/ }, (args) => ({ path: args.path, namespace: 'creative-test' }));
     builder.onLoad({ filter: /.*/, namespace: 'creative-test' }, ({ path }) => ({ contents: path.endsWith('/server') ? `
+      export class HttpError extends Error { constructor(message,status=400) { super(message); this.status=status; } }
       export const api = fn => async (req, ctx) => { try { return await fn(req, ctx); } catch (error) { return Response.json({ error: error.message }, { status: error.status ?? 400 }); } };
       export const owner = async () => 'owner';
       export const loadProject = async () => structuredClone(globalThis.creativeApprovalState);
+      export const saveProject = async (_,p,revision) => { if(revision!==globalThis.creativeApprovalState.revision)throw new HttpError('Revision',409);p.revision++;globalThis.creativeApprovalState=structuredClone(p);return p; };
       export const mutate = async (_, id, fn) => { const p = structuredClone(globalThis.creativeApprovalState); if (p.id !== id) throw Error('Wrong test project'); fn(p); p.revision++; globalThis.creativeApprovalState = structuredClone(p); return p; };
       export const getKey = async () => 'test-only-placeholder';
       export const imageData = async () => { throw Error('Stale job must not load provider inputs'); };

@@ -1,3 +1,5 @@
+import {soundLayerApproved} from './soundscape';
+import type {SoundscapeState,SoundGeneration} from './soundscape';
 import type {VideoPreparation} from './video-from-animatic';
 import {versionSignature} from './creative-versions';
 import type {AnimaticManifest} from './animatic-manifest';
@@ -5,6 +7,8 @@ import type {KeyframeRole,KeyframeSelection,KeyframeApproval} from './keyframes'
 import {hasKeyframeConfig,keyframesApproved,approveKeyframes,selectedKeyframe,keyframeFoundationBasis} from './keyframes';
 import type {MediaReview} from './media-review';
 import type {PromptCompilationSnapshot} from './prompt-jobs';
+import type {VoiceDelivery,VoiceStudioState,VoicePreview} from './voice-direction';
+import type {VoiceWorkflowInput} from './voice-design';
 import type { ActorProfile,LocationProfile } from './world-assets';
 import { renderCreativeInstructions } from './creative-brief';
 import type { SpeechType } from './speech-mode';
@@ -41,8 +45,10 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
-  providerDuration?:number;videoPreparationBasis?:string;
+  providerDuration?:number;
+  videoPreparationBasis?:string;
   animaticManifest?:AnimaticManifest;
+  voiceDelivery?:VoiceDelivery;voiceProfileId?:string;ttsRequestText?:string;
   keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;characterDraft?:boolean;
   basisVersion?: 2;
@@ -96,7 +102,11 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
-  providerDuration?:number;videoPreparationBasis?:string;
+  soundInput?:{layerId:string;generation:SoundGeneration;late?:boolean};
+  providerDuration?:number;
+  videoPreparationBasis?:string;
+  voiceDelivery?:VoiceDelivery;voiceProfileId?:string;ttsRequestText?:string;
+  voiceWorkflow?:{provider:string;input:VoiceWorkflowInput;previews?:VoicePreview[];savedVoiceId?:string;late?:boolean};
   keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;
   basisVersion?: 2;
@@ -111,7 +121,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'music' | 'music-ideas' | 'directing' | 'media-review';
+  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -158,7 +168,9 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  soundscape?:SoundscapeState;
   animaticSettings?:{sound:'silent'|'voices';music:boolean;motion:boolean};
+  voiceStudio?:VoiceStudioState;
   mediaReviews?:MediaReview[];
   creativeHistory?: CreativeVersion[];
   creativeVersionId?: string;
@@ -252,11 +264,12 @@ export function dependencies(p: Project, stage: number): string {
       .map((i) => [i.id, i.approvedId ?? null]),
     ...(stage===8&&p.captions?.length ? [['captions',p.captions]] : []),
     ...(stage===8&&p.assemblyCuts?.length ? [['assemblyCuts',p.assemblyCuts]] : []),
+    ...(stage===8&&p.soundscape?.enabled?[['soundscape',p.soundscape.layers.filter(l=>!l.removedAt&&l.settings.enabled).map(l=>[l.id,l.approvedId,l.approvedBasis])]]:[]),
     ...(stage===8&&musicSettings(p).enabled ? [['music',p.music?.approvedId,p.music?.approvedSettings]] : []),
   ]);
 }
 export function stageReady(p: Project, stage: number): boolean {
-  if(stage===8&&musicIssue(p))return false;
+  if(stage===8&&(musicIssue(p)||p.soundscape?.enabled&&p.soundscape.layers.some(l=>!l.removedAt&&l.settings.enabled&&!soundLayerApproved(l))))return false;
   if (productionPrecedes(p,6,stage) && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items
     .filter((i) => productionPrecedes(p,i.stage,stage) && participates(p, i))
@@ -358,7 +371,7 @@ export function deleteVariant(p: Project, itemId: string, variantId: string) {
   const variant = item.variants.find(v => v.id === variantId);
   if (!variant) throw new Error('Вариант уже удалён или не найден. Обновите карточку.');
   const active = p.jobs.filter(j => ['queued','dispatching','pending','saving'].includes(j.status));
-  if (active.some(j => !['media-review','directing'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
+  if (active.some(j => !['media-review','directing','voice-design','soundscape'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
     (j.purpose !== 'voice-test' && (item.approvedId === variantId || [item.approvedKeyframes?.startId,item.approvedKeyframes?.middleId,item.approvedKeyframes?.endId].includes(variantId)) && precedesStage(item.stage,getItem(p,j.itemId).stage)))))
     throw new Error('Этот вариант используется текущей генерацией. Дождитесь её завершения или отмените неотправленные попытки.');
   p.removedVariants ??= [];

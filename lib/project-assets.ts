@@ -2,7 +2,7 @@ import type { CharacterBrief, Project, Variant } from './domain';
 import type {LocationProfile} from './world-assets';
 // Only the persisted file slots are needed here; keep the collector independent
 // of the later animatic renderer and its runtime schemas.
-type SavedManifestSources={schemaVersion:1;projectId:string;clips:{frames?:{role:string;assetId:string}[]}[];audio:{assetId:string}[];music?:{assetId:string}};
+type SavedManifestSources={schemaVersion:1;projectId:string;clips:{frames?:{role:string;assetId:string}[]}[];audio:{assetId:string}[];soundscape?:{assetId:string}[];music?:{assetId:string}};
 
 /**
  * Asset candidates referenced by a trusted, already saved project snapshot.
@@ -47,6 +47,7 @@ export function projectAssetIds(p: Project): Set<string> {
     for(const clip of value.clips)if(Array.isArray(clip?.frames))for(const frame of clip.frames)
       if(frame&&['start','middle','end'].includes(frame.role))add(frame.assetId);
     for(const audio of value.audio)add(audio?.assetId);
+    for(const sound of value.soundscape??[])add(sound?.assetId);
     add(value.music?.assetId);
   };
   const variant = (value: Variant) => {
@@ -96,5 +97,13 @@ export function projectAssetIds(p: Project): Set<string> {
   for (const comparison of p.voiceComparisons ?? []) {
     for (const sample of comparison.samples) add(sample.assetId);
   }
+  // Voice-design previews use their own file IDs. Retain deleted series/profile
+  // history and late receipts for playback/recovery, never external Voice IDs.
+  for(const design of p.voiceStudio?.designs??[])for(const preview of design.previews)add(preview.assetId);
+  for(const profile of p.voiceStudio?.profiles??[])add(profile.previewAssetId);
+  for(const job of p.jobs)for(const preview of job.voiceWorkflow?.previews??[])add(preview.assetId);
+  // Sound layers keep uploaded/generated variants in recoverable history.
+  // Scope IDs identify plans/scenes and never grant file membership.
+  for(const layer of p.soundscape?.layers??[])for(const value of layer.variants)add(value.assetId);
   return ids;
 }

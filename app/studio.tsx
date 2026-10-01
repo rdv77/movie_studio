@@ -1,4 +1,6 @@
 'use client';
+import {SoundscapeEditor} from './soundscape-editor';
+import {VoiceStudioShell} from './voice-studio-shell';
 import {VideoPreparationPanel} from './video-preparation';
 import {videoPreparationIssue} from '../lib/video-from-animatic';
 import {grokVideoReservation,scaledVideoReservation} from '../lib/video-duration';
@@ -808,6 +810,8 @@ function Workspace() {
                   )}
                 </div>}
               </div>
+              {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
+              {[1,6].includes(step)&&<VoiceStudioShell p={p} busy={busy} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
@@ -974,7 +978,7 @@ function Workspace() {
               )}
               {step===5&&item&&<KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/>}
               {step===5&&<KeyframeBatchEditor p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
-              {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
+              {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
                 <div className="editor-surface p-5 mb-5">
                   <strong>{currentShot.title} · {currentShot.duration} сек · из утверждённого сценария</strong>

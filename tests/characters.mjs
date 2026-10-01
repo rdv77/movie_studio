@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {strict as assert} from 'node:assert';
 const server=`
+export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}}
 export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:400})}};
 export const owner=async req=>{if(req.headers.get('test-owner')!=='owner')throw new Error('Unauthorized');return 'owner'};
 export const loadProject=async()=>structuredClone(globalThis.state);

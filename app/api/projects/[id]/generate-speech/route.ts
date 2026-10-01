@@ -7,12 +7,15 @@ import { spokenText } from '@/lib/spoken-text';
 import { model } from '@/lib/models';
 import { z } from 'zod';
 import { speechInfo, assertSpeech, speechNames } from '@/lib/speech-mode';
+import {voiceDeliverySchema} from '@/lib/voice-direction';
+import {freezeVoiceJob} from '@/lib/voice-tts';
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
   const original = await loadProject(user, (await ctx.params).id);
   const s = z.object({ revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
-    voiceId: z.string().trim().min(1).max(150), estimate: z.string().regex(/^\d+$/).nullable(),
+    voiceId: z.string().trim().max(150).default(''), profileId:z.string().uuid().optional(),voiceDelivery:voiceDeliverySchema.optional(),estimate: z.string().regex(/^\d+$/).nullable(),
     plans: z.array(z.object({ frameId: z.string().uuid(), dialogue: z.string().trim().min(1).max(9500),
+      voiceId:z.string().trim().max(150).optional(),profileId:z.string().uuid().optional(),voiceDelivery:voiceDeliverySchema.optional(),
       speechType:z.enum(['voiceover','character']).optional(),speaker:z.string().trim().max(100).optional() })).min(1).max(120)
   }).parse(await req.json());
   if (original.jobs.some(j => j.batchId === s.batchId)) return Response.json(original);
@@ -37,11 +40,14 @@ export const POST = api(async (req, ctx) => {
     const info=speechInfo({...row,...input});assertSpeech(info,input.dialogue);
     const dialogue = spokenText(input.dialogue, [...speechCharacters(p),info.speaker]);
     if (!dialogue) throw new Error('В реплике нет произносимого текста.');
-    return { id: id(), batchId: s.batchId, itemId: row.item!.id, kind: 'audio', model: m.id,
-      voiceId: s.voiceId, dialogue, ...info, brief: `${speechNames[info.speechType]}${info.speaker?' · '+info.speaker:''}: «${row.title}»`, prompt: dialogue, refs: [],
+    const job:Job={ id: id(), batchId: s.batchId, itemId: row.item!.id, kind: 'audio', model: m.id,
+      voiceId: input.voiceId??s.voiceId, dialogue, ...info, brief: `${speechNames[info.speechType]}${info.speaker?' · '+info.speaker:''}: «${row.title}»`, prompt: dialogue, refs: [],
       duration: row.duration, offset: row.offset, volume: 1, camera: '', continuity: '',
       shotSource: row.scriptVersion, deps: dependencies(p, 6), created: now(), status: 'queued', transportVersion: 2,
       estimate: s.estimate, actual: null };
+    freezeVoiceJob(p,job,{profileId:input.profileId,fallbackProfileId:s.profileId,delivery:input.voiceDelivery??s.voiceDelivery});
+    if(!job.voiceId.trim())throw Error(`${row.title}: укажите Voice ID или профиль голоса.`);
+    return job;
   });
   await getKey(user, m.provider);
   assertBudget(p, jobs);

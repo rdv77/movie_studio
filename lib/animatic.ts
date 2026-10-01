@@ -11,7 +11,7 @@ export function animaticBasis(p: Project) {
   const fields=(v:Variant)=>[v.id,v.assetId,v.duration,v.trim,v.offset,v.volume,v.speechType,v.speaker];
   const pairBasis=p.items.filter(i=>i.stage===5&&participates(p,i)&&hasKeyframeConfig(p,i)).map(i=>({id:i.id,mode:planKeyframeMode(p,i),selection:keyframeSelection(i),frames:['start','middle','end'].map(role=>{const v=selectedKeyframe(i,role as 'start'|'middle'|'end');return v?[v.id,v.assetId,v.keyframeSourceBasis,v.keyframeReviewBasis]:null;}),direction:versionShot(p,i)?.direction}));
   const settings=(p as Project&{animaticSettings?:unknown}).animaticSettings;
-  return JSON.stringify([p.configVersion,p.format,p.seconds,p.speechMode??'track',plan.clips.map(fields),plan.audio.map(fields),plan.audioClipIndexes,...(p.captions?.length?[p.captions]:[]),...(pairBasis.length?[pairBasis]:[]),...(settings?[settings]:[]),...(plan.music?[plan.music.id,plan.music.assetId,plan.musicSettings]:[])]);
+  return JSON.stringify([p.configVersion,p.format,p.seconds,p.speechMode??'track',plan.clips.map(fields),plan.audio.map(fields),plan.audioClipIndexes,...(p.captions?.length?[p.captions]:[]),...(pairBasis.length?[pairBasis]:[]),...(settings?[settings]:[]),...(plan.music?[plan.music.id,plan.music.assetId,plan.musicSettings]:[]),...(p.animaticSettings?.music&&p.soundscape?.enabled?[p.soundscape.layers.filter(l=>!l.removedAt&&l.settings.enabled).map(l=>[l.id,l.approvedId,l.approvedBasis])]:[])]);
 }
 export function animaticIssue(p:Project,v?:Variant) {
   if(!v?.assetId||v.kind!=='video')return 'Сначала соберите и выберите аниматик.';

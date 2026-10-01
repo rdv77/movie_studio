@@ -5,7 +5,8 @@ await mkdir('work/tests',{recursive:true});
 await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as K from './lib/keyframes';export * as C from './lib/prompt-compiler';export {POST as generate} from './app/api/projects/[id]/generate/route';export {POST as frames} from './app/api/projects/[id]/keyframes/route';export {POST as review} from './app/api/projects/[id]/media-review/route';export {POST as step} from './app/api/projects/[id]/jobs/[jobId]/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/keyframe-api.mjs',plugins:[{name:'owned-mock',setup(b){
   b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));
   b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`
-    export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:e.status??400})}};
+    export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
+export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:e.status??400})}};
     export const owner=async()=> 'test';export const loadProject=async()=>structuredClone(globalThis.kState);
     export const saveProject=async(_,p,rev)=>{if(rev!==globalThis.kState.revision)throw Error('CAS');p.revision++;globalThis.kState=structuredClone(p);return p};
     export const mutate=async(_,id,fn)=>{const p=structuredClone(globalThis.kState);fn(p);return saveProject('',p,p.revision)};

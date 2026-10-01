@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {strict as assert} from 'node:assert';
-const server=`export const api=f=>f;export const owner=async()=> 'owner';
+const server=`export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};
+export const api=f=>f;export const owner=async()=> 'owner';
 export const loadProject=async()=>structuredClone(globalThis.state);
 export const saveProject=async(_,p)=>{p.revision++;globalThis.state=structuredClone(p);return p};
 export const mutate=async(u,id,fn)=>{const p=await loadProject();fn(p);return saveProject(u,p)};

@@ -1,0 +1,26 @@
+import {build} from 'esbuild';
+import A from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as S from './lib/soundscape';export {audioArgs} from './lib/render';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/soundscape-render.mjs',plugins:[{name:'browser-render',setup(b){b.onResolve({filter:/^@ffmpeg\/ffmpeg$/},()=>({path:'ff',namespace:'mock'}));b.onResolve({filter:/^\.\/wasm$/},()=>({path:'wasm',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='ff'?'export class FFmpeg {}':'export const wasmUrl=async()=>""'}));}}]});
+const {D,S,audioArgs}=await import('../work/tests/soundscape-render.mjs');
+globalThis.self={location:{href:pathToFileURL(process.cwd()+'/public/ffmpeg/ffmpeg-core.js').href}};
+const {default:createCore}=await import('../public/ffmpeg/ffmpeg-core.js'),core=await createCore({wasmBinary:new Uint8Array(await readFile('node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm'))});
+let logs=[];core.setLogger(({message})=>logs.push(message));
+const exec=args=>{core.reset();const code=core.exec('-y',...args);if(code)throw Error(logs.slice(-20).join('\n'));return code;};
+for(const [name,frequency,duration] of [['ambience',220,1],['event',880,.6],['speech',1320,1]])exec(['-f','lavfi','-i',`sine=frequency=${frequency}:duration=${duration}`,'-c:a','pcm_s16le',name+'.wav']);
+const p=D.newProject('Шумы и речь');S.soundscape(p).enabled=true;
+const add=(name,kind,seconds,settings)=>{const layer=S.saveSoundLayer(p,{name,kind,scope:{type:'film'},settings}),v={id:D.id(),assetId:name+'.wav',model:'Generated fixture',created:D.now(),prompt:'',mime:'audio/wav',seconds};layer.variants.push(v);S.chooseSoundVariant(p,layer.id,v.id);S.approveSoundLayer(p,layer.id);return layer;};
+add('ambience','ambience',1,{loop:true,trim:.2,volume:.5,speechVolume:.05,fadeIn:0,fadeOut:0});add('event','event',.6,{offset:1,trim:.1,duration:.5,loop:false,volume:.8,speechVolume:.1,fadeIn:.02,fadeOut:.02});
+const before=structuredClone(p),speech=[{offset:2,duration:1}],layers=S.buildSoundscapeMix(p,{seconds:6,clips:[]}),graph=S.soundscapeFilter(layers,speech,2);A.equal(layers[0].duration,6);A.equal(layers[1].start,1);A.equal(layers[1].duration,.5);A.deepEqual(p,before);
+const filter='[1:a]asetpts=PTS-STARTPTS,adelay=2000:all=1[voice];'+graph.filter+';[0:a][voice]'+graph.labels.join('')+'amix=inputs=4:normalize=0:duration=longest,alimiter=limit=0.95[mix]';
+exec(['-f','lavfi','-i','anullsrc=r=44100:cl=mono','-i','speech.wav','-i','ambience.wav','-i','event.wav','-filter_complex',filter,'-map','[mix]','-t','6','-c:a','pcm_s16le','mix.wav']);
+const volume=(at,frequency)=>{logs=[];exec(['-v','info','-ss',String(at),'-i','mix.wav','-t','0.2','-af',`bandpass=f=${frequency}:width_type=h:width=30,volumedetect`,'-f','null','-']);const m=logs.map(v=>v.match(/mean_volume: (-?[\d.]+) dB/)).find(Boolean);A(m);return Number(m[1]);};
+const normal=volume(.7,220),ducked=volume(2.5,220),restored=volume(4.5,220);A(normal-ducked>15,JSON.stringify({normal,ducked,restored}));A(Math.abs(normal-restored)<1,JSON.stringify({normal,restored}));A(volume(2.5,1320)>-30,'Dialogue remains audible');const beforeEvent=volume(.3,880),duringEvent=volume(1.15,880),afterEvent=volume(1.6,880);A(duringEvent-beforeEvent>15,JSON.stringify({beforeEvent,duringEvent}));A(duringEvent-afterEvent>30&&afterEvent<beforeEvent+3,JSON.stringify({beforeEvent,duringEvent,afterEvent}));A(volume(5.3,220)>-40,'Trimmed ambience loops across the entire actual film');
+core.reset();A(core.ffprobe('-v','error','-show_entries','format=duration','-of','json','-o','probe.json','mix.wav')<=0,logs.slice(-30).join(String.fromCharCode(10)));A(Math.abs(Number(JSON.parse(new TextDecoder().decode(core.FS.readFile('probe.json'))).format.duration)-6)<.02);await writeFile('work/tests/soundscape-mix.wav',new Uint8Array(core.FS.readFile('mix.wav')));
+// Exercise the actual final-assembly command as well as the isolated PCM graph.
+exec(['-f','lavfi','-i','color=c=blue:size=160x90:rate=24','-t','6','-c:v','libx264','-threads','1','silent.mp4']);
+core.FS.writeFile('audio0',core.FS.readFile('speech.wav'));core.FS.writeFile('sound0',core.FS.readFile('ambience.wav'));core.FS.writeFile('sound1',core.FS.readFile('event.wav'));
+exec(audioArgs([{trim:0,offset:2,duration:1,volume:1}],6,undefined,layers));
+core.reset();A(core.ffprobe('-v','error','-show_entries','format=duration:stream=codec_type','-of','json','-o','final-probe.json','film.mp4')<=0);const final=JSON.parse(new TextDecoder().decode(core.FS.readFile('final-probe.json')));A(final.streams.some(s=>s.codec_type==='audio'));A(Math.abs(Number(final.format.duration)-6)<.03);await writeFile('work/tests/soundscape-final.mp4',new Uint8Array(core.FS.readFile('film.mp4')));
+console.log('PASS real FFmpeg soundscape: source trim, seamless loop, one-shot offset/duration, >15 dB ducking on measured speech, restored ambience, audible dialogue, and actual audioArgs final assembly retains the 6-second montage.');

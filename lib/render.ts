@@ -1,3 +1,4 @@
+import {readSoundscape,soundLayerApproved,assertSoundScope,buildSoundscapeMix,soundscapeFilter,type SoundMixLayer} from './soundscape';
 import {renderKeyframeClip} from './animatic-render';
 import {buildAnimaticManifest} from './animatic-manifest';
 import {hasKeyframeConfig} from './keyframes';
@@ -11,6 +12,7 @@ import {runtimeLimit,checkRuntime} from './runtime-policy';
 type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
   const settings=(p as Project&{animaticSettings?:{sound?:'silent'|'voices';music?:boolean;motion?:boolean}}).animaticSettings;
+  if((!animatic||settings?.music)&&readSoundscape(p).enabled)for(const l of readSoundscape(p).layers.filter(l=>!l.removedAt&&l.settings.enabled)){assertSoundScope(p,l.scope);if(!soundLayerApproved(l))throw Error('Утвердите звуковой слой «'+l.name+'» перед сборкой.');}
   const silent=animatic&&settings?.sound==='silent';
   if((!animatic||settings?.music===true)&&musicIssue(p))throw new Error(musicIssue(p));
   const stage = animatic ? 5 : 7;
@@ -210,9 +212,10 @@ export function clipArgs(
     `clip${index}.mp4`,
   ];
 }
-export function audioArgs(audio: Variant[], seconds: number, music?:MusicSettings) {
+export function audioArgs(audio: Variant[], seconds: number, music?:MusicSettings,layers:SoundMixLayer[]=[]) {
   const inputs = audio.flatMap((_, i) => ['-i', `audio${i}`]);
   if(music)inputs.push(...(music.loop?['-stream_loop','-1']:[]),'-i','music.wav');
+  layers.forEach((_,n)=>inputs.push('-i','sound'+n));
   const filters = audio.map(
     (v, i) =>
       `[${i + 1}:a]atrim=start=${v.trim}:duration=${v.duration},asetpts=PTS-STARTPTS,volume=${v.volume},adelay=${Math.round(v.offset * 1000)}:all=1[a${i}]`,
@@ -221,7 +224,8 @@ export function audioArgs(audio: Variant[], seconds: number, music?:MusicSetting
     const fade=Math.min(music.fade,seconds/2);
     filters.push(`[${audio.length+1}:a]apad,atrim=duration=${seconds},asetpts=PTS-STARTPTS,volume='${musicEnvelope(audio,music)}':eval=frame${fade?`,afade=t=in:st=0:d=${fade},afade=t=out:st=${seconds-fade}:d=${fade}`:''}[music]`);
   }
-  filters.push(audio.map((_,i)=>`[a${i}]`).join('')+(music?'[music]':'')+`amix=inputs=${audio.length+(music?1:0)}:normalize=0,alimiter=limit=0.95,apad[mix]`);
+  const sound=soundscapeFilter(layers,audio,audio.length+1+(music?1:0));if(sound.filter)filters.push(sound.filter);
+  filters.push(audio.map((_,i)=>`[a${i}]`).join('')+(music?'[music]':'')+sound.labels.join('')+`amix=inputs=${audio.length+(music?1:0)+layers.length}:normalize=0,alimiter=limit=0.95,apad[mix]`);
   return [
     '-y',
     '-i',
@@ -368,9 +372,15 @@ export async function renderFilm(
       if(await ff.exec(['-y','-i','music-source','-af',`atrim=start=${plan.musicSettings.trim}:duration=${plan.seconds},asetpts=PTS-STARTPTS,loudnorm=I=-18:TP=-2:LRA=11`,'-ar','44100','-ac','2','music.wav'])!==0)throw Error('Не удалось подготовить музыку. Проверьте формат файла.');
       await ff.deleteFile('music-source');
     }
-    if (plan.audio.length || plan.music) {
+    const layers:SoundMixLayer[]=[];
+    if(!animatic||p.animaticSettings?.music){
+      let offset=0;const items=p.items.filter(i=>i.stage===(animatic?5:7)&&participates(p,i)),timeline={seconds:plan.seconds,clips:plan.clips.map((v,n)=>{const i=items[n],value={itemId:i.id,shotId:i.sourceShot?.shotId,sceneId:i.sourceShot?.sceneId,offset,duration:v.duration};offset+=v.duration;return value;})};
+      layers.push(...buildSoundscapeMix(p,timeline));
+      for(let n=0;n<layers.length;n++){const l=layers[n];await input('sound'+n,{assetId:l.assetId} as Variant);const name='sound-probe'+n+'.json';if(await ff.ffprobe(['-v','error','-show_entries','format=duration:stream=codec_type','-of','json','-o',name,'sound'+n])>0)throw Error('Не удалось измерить звуковой слой «'+l.name+'».');const raw=await ff.readFile(name),info=JSON.parse(typeof raw==='string'?raw:new TextDecoder().decode(raw));if(!info.streams?.some((s:{codec_type:string})=>s.codec_type==='audio')||!Number.isFinite(Number(info.format?.duration))||Math.abs(Number(info.format.duration)-l.sourceSeconds)>.1)throw Error('Проверьте фактическую длительность звукового слоя «'+l.name+'» перед сборкой.');}
+    }
+    if (plan.audio.length || plan.music || layers.length) {
       progress('Сведение речи и музыки…');
-      if ((await ff.exec(audioArgs(plan.audio, plan.seconds,plan.music?plan.musicSettings:undefined))) !== 0)
+      if ((await ff.exec(audioArgs(plan.audio, plan.seconds,plan.music?plan.musicSettings:undefined,layers))) !== 0)
         throw new Error('Не удалось свести звуковые дорожки.');
       output = 'film.mp4';
     }
@@ -378,7 +388,7 @@ export async function renderFilm(
     if (typeof bytes === 'string')
       throw new Error('Некорректный результат сборки.');
     return { blob: new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), seconds: plan.seconds,
-      ...(animatic?{manifest:buildAnimaticManifest(p,plan,(await import('./animatic')).animaticBasis(p))}:{}),
+      ...(animatic?{manifest:buildAnimaticManifest(p,{...plan,soundscape:layers},(await import('./animatic')).animaticBasis(p))}:{}),
       timing: plan.clips.map((v, n) => `${n + 1}. ${v.duration.toFixed(3)} сек`).join('\n') };
   } finally {
     signal?.removeEventListener('abort', cancel);
