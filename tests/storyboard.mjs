@@ -122,7 +122,11 @@ for (const [index, j] of queued.jobs.slice(bulk.jobs.length).entries()) {
   assert.equal(j.status, 'queued');
   assert.equal(j.itemId, allFrames[index].item.id);
   assert.equal(j.brief, payload.plans[index].prompt);
-  assert(j.prompt.includes(payload.plans[index].prompt));
+  const fields=S.planFields(bulk,allFrames[index].item,D.chosen(allFrames[index].item));
+  const description=allFrames[index].item.id===card.id?D.chosen(card).text:V.videoShot(bulk,allFrames[index].item).description;
+  assert(j.prompt.includes(description.trim()),'Preserve the current plan action rather than the entire generated wrapper');
+  assert(j.prompt.includes(fields.camera),'Preserve the current plan camera');
+  assert(j.compilation && j.compilation.budget.compiledCharacters===j.prompt.length,'Persist the model-specific prompt budget');
   assert.deepEqual(j.refs, payload.refs);
   assert.equal(j.camera, S.planFields(bulk, allFrames[index].item, D.chosen(allFrames[index].item)).camera);
   assert.equal(j.estimate, payload.estimate);

@@ -19,7 +19,8 @@ const bulk={revision:p.revision,batchId:D.id(),model:single.models[0],refs:[extr
 const ctx={params:Promise.resolve({id:p.id})},req=body=>new Request('http://test',{method:'POST',body:JSON.stringify(body)});
 for(const [route,input] of [[G,single],[B,bulk]]) {
  for(const refs of [[extra],[],[extra,hero]]) {
-  globalThis.state=structuredClone(p);await route.POST(req({...input,refs}),ctx);assert.deepEqual(state.jobs.at(-1).refs,refs,'Unchecked heroes never reappear server-side');
+  globalThis.state=structuredClone(p);await route.POST(req({...input,refs}),ctx);assert.deepEqual(new Set(state.jobs.at(-1).refs),new Set(refs),'Unchecked heroes never reappear server-side');
+  if(refs.includes(hero))assert.equal(state.jobs.at(-1).compilation.references[0].role,'character','Identity images are ordered before generic references');
   if(!refs.includes(hero))assert(!state.jobs.at(-1).prompt.includes('Изображение 1: Герой'));
  }
  state=structuredClone(p);await route.POST(req({...input,referenceMode:'auto'}),ctx);assert.deepEqual(state.jobs.at(-1).refs,[hero,extra],'Legacy automatic mode preserved');

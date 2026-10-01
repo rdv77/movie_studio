@@ -1,6 +1,7 @@
 import { retrieveGoogle } from '@/lib/google-provider';
 import {waitExpired,stopJobWait,resumeJobWait} from '@/lib/job-wait';
 import {isMusicJob,musicBasis,parseMusicIdeas,DEFAULT_MUSIC} from '@/lib/music';
+import type {PromptCompilationSnapshot} from '@/lib/prompt-jobs';
 import {
   api,
   owner,
@@ -219,7 +220,9 @@ export const POST = api(async (req, ctx) => {
       }
       const item = getItem(p, job.itemId);
       if (!item.variants.some((v) => v.jobId === jobId)) {
+        const compilation=(job as typeof job&{compilation?:PromptCompilationSnapshot}).compilation;
         const v = makeVariant(p, item, {
+          ...(compilation?{compilation}:{}),
           id: jobId,
           reviewBasis:job.reviewBasis,
           basisVersion:job.basisVersion,

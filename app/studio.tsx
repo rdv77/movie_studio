@@ -1,4 +1,7 @@
 'use client';
+import {compilePrompt,type CompiledPrompt,type PromptInput} from '@/lib/prompt-compiler';
+import {mediaVariantPrompt} from '@/lib/prompt-jobs';
+import {PromptPreview} from './prompt-preview';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
@@ -1978,19 +1981,14 @@ function GenerateDialog({
   const effectiveRefs=selectableRefs?filterPlanReferences(p,item,refs):refs;
   const visibleReferenceIds=[5,7].includes(item.stage)?new Set([...(kind==='video'?planFrameIds(p,item):[...planReferenceIds(p,item),...planFrameIds(p,item)]),...effectiveRefs]):undefined;
   const effectiveCharacters=[5,7].includes(item.stage)?planCharacterIds(p,item,characterIds):characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
-  const effectivePrompt=kind==='video'?videoGenerationPrompt(p,item,prompt,effectiveCharacters):prompt;
-  const imageRequest=kind==='image'&&item.stage===5?storyboardImageRequest(p,item,prompt,effectiveRefs,1,count):undefined;
-  const heroRequests=kind==='image'&&item.stage===1?selected.map(m=>({model:m,...characterImageRequest(p,item,prompt,effectiveRefs,1,count,m.id)})):[];
-  const miniRequest=kind==='image'&&selected.some(m=>isMiniMaxImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count,'image-01'):miniMaxImageRequest(p,item,prompt,effectiveRefs,1,count)):undefined;
-  const falRequest=kind==='image'&&selected.some(m=>isFalImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count):compactImageRequest(p,item,prompt,effectiveRefs,1,count,FAL_PROMPT_BUDGET)):undefined;
-  const zenRequest=kind==='image'&&selected.some(m=>isZenCreatorImage(m.id))?(item.stage===1?characterImageRequest(p,item,prompt,effectiveRefs,1,count):compactImageRequest(p,item,prompt,effectiveRefs,1,count,ZEN_IMAGE_PROMPT_LIMIT)):undefined;
-  const imagePromptError=falRequest&&falRequest.length>FAL_PROMPT_BUDGET?'Qwen Image Edit: сократите задачу и описания до бюджета студии — 5000 символов.':zenRequest&&zenRequest.length>ZEN_IMAGE_PROMPT_LIMIT?'ZenCreator: сократите задачу, имена и описания до общего лимита 5000 символов.':miniRequest&&miniRequest.length>1500?'MiniMax image-01: сократите имена героев и описания до 1500 символов.':imageRequest?selected.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id)).map(m=>storyboardImagePromptIssue(imageRequest,m.id,item.title)).find(Boolean):'';
-  const miniRefError=falRequest&&falRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a))|| (miniRequest?miniMaxImageRefIssue(effectiveRefs.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a)):'');
+  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:shot?.duration,allowLegacyModel:!p.directing});
+  const compiledModels=new Map<string,{result?:CompiledPrompt,error?:string}>();
+  if(kind==='image'||kind==='video')for(const m of selected){try{compiledModels.set(m.id,{result:compilePrompt(p,item,m.id,mediaInput(m))});}catch(error){compiledModels.set(m.id,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'});}}
+  const imagePromptError=[...compiledModels.values()].map(x=>x.error).find(Boolean)??'';
+  const miniRefError=selected.map(m=>{const ids=compiledModels.get(m.id)?.result?.references.map(x=>x.assetId)??[];const files=ids.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a);return isFalImage(m.id)?falRefIssue(files):isMiniMaxImage(m.id)?miniMaxImageRefIssue(files):'';}).find(Boolean)??'';
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
-  const referenceError=selected.some(m=>kind==='image'&&effectiveRefs.length>(m.provider==='xai'?5:8))
-    ? `С учётом героев выбрано ${effectiveRefs.length} изображений. В студии Grok принимает до 5, FLUX и GPT Image — до 8. Уберите дополнительные референсы или смените модель.`
-    : selected.some(m=>kind==='video'&&m.provider==='xai'&&videoCharacterRefs(p,'xai',effectiveCharacters).length>7)?'Grok Video принимает до 7 отдельных образов героев.':'';
-  const computed = (m: (typeof MODELS)[number]) => m.id === GROK_IMAGE_MODEL ? grokImageEstimate(imageSettings, Math.min(5,effectiveRefs.length)) : googleEstimate(m.id,
+  const referenceError='';
+  const computed = (m: (typeof MODELS)[number]) => m.id === GROK_IMAGE_MODEL ? grokImageEstimate(imageSettings, compiledModels.get(m.id)?.result?.references.length??0) : googleEstimate(m.id,
     estimates[m.id] !== undefined
       ? estimates[m.id]
         ? ticks(estimates[m.id])
@@ -2263,19 +2261,8 @@ function GenerateDialog({
           )
         )}
         {item.stage>=4&&['image','video'].includes(kind)&&!selectableRefs&&<CharacterReferences p={p} item={item} mode={kind==='video'?'video':'image'} selectedIds={effectiveCharacters} onChange={kind==='video'?setCharacterIds:undefined} disabled={busy}/>}
-        {heroRequests.length>0&&<section className="note"><strong>Герой в визуальном мире фильма</strong><p>В каждый запрос включены краткие описания утверждённого стиля и локаций. Исходные карточки сохраняются целиком. Перед запуском можно раскрыть точный промпт каждой модели.</p>{heroRequests.map(r=><details key={r.model.id}><summary>{r.model.name} · {r.length} / {r.limit} символов</summary><p className="whitespace-pre-wrap">{r.prompt}</p></details>)}</section>}
-        {referenceError&&<p role="alert">{referenceError}</p>}{item.stage===1&&miniRefError&&<p role="alert">{miniRefError}</p>}
-        {item.stage!==1&&falRequest&&<div className="note"><p>Qwen Image Edit: нужен хотя бы один референс. Полный промпт {falRequest.length} / 5000 символов — бюджет студии. {falRequest.shortened?'Длинные описания сокращены; проверьте промпт.':''} Оригинальные карточки сохраняются целиком.</p><details><summary>Промпт для fal.ai</summary><p className="whitespace-pre-wrap">{falRequest.prompt}</p></details></div>}
-        {item.stage!==1&&zenRequest&&<div className="note"><p>ZenCreator: полный промпт {zenRequest.length} / 5000 символов. {zenRequest.shortened?'Длинные части сокращены; проверьте описание перед запуском. ':''}Исходные карточки сохраняются целиком. Для героя передаются его описание, задача и утверждённый стиль; для кадра — текущий план и образы героев.</p>
-          <details><summary>Промпт для ZenCreator{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{zenRequest.prompt}</p></details>
-          {imagePromptError&&<p role="alert">{imagePromptError}</p>}
-        </div>}
-        {item.stage!==1&&miniRequest&&<div className="note"><p>MiniMax image-01: {miniRequest.length} / 1500 символов. Длинные описания сокращаются; проверьте действие, стиль и внешность перед запуском. Исходные карточки сохраняются полностью.</p><details><summary>Промпт для MiniMax image-01</summary><p className="whitespace-pre-wrap">{miniRequest.prompt}</p></details>{miniRefError&&<p role="alert">{miniRefError}</p>}{imagePromptError&&<p role="alert">{imagePromptError}</p>}</div>}
-        {imageRequest&&selected.some(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id))&&<div className="note">
-          <p>Полный промпт кадра: {imageRequest.length}{selected.some(m=>isOpenAIImage(m.id))?' / 32000':''} символов. Учтены стиль, герои, референсы и правило речи.</p>
-          <details><summary>Промпт для модели{count>1?' · первый вариант':''}</summary><p className="whitespace-pre-wrap">{imageRequest.prompt}</p></details>
-          {imagePromptError&&<p role="alert">{imagePromptError}</p>}
-        </div>}
+        {(kind==='image'||kind==='video')&&selected.map(m=><PromptPreview key={m.id} project={p} item={item} modelIds={[m.id]} input={mediaInput(m)}/>)}
+        {!!miniRefError&&<p role="alert">{miniRefError}</p>}
         {kind === 'video' && (
           <div className="note">
             {selected.some(m=>m.id==='MiniMax-H3')&&<p>MiniMax H3 использует выбранный первый кадр; пропорции видео определяются этим изображением. Сохранённый ключ MiniMax должен иметь доступ Pay-as-you-go. Образы героев учитываются в первом кадре и тексте, отдельные изображения героев не добавляются к этому запросу.</p>}
@@ -2284,9 +2271,6 @@ function GenerateDialog({
             {selected.some(m=>m.id===GOOGLE_OMNI)&&<p>Gemini Omni: длительность задаётся просьбой в промпте, результат может длиться 3–10 секунд. После генерации проверьте хронометраж. Ориентир $1.05 за попытку включает 10 секунд 720p и запас на вход; фактические расходы зависят от токенов.</p>}
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
-            <p>Промпт с героями и правилом речи: {effectivePrompt.trim().length} / {selectedVideoPromptLimit(models)} символов.</p>
-            <details><summary>Полный промпт для модели</summary><p className="whitespace-pre-wrap">{effectivePrompt}</p></details>
-            {effectivePrompt.trim().length > selectedVideoPromptLimit(models) && <p role="alert">Сократите задачу: общий видеопромпт с героями должен быть до {selectedVideoPromptLimit(models)} символов. Запрос пока не запускается.</p>}
             {shot&&selected.length>0&&<VideoTiming p={p} item={item} planSeconds={shot.duration} videoSeconds={Math.min(...selected.map(m=>generationSeconds(m.id)))}/>}
             {!shot && <p role="alert">Для этой карточки не найден план в утверждённом сценарии. Подтяните планы и выберите нужную карточку.</p>}
           </div>
@@ -2318,9 +2302,9 @@ function GenerateDialog({
               !models.length || !!queueIssue ||
               !prompt.trim() ||
               prompt.trim().length>20000 || !!imagePromptError ||
-              count < 1 ||
+              !Number.isInteger(count) || count < 1 ||
               count > 4 ||
-              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || effectivePrompt.trim().length > selectedVideoPromptLimit(models) || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
+              !!referenceError || !!miniRefError || !!speechIssue || (kind === 'video' && (refs.length !== 1 || !shot || !!videoDurationIssue(item.title,shot.duration,models))) ||
               (kind === 'audio' && (!voice.trim() || !spoken || speech.length > 9500 || models.length > 1))
             }
             onClick={() =>
@@ -2381,8 +2365,8 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
     else if (BigInt(total) + BigInt(budget.actual) + BigInt(budget.reserved) > BigInt(p.limit)) costError = 'Эта серия превысит лимит проекта.';
   }
-  const blockReasons=[...(included.some(r=>videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).length>7)?['Grok Video принимает до 7 отдельных образов героев. Снимите лишние галочки.']:[]),
-    ...included.flatMap(r=>videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim()?videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds):'',videoPromptLimit(m.id),[m.id]))];
+  const videoInput=(r:(typeof rows)[number]):PromptInput=>({kind:'video',prompt:r.prompt.trim(),references:[...(r.ref?[{assetId:r.ref,role:'first-frame' as const}]:[]),...videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).map(assetId=>({assetId,role:'character' as const}))],startFrameId:r.ref||undefined,characterIds:planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds),duration:r.duration,allowLegacyModel:!snapshot.directing});
+  const blockReasons=included.flatMap(r=>{const errors=videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim(),20000,[m.id]);try{compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,m.id,videoInput(r));}catch(e){errors.push(r.title+': '+(e instanceof Error?e.message:'Не удалось подготовить запрос.'));}return errors;});
   const incomplete = blockReasons.length>0;
   const update = (itemId: string, changes: Partial<(typeof rows)[number]>) => setRows(current => current.map(r => r.itemId === itemId ? { ...r, ...changes } : r));
   return (
@@ -2435,11 +2419,8 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
               </div>
               <PlanSpeechNote p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!}/>
               <VideoTiming p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} planSeconds={r.duration} videoSeconds={generationSeconds(m.id)}/>
-              <details className="mt-3"><summary>Проверить и изменить промпт · с героями и правилом речи {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length} / {videoPromptLimit(m.id)}</summary>
-                <Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })} />
-                <p className="whitespace-pre-wrap">{videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds)}</p>
-              </details>
-              {videoGenerationPrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt.trim(),characterIds).length > videoPromptLimit(m.id) && <p role="alert">Сократите задачу: вместе с героями и правилом речи промпт должен быть до {videoPromptLimit(m.id)} символов.</p>}
+              <details className="mt-3"><summary>Правки задачи этого плана</summary><Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })}/></details>
+              <PromptPreview project={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} modelIds={[m.id]} input={videoInput(r)}/>
               {videoDurationIssue(r.title,r.duration,[m.id])&&<p role="alert">{videoDurationIssue(r.title,r.duration,[m.id])}</p>}
             </>}
           </section>
@@ -2755,7 +2736,10 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   const referenceOptions=new Map(rows.map(r=>[r.itemId,planReferenceIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!)]));
   const referencesByPlan=new Map(rows.map(r=>[r.itemId,filterPlanReferences(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.refs)]));
   const rowRefs=(r:(typeof rows)[number])=>referencesByPlan.get(r.itemId)??[];
-  const effectiveRefs=rows.filter(r=>r.include&&!r.blocked).map(rowRefs).sort((a,b)=>b.length-a.length)[0]??[];
+  const frameInput=(r:(typeof rows)[number]):PromptInput=>({kind:'image',prompt:r.prompt.trim(),references:rowRefs(r),allowLegacyModel:!snapshot.directing});
+  const compiled=new Map<string,{result?:CompiledPrompt,error?:string}>(rows.map(r=>{try{return [r.itemId,{result:compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,modelId,frameInput(r))}] as const;}catch(error){return [r.itemId,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'}] as const;}}));
+  const compiledRefs=(r:(typeof rows)[number])=>compiled.get(r.itemId)?.result?.references.map(x=>x.assetId)??[];
+  const effectiveRefs=rows.filter(r=>r.include&&!r.blocked).map(compiledRefs).sort((a,b)=>b.length-a.length)[0]??[];
   const excludedRefs=hiddenReferences(snapshot);
   const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id));
   const included = rows.filter(r => r.include && !r.blocked);
@@ -2764,7 +2748,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   let estimate = base, costError = '';
   try { if (!isGrok && override !== undefined) estimate = override.trim() ? ticks(override.trim()) : null; }
   catch { costError = 'Укажите стоимость в USD, например 0.05.'; estimate = null; }
-  const total = isGrok ? included.reduce((sum,r)=>sum+BigInt(grokImageEstimate(imageSettings,Math.min(5,rowRefs(r).length))),0n).toString() : estimate === null ? null : (BigInt(estimate) * BigInt(included.length)).toString();
+  const total = isGrok ? included.reduce((sum,r)=>sum+BigInt(grokImageEstimate(imageSettings,Math.min(5,compiledRefs(r).length))),0n).toString() : estimate === null ? null : (BigInt(estimate) * BigInt(included.length)).toString();
   const budget = totals(p);
   if (!costError && p.limit !== null) {
     if (total === null || budget.unknown) costError = 'При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';
@@ -2772,8 +2756,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   }
   const refLimit = m?.provider === 'xai' ? 5 : 8;
   const miniRefError=included.map(r=>{const media=rowRefs(r).map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a);return isFalImage(modelId)?falRefIssue(media):isMiniMaxImage(modelId)?miniMaxImageRefIssue(media):'';}).find(Boolean);
-  const compiled=new Map(rows.map(r=>[r.itemId,storyboardImageRequest(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.prompt,rowRefs(r),1,1,modelId)]));
-  const promptErrors=new Map(rows.map(r=>[r.itemId,storyboardImagePromptIssue(compiled.get(r.itemId)!,modelId,r.title)]));
+  const promptErrors=new Map(rows.map(r=>[r.itemId,compiled.get(r.itemId)?.error]));
   return <Dialog open onOpenChange={v => !v && close()}>
     <DialogContent className="sm:max-w-3xl modal-scroll">
       <DialogHeader><DialogTitle>Создать кадры всех планов</DialogTitle>
@@ -2783,9 +2766,6 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
       {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
-      {isFalImage(modelId)&&<p className="note">Qwen Image Edit: кадры создаются с выбранными референсами и утверждёнными образами героев. Промпт сокращён до бюджета студии в 5000 символов; проверьте его перед запуском.</p>}
-      {isZenCreatorImage(modelId)&&<p className="note">ZenCreator: промпт каждого кадра подготовлен в пределах 5000 символов. Проверьте действие, героев и стиль в разделе «Промпт для модели»; исходные описания остаются целиком.</p>}
-      {isMiniMaxImage(modelId)&&<p className="note">MiniMax image-01: описание каждого кадра сокращается до 1500 символов. Перед запуском проверьте «Промпт для модели» в отмеченных планах. Референсы PNG/JPEG меньше 10 МБ; общий размер до 20 МБ. Используется сохранённый ключ MiniMax.</p>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
       <div className="row wrap"><Button variant="outline" onClick={() => setRows(rs => rs.map(r => ({ ...r, include: !r.blocked })))}>Выбрать все планы</Button>
@@ -2798,8 +2778,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
           {(!r.prompt.trim() || r.prompt.trim().length > 20000) && <p role="alert">Введите задачу длиной от 1 до 20000 символов.</p>}
-          <p>Промпт со стилем, героями и референсами: {compiled.get(r.itemId)!.length}{isOpenAIImage(modelId)?' / 32000':isMiniMaxImage(modelId)?' / 1500':isZenCreatorImage(modelId)||isFalImage(modelId)?' / 5000':''} символов.</p>
-          <details><summary>Промпт для модели</summary><p className="whitespace-pre-wrap">{compiled.get(r.itemId)!.prompt}</p></details>
+          <PromptPreview project={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} modelIds={modelId?[modelId]:[]} input={frameInput(r)}/>
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
       </section>)}

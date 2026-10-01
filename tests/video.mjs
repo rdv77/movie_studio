@@ -73,7 +73,8 @@ const saved = await (await run(payload)).json();
 const jobs = saved.jobs.slice(1);
 assert.equal(jobs.length, 4);
 for (const job of jobs) {
-  assert(job.prompt.startsWith(payload.prompt),'Preserve the reviewed action');
+  assert(job.prompt.includes(payload.prompt),'Preserve the reviewed manual action regardless of prompt section order');
+  assert(job.compilation && job.compilation.budget.compiledCharacters===job.prompt.length);
   assert.match(job.prompt,/Все персонажи держат рты закрытыми/,'The server adds the speech rule to custom prompts');
   assert.equal(job.speechType,'voiceover');
   assert.equal(job.duration, 4, 'Timeline duration from screenplay, not fixed six seconds');
@@ -139,7 +140,8 @@ newJobs.forEach((j, n) => {
   assert.equal(j.model, 'grok-imagine-video-1.5');
   assert.equal(j.status, 'queued');
   assert.equal(j.duration, V.videoShot(bulk, targets[n]).duration);
-  assert(j.prompt.startsWith(bulkPayload.plans[n].prompt));
+  assert(j.prompt.includes(V.videoShot(bulk,targets[n]).description.trim()),'Preserve the current plan action, not repeated generated wrappers');
+  assert(j.compilation && j.compilation.budget.compiledCharacters===j.prompt.length);
   assert.match(j.prompt,/рты закрытыми/);
   assert.deepEqual(j.refs, [bulkPayload.plans[n].ref]);
   assert.equal(j.deps, D.dependencies(bulk, 7));

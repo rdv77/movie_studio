@@ -1,8 +1,8 @@
 import {build} from 'esbuild';
 import {strict as assert} from 'node:assert';
 const server=`export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:400})}};export const owner=async()=> 'owner';export const loadProject=async()=>structuredClone(globalThis.state);export const saveProject=async(_,p,revision)=>{assertRevision(revision);p.revision++;globalThis.state=structuredClone(p);return p};function assertRevision(rev){if(rev!==state.revision)throw Error('revision')};export const getKey=async()=> 'fake';export const asset=async(_,id)=>({id,mime:'image/png',size:100});`;
-await build({entryPoints:['lib/domain.ts','lib/models.ts','lib/minimax-image.ts','lib/zencreator-models.ts','app/api/projects/[id]/generate/route.ts'],outdir:'work/tests/character-image-prompt',outbase:'.',outExtension:{'.js':'.mjs'},bundle:true,format:'esm',platform:'node',plugins:[{name:'memory',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
-const base='../work/tests/character-image-prompt/',D=await import(base+'lib/domain.mjs'),I=await import(base+'lib/minimax-image.mjs'),M=await import(base+'lib/models.mjs'),Z=await import(base+'lib/zencreator-models.mjs'),G=await import(base+'app/api/projects/[id]/generate/route.mjs');
+await build({entryPoints:['lib/domain.ts','lib/models.ts','lib/prompt-compiler.ts','lib/prompt-jobs.ts','lib/zencreator-models.ts','app/api/projects/[id]/generate/route.ts'],outdir:'work/tests/character-image-prompt',outbase:'.',outExtension:{'.js':'.mjs'},bundle:true,format:'esm',platform:'node',plugins:[{name:'memory',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
+const base='../work/tests/character-image-prompt/',D=await import(base+'lib/domain.mjs'),C=await import(base+'lib/prompt-compiler.mjs'),J=await import(base+'lib/prompt-jobs.mjs'),M=await import(base+'lib/models.mjs'),Z=await import(base+'lib/zencreator-models.mjs'),G=await import(base+'app/api/projects/[id]/generate/route.mjs');
 const p=D.newProject('Проверка портрета'),hero=p.items.find(i=>i.stage===1),script=p.items.find(i=>i.stage===0),style=p.items.find(i=>i.stage===2);
 D.addVariant(p,script.id,{text:'СЦЕНАРИЙ_НЕ_ОТПРАВЛЯТЬ '+('Сюжет большого фильма. '.repeat(5000))});D.approve(p,script.id);
 D.addVariant(p,style.id,{text:'УТВЕРЖДЁННЫЙ_СТИЛЬ: гуашь, тёплая палитра.'});D.approve(p,style.id);
@@ -13,29 +13,29 @@ D.addVariant(p,hero.id,{kind:'image',assetId:D.id(),text:'СЛУЖЕБНАЯ_И�
 const other={...hero,id:D.id(),title:'ЧУЖОЙ_ГЕРОЙ',character:{...hero.character,name:'ЧУЖОЙ_ГЕРОЙ'},variants:[],approvedId:undefined,selectedId:undefined};p.items.push(other);
 D.addVariant(p,other.id,{kind:'image',assetId:D.id(),text:'ЧУЖОЙ_ГЕРОЙ',character:other.character});D.approve(p,other.id);
 const task='Создай один образ героя на простом фоне.',refs=hero.character.refs;
-const preview=I.characterImageRequest(p,hero,task,refs,1,2);
-assert(preview.length<5000);assert(!preview.shortened);
-for(const text of ['Лена','Рыжие волосы','Добрая','Сохрани лицо первого','УТВЕРЖДЁННЫЙ_СТИЛЬ',task,'только этого героя'])assert(preview.prompt.includes(text),text);
+const models=M.MODELS.filter(m=>Z.isZenCreatorImage(m.id)).map(m=>m.id);assert(models.length>4);
+const preview=C.compilePrompt(p,hero,models[0],{kind:'image',prompt:J.mediaVariantPrompt(task,1,2),references:refs,allowLegacyModel:true});
+assert(preview.prompt.length<5000);assert(!preview.compression.shortened);
+for(const text of ['Лена','Рыжие волосы','Добрая','Сохрани лицо первого','УТВЕРЖДЁННЫЙ_СТИЛЬ',task,'ЛОКАЦИЯ','рты всех персонажей закрыты'])assert(preview.prompt.includes(text),text);
 for(const absent of ['СЦЕНАРИЙ_НЕ_ОТПРАВЛЯТЬ','СЛУЖЕБНАЯ_ИСТОРИЯ','ЧУЖОЙ_ГЕРОЙ',hero.approvedId,...refs,'"deps"'])assert(!preview.prompt.includes(absent),absent);
 const original=structuredClone(p),long=structuredClone(p);long.items.find(i=>i.id===hero.id).character.appearance+=' Детали одежды. '.repeat(3000);
-const compact=I.compactImageRequest(long,long.items.find(i=>i.id===hero.id),task,refs,1,1,5000);
-assert(compact.shortened);assert(compact.length<=5000);assert(compact.prompt.includes('Сохрани лицо первого'));assert(compact.prompt.includes('Рыжие волосы'));
+assert.throws(()=>C.compilePrompt(long,long.items.find(i=>i.id===hero.id),models[0],{kind:'image',prompt:task,references:refs}),e=>e.code==='critical_too_long','Physical identity is mandatory, never silently truncated');
 assert.deepEqual(p,original,'Prompt construction never changes descriptions, refs or approvals');
-const models=M.MODELS.filter(m=>Z.isZenCreatorImage(m.id)).map(m=>m.id);assert(models.length>4);
 const payload={revision:p.revision,batchId:D.id(),itemId:hero.id,models:[...models,models[0]],count:2,prompt:task,refs:[],dialogue:'',voiceId:'',estimates:{}};
 const ctx={params:Promise.resolve({id:p.id})},req=b=>new Request('http://test/',{method:'POST',body:JSON.stringify(b)});
 globalThis.state=structuredClone(p);let response=await G.POST(req(payload),ctx);assert.equal(response.status,200,await response.clone().text());
 assert.equal(state.jobs.length,models.length*2);assert.deepEqual(state.items,p.items);assert.equal(state.jobs[0].prompt,preview.prompt);
 for(const j of state.jobs){assert(j.prompt.length<=5000);assert.deepEqual(j.refs,refs);assert.deepEqual(j.character,hero.character);assert.equal(j.actual,null);assert(j.zenCreditsEstimate>0);}
 response=await G.POST(req(payload),ctx);assert.equal(response.status,200);assert.equal(state.jobs.length,models.length*2,'Repeated batch does not add more paid jobs');
-globalThis.state=structuredClone(long);response=await G.POST(req({...payload,batchId:D.id()}),ctx);assert.equal(response.status,200);assert(state.jobs.every(j=>j.prompt.length<=5000));assert.deepEqual(state.items,long.items);
+globalThis.state=structuredClone(long);response=await G.POST(req({...payload,batchId:D.id()}),ctx);assert.equal(response.status,400);assert.equal(state.jobs.length,0);assert.deepEqual(state.items,long.items);
 globalThis.state=structuredClone(p);state.limit='1';response=await G.POST(req({...payload,estimates:Object.fromEntries(models.map(m=>[m,'2']))}),ctx);assert.equal(response.status,400);assert.equal(state.jobs.length,0,'Large selections still respect the budget atomically');
 for(const m of M.MODELS.filter(m=>m.kind==='image')){
- globalThis.state=structuredClone(long);
+ globalThis.state=structuredClone(p);
  const request={...payload,batchId:D.id(),models:[m.id],count:1};
  const response=await G.POST(req(request),ctx);assert.equal(response.status,200,m.id+': '+await response.clone().text());
- const actual=state.jobs[0],expected=I.characterImageRequest(long,long.items.find(i=>i.id===hero.id),task,refs,1,1,m.id);
- assert.equal(actual.prompt,expected.prompt,m.id+' preview and queued prompt differ');assert(actual.prompt.length<=expected.limit,m.id);
- assert(actual.prompt.includes('ЛОКАЦИЯ'));assert(actual.prompt.includes('УТВЕРЖДЁННЫЙ_СТИЛЬ'));assert.deepEqual(state.items,long.items);
+ const actual=state.jobs[0],expected=C.compilePrompt(p,hero,m.id,{kind:'image',prompt:task,references:refs,allowLegacyModel:true});
+ assert.equal(actual.prompt,expected.prompt,m.id+' preview and queued prompt differ');assert(actual.prompt.length<=expected.budget.limit,m.id);
+ assert(actual.compilation && actual.prompt.includes('Рыжие волосы'));assert(actual.prompt.includes('УТВЕРЖДЁННЫЙ_СТИЛЬ'));assert.deepEqual(state.items,p.items);
+ if(!actual.prompt.includes('ЛОКАЦИЯ'))assert(actual.compilation.compression.omitted.some(x=>x.key.startsWith('portrait-world.')&&x.reason==='budget'));
 }
-console.log('PASS character image prompts: huge script excluded, approved style/location included for every image model, preview equals API jobs, bounded compaction, immutable cards/references, idempotency and budget protection.');
+console.log('PASS character image prompts: huge script/history/other heroes excluded, approved style/location context, per-model exact preview, physical identity never truncated, immutable cards/references, idempotency and budget protection.');

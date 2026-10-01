@@ -1,26 +1,21 @@
-import { filterPlanReferences } from '@/lib/plan-references';
+import { compileMediaJob } from '@/lib/prompt-jobs';
+import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
 import {stampGenerationVersions} from '@/lib/creative-versions';
-import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate } from '@/lib/image-quality';
-import {materialBasis} from '@/lib/material-basis';
-import { prepareFalJobs } from '@/lib/fal-models';
+import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL } from '@/lib/image-quality';
 import { assertSelectedReferences } from '@/lib/reference-selection';
-import { prepareZenJobs } from '@/lib/zencreator-models';
 import { z } from 'zod';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
 import { chosen, stageReady, dependencies, assertBudget, id, now, type Job } from '@/lib/domain';
 import { model } from '@/lib/models';
 import { planFields, storyboardBatchPlans } from '@/lib/storyboard';
-import { characterImageRefs, assertCharacterRefLimit } from '@/lib/characters';
-import { isOpenAIImage, OPENAI_IMAGE_REFS_BYTES } from '@/lib/openai-image';
-import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
-import { isMiniMaxImage, miniMaxImageRefIssue } from '@/lib/minimax-image';
+import { characterImageRefs } from '@/lib/characters';
 
 const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
   imageSettings: imageSettingsSchema.optional(),
-  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
+  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000), instruction:z.string().trim().max(20000).optional(), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
@@ -40,22 +35,18 @@ export const POST = api(async (req, ctx) => {
   for (const row of s.plans) {
     const entry = available.find(x => x.item.id === row.itemId);
     if (!entry || entry.blocked) throw new Error(entry?.blocked || 'План не найден в раскадровке утверждённого сценария.');
-    const refs=filterPlanReferences(p,entry.item,row.refs!==undefined?assertSelectedReferences(p,row.refs):s.referenceMode==='selected'?s.refs:characterImageRefs(p,entry.item,s.refs));
-    assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
-    const imageAssets=[];
-    for(const ref of refs){const a=await asset(user,ref,p);if(!['image/png','image/jpeg','image/webp'].includes(a.mime))throw Error('Референс должен быть изображением PNG, JPEG или WebP.');imageAssets.push(a);}
-    if(isOpenAIImage(m.id)&&(imageAssets.some(a=>a.size>10*1024*1024)||imageAssets.reduce((n,a)=>n+a.size,0)>OPENAI_IMAGE_REFS_BYTES))throw Error('GPT Image: каждый референс до 10 МБ, суммарно до 20 МБ на план.');
-    if(isMiniMaxImage(m.id)){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw Error(issue);}
+    const refs=row.refs!==undefined?assertSelectedReferences(p,row.refs):s.referenceMode==='selected'?s.refs:characterImageRefs(p,entry.item,s.refs);
     const basis = chosen(entry.item), fields = planFields(p, entry.item, basis);
-    const request=storyboardImageRequest(p,entry.item,row.prompt,refs,1,1,m.id);
-    const issue=storyboardImagePromptIssue(request,m.id,entry.item.title);if(issue)throw new Error(issue);
     const job:Job={ id: id(), batchId: s.batchId, itemId: entry.item.id, model: m.id, kind: 'image',
-      brief: row.prompt, prompt: request.prompt, refs,
+      brief: row.prompt, prompt: '', refs,
       ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...fields, offset: 0, volume: 1, voiceId: '', deps: dependencies(p, 5), created: now(),
-      status: 'queued', transportVersion: 2, estimate: m.id === GROK_IMAGE_MODEL ? grokImageEstimate(s.imageSettings, refs.length) : s.estimate, actual: null };
-    prepareFalJobs([job],imageAssets);prepareZenJobs([job],imageAssets);jobs.push(job);
+      status: 'queued', transportVersion: 2, estimate:s.estimate, actual: null };
+    jobs.push(compileMediaJob(p,job,{instruction:row.instruction}));
   }
+  const loaded=new Map<string,Promise<PromptAsset>>();
+  const load=(ref:string)=>{let value=loaded.get(ref);if(!value){value=asset(user,ref,p);loaded.set(ref,value);}return value;};
+  for(const job of jobs)await validateCompiledMediaAssets(job,load);
   await getKey(user, m.provider);
   assertBudget(p, jobs);
   stampGenerationVersions(p,jobs);

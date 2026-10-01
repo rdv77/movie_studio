@@ -67,7 +67,7 @@ await tick(req({}),{params:Promise.resolve({id:state.id,jobId:job.id})});assert.
 assert.deepEqual(sent[0].body.image,{url:'data:image/png;base64,'+photo,type:'image_url'});
 assert.deepEqual(state.items[1].variants.at(-1).character,profile);assert.equal(state.items[1].approvedId,baseline.items[1].approvedId,'New generated portrait requires director approval');
 state=structuredClone(baseline);assert.equal((await generate(req(input(frame.id,'grok-imagine-image-2.0',[extra])),ctx)).status,200);
-assert.deepEqual(state.jobs[0].refs,[approvedImage,extra]);assert.match(state.jobs[0].prompt,/Изображение 1: Катя/);assert.match(state.jobs[0].prompt,/Смелая и внимательная/);
+assert.deepEqual(state.jobs[0].refs,[approvedImage,extra]);assert.match(state.jobs[0].prompt,/Изображение 1:.*героя Катя/);assert.match(state.jobs[0].prompt,/Смелая и внимательная/);
 const batch={revision:baseline.revision,batchId:D.id(),model:'grok-imagine-image-2.0',refs:[extra],estimate:'600000000',plans:[{itemId:frame.id,prompt:'Сцена у моря'}]};
 state=structuredClone(baseline);assert.equal((await storyboard(req(batch),ctx)).status,200);assert.deepEqual(state.jobs[0].refs,[approvedImage,extra]);
 assert.match(state.jobs[0].prompt,/Катя/);
@@ -75,7 +75,7 @@ const crowded=structuredClone(baseline);for(let n=0;n<5;n++){const item={id:D.id
 for(const i of crowded.items.filter(i=>i.stage>1&&i.stage<7)){D.chosen(i).deps=D.dependencies(crowded,i.stage);}
 state=structuredClone(crowded);assert.equal((await generate(req(input(frame.id,'grok-imagine-image-2.0')),ctx)).status,200);assert.deepEqual(state.jobs[0].refs,[approvedImage],'Unrelated heroes do not consume the shot reference limit');
 const crowdedScript=crowded.items.find(i=>i.stage===4),crowdedData=JSON.parse(D.chosen(crowdedScript).text);crowdedData.shots[0].cast=['Катя',...Array.from({length:5},(_,n)=>'Герой '+n)];D.chosen(crowdedScript).text=JSON.stringify(crowdedData);
-state=structuredClone(crowded);const denied=await generate(req(input(frame.id,'grok-imagine-image-2.0')),ctx);assert.equal(denied.status,400);assert.match((await denied.json()).error,/6 референсов/);assert.equal(state.jobs.length,0);
+state=structuredClone(crowded);const denied=await generate(req(input(frame.id,'grok-imagine-image-2.0')),ctx);assert.equal(denied.status,400);assert.match((await denied.json()).error,/6 (?:референсов|подходящих изображений)/);assert.equal(state.jobs.length,0);
 state=structuredClone(baseline);assert.equal((await generate(req(input(video.id,'grok-imagine-video-1.5',[firstFrame])),ctx)).status,200);
 job=state.jobs[0];assert.deepEqual(job.refs,[firstFrame]);assert.deepEqual(job.characterRefs,[approvedImage]);assert.match(job.prompt,/Рыжие косы/);
 sent=[];globalThis.fetch=async(url,options)=>{sent.push(JSON.parse(options.body));return Response.json({request_id:'video-receipt',task_id:'minimax-receipt'})};
@@ -84,26 +84,28 @@ await P.generate({...job,model:'MiniMax-Hailuo-2.3'},'key',['data:first'],'16:9'
 state=structuredClone(baseline);const long=await generate(req({...input(video.id,'MiniMax-Hailuo-2.3',[firstFrame]),prompt:'a'.repeat(1990)}),ctx);assert.equal(long.status,400);assert.equal(state.jobs.length,0,'Combined mandatory identity counts against provider limit before charging');
 state=structuredClone(baseline);D.addVariant(state,video.id,{kind:'video',assetId:firstFrame,text:'Ролик',model:'grok-imagine-video-1.5'});D.approve(state,video.id);
 const remainingItem={id:D.id(),stage:7,title:'План 2',sourceShot:{scriptId:state.items[4].id,title:'План 2'},variants:[]};state.items.push(remainingItem);
-assert.equal((await remaining(req({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items[7]).id,estimate:'8600000000',plans:[{itemId:remainingItem.id,ref:firstFrame,prompt:'Катя идёт к морю.'}]}),ctx)).status,200);
+const secondFrame=image(),secondBoard={id:D.id(),stage:5,title:'План 2',sourceShot:{scriptId:state.items[4].id,title:'План 2'},variants:[]};state.items.push(secondBoard);
+D.addVariant(state,secondBoard.id,{kind:'image',assetId:secondFrame,text:'Начало второго плана'});D.approve(state,secondBoard.id);
+for(const voice of state.items.filter(i=>i.stage===6))D.chosen(voice).deps=D.dependencies(state,6);
+assert.equal((await remaining(req({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items[7]).id,estimate:'8600000000',plans:[{itemId:remainingItem.id,ref:secondFrame,prompt:'Катя идёт к морю.'}]}),ctx)).status,200);
 assert.deepEqual(state.jobs[0].characterRefs,[approvedImage]);assert.match(state.jobs[0].prompt,/Рыжие косы/);
 console.log('PASS character workflow: owned photo/text drafts, immutable approved profiles, portrait generation snapshots, automatic single/batch references, Grok video reference_images, MiniMax first frame, reference/prompt limits before billing, and downstream reapproval. Zero paid calls.');
 
 // Explicit empty selection is different from legacy requests with no selection.
 const remainingBase=structuredClone(state);remainingBase.jobs=[];
-const remainingInput=()=>({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items.find(i=>i.id===video.id)).id,estimate:'8500000000',plans:[{itemId:remainingItem.id,ref:firstFrame,prompt:'Пейзаж у моря.'}]});
+const remainingInput=()=>({revision:state.revision,batchId:D.id(),sourceItemId:video.id,sourceVariantId:D.chosen(state.items.find(i=>i.id===video.id)).id,estimate:'8500000000',plans:[{itemId:remainingItem.id,ref:secondFrame,prompt:'Пейзаж у моря.'}]});
 for(const ids of [[],[hero.id]]){
  state=structuredClone(remainingBase);const res=await remaining(req({...remainingInput(),characterIds:ids}),ctx);assert.equal(res.status,200,await res.clone().text());
  const j=state.jobs[0];assert.deepEqual(j.characterIds,ids);assert.deepEqual(j.characterRefs??[],ids.length?[approvedImage]:[]);
- assert.equal(j.prompt.includes('Рыжие косы'),!!ids.length);assert.deepEqual(j.refs,[firstFrame]);
+ assert(j.prompt.includes('Рыжие косы'),'Removing a photo reference does not remove the identity of a visible actor');assert.deepEqual(j.refs,[secondFrame]);
 }
 const allHeroes=C.approvedCharacters(crowded),picked=allHeroes[1];
 for(const model of ['grok-imagine-video-1.5','MiniMax-Hailuo-2.3'])for(const ids of [[],[picked.itemId]]){
  state=structuredClone(crowded);const initial=structuredClone(state.items);
  const res=await generate(req({...input(video.id,model,[firstFrame]),characterIds:ids}),ctx);assert.equal(res.status,200,await res.clone().text());
  const j=state.jobs[0];assert.deepEqual(j.characterIds,ids);assert.deepEqual(j.refs,[firstFrame]);assert.deepEqual(state.items,initial,'Exclusion never removes a hero or changes approvals');
- assert.equal(j.prompt.includes('Постоянные герои:'),!!ids.length);
- assert(!j.prompt.includes('Катя:'),'Unselected identity excluded from automatic prompt');
- assert.equal(j.prompt.includes(picked.profile.name+':'),!!ids.length);
+ assert(j.prompt.includes('Постоянная идентичность Катя:'));
+ assert(j.prompt.includes('Постоянная идентичность '+picked.profile.name+':'),'Canonical cast identities are preserved independently from photo selection');
  assert.deepEqual(j.characterRefs??[],model.startsWith('grok')&&ids.length?[picked.assetId]:[]);
 }
 for(const ids of [[D.id()],[hero.id,hero.id],[frame.id]]){

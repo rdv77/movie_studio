@@ -1,195 +1,106 @@
-import { planCharacterIds, filterPlanReferences } from '@/lib/plan-references';
-import {stampGenerationVersions} from '@/lib/creative-versions';
-import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate } from '@/lib/image-quality';
-import {materialBasis} from '@/lib/material-basis';
-import {selectedVideoPromptLimit,availableForDirecting} from '@/lib/model-capabilities';
-import { prepareFalJobs, isFalImage, FAL_PROMPT_BUDGET } from '@/lib/fal-models';
-import { prepareGoogleJobs } from '@/lib/google-models';
+import { planCharacterIds } from '@/lib/plan-references';
+import { stampGenerationVersions } from '@/lib/creative-versions';
+import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL } from '@/lib/image-quality';
+import { availableForDirecting } from '@/lib/model-capabilities';
 import { enqueuePlanJobs, conceptImageAdmissionIssue, storyboardAdmissionIssue, videoAdmissionIssue } from '@/lib/generation-queue';
 import { videoDurationIssue } from '@/lib/video-readiness';
 import { assertSelectedReferences } from '@/lib/reference-selection';
-import { prepareZenJobs, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
-import {
-  api,
-  owner,
-  loadProject,
-  saveProject,
-  getKey,
-  asset,
-} from '@/lib/server';
-import {
-  id,
-  now,
-  getItem,
-  stageReady,
-  chosen,
-  dependencies,
-  promptFor,
-  assertBudget,
-  type Job,
-} from '@/lib/domain';
+import { api, owner, loadProject, saveProject, getKey, asset } from '@/lib/server';
+import { id, now, getItem, stageReady, chosen, dependencies, promptFor, assertBudget, type Job } from '@/lib/domain';
 import { model, MODELS } from '@/lib/models';
-import { resolveSpeechSource, speechCharacters,speechPlans } from '@/lib/speech';
+import { resolveSpeechSource, speechCharacters, speechPlans } from '@/lib/speech';
 import { spokenText } from '@/lib/spoken-text';
-import { videoShot, videoGenerationPrompt, VIDEO_PROMPT_LIMIT,scriptVideo } from '@/lib/video';
+import { videoShot, scriptVideo } from '@/lib/video';
 import { planFields } from '@/lib/storyboard';
 import { z } from 'zod';
-import { characterPrompt, characterImageRefs, characterReferenceNote, withCharacterIdentity, videoCharacterRefs, videoCharacters, assertCharacterRefLimit } from '@/lib/characters';
+import { characterPrompt, characterImageRefs, videoCharacterRefs, videoCharacters } from '@/lib/characters';
 import { planSpeech } from '@/lib/plan-speech';
-import { speechInfo, assertSpeech, withSpeechDirection } from '@/lib/speech-mode';
-import { isOpenAIImage, OPENAI_IMAGE_PROMPT_LIMIT, OPENAI_IMAGE_REFS_BYTES } from '@/lib/openai-image';
-import { storyboardImageRequest, storyboardImagePromptIssue } from '@/lib/storyboard-image-prompt';
-import { isMiniMaxImage, miniMaxImageRequest, compactImageRequest, characterImageRequest, miniMaxImageRefIssue, MINIMAX_IMAGE_PROMPT_LIMIT } from '@/lib/minimax-image';
+import { speechInfo, assertSpeech } from '@/lib/speech-mode';
+import { compileMediaJob } from '@/lib/prompt-jobs';
+import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
+
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
   const p = await loadProject(user, (await ctx.params).id);
-  const s = z
-    .object({
-      revision: z.number().int(),
-      batchId: z.string().uuid(),
-      itemId: z.string().uuid(),
-      models: z.array(z.string()).min(1).max(MODELS.length),
-      count: z.number().int().min(1).max(4),
-      prompt: z.string().trim().min(1).max(20000),
-      refs: z.array(z.string().uuid()).max(8),
-      characterIds: z.array(z.string().uuid()).max(120).optional(),
-      referenceMode: z.enum(['auto','selected']).default('auto'),
-      imageSettings: imageSettingsSchema.optional(),
-      dialogue: z.string().max(9500),
-      voiceId: z.string().max(150),
-      speechSource: z.string().max(200).optional(),
-      speechType: z.enum(['voiceover','character','none']).optional(),
-      speaker: z.string().trim().max(100).optional(),
-      estimates: z.record(z.string(), z.string().regex(/^\d+$/).nullable()),
-    })
-    .parse(await req.json());
-  if (p.jobs.some((j) => j.batchId === s.batchId)) return Response.json(p);
-  if (s.revision !== p.revision)
-    throw new Error('Проект изменился. Обновите оценку серии.');
+  const s = z.object({
+    revision: z.number().int(), batchId: z.string().uuid(), itemId: z.string().uuid(),
+    models: z.array(z.string()).min(1).max(MODELS.length), count: z.number().int().min(1).max(4),
+    prompt: z.string().trim().min(1).max(20000), instruction: z.string().trim().max(20000).optional(),
+    refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
+    referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(),
+    dialogue: z.string().max(9500), voiceId: z.string().max(150), speechSource: z.string().max(200).optional(),
+    speechType: z.enum(['voiceover', 'character', 'none']).optional(), speaker: z.string().trim().max(100).optional(),
+    estimates: z.record(z.string(), z.string().regex(/^\d+$/).nullable()),
+  }).parse(await req.json());
+  if (p.jobs.some(j => j.batchId === s.batchId)) return Response.json(p);
+  if (s.revision !== p.revision) throw Error('Проект изменился. Обновите оценку серии.');
   const item = getItem(p, s.itemId);
-  if(item.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария. Запрос не отправлен.');
-  if(item.removedAt)throw new Error('Сначала восстановите удалённую карточку героя.');
-  if (!stageReady(p, item.stage))
-    throw new Error('Утвердите предыдущие этапы.');
+  if (item.planArchive) throw Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария. Запрос не отправлен.');
+  if (item.removedAt) throw Error('Сначала восстановите удалённую карточку героя.');
+  if (!stageReady(p, item.stage)) throw Error('Утвердите предыдущие этапы.');
   const ms = [...new Set(s.models)].map(model);
-  if(p.directing&&s.models.some(id=>!availableForDirecting(id)))throw Error('Эта модель имеет короткий промпт и исключена из режиссёрского процесса. Выберите другую.');
-  const parallelStoryboard=item.stage===5&&ms.every(m=>m.kind==='image');
-  const parallelVideo=item.stage===7&&ms.every(m=>m.kind==='video'&&m.provider!=='sync');
-  const parallelConcept=[1,2,3].includes(item.stage)&&ms.every(m=>m.kind==='image');
-  const queueIssue=parallelConcept?conceptImageAdmissionIssue(p,item.id):parallelStoryboard?storyboardAdmissionIssue(p,item.id):parallelVideo?videoAdmissionIssue(p,item.id):'';
-  if(queueIssue)throw new Error(queueIssue);
-  if (!parallelConcept && !parallelStoryboard && !parallelVideo &&
-    p.jobs.some((j) =>
-      ['queued', 'dispatching', 'pending', 'saving'].includes(j.status),
-    )
-  )
-    throw new Error(
-      'Дождитесь текущей серии или отмените неотправленные попытки.',
-    );
-  if (ms.some((m) => m.kind !== ms[0].kind))
-    throw new Error('Сравнивайте модели одного типа.');
-  if (ms.some(m => m.provider === 'sync')) throw new Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
-  for (const m of ms) await getKey(user, m.provider);
+  if (p.directing && s.models.some(id => !availableForDirecting(id))) throw Error('Эта модель имеет короткий промпт и исключена из режиссёрского процесса. Выберите другую.');
+  const parallelStoryboard = item.stage === 5 && ms.every(m => m.kind === 'image');
+  const parallelVideo = item.stage === 7 && ms.every(m => m.kind === 'video' && m.provider !== 'sync');
+  const parallelConcept = [1, 2, 3].includes(item.stage) && ms.every(m => m.kind === 'image');
+  const queueIssue = parallelConcept ? conceptImageAdmissionIssue(p, item.id) : parallelStoryboard ? storyboardAdmissionIssue(p, item.id) : parallelVideo ? videoAdmissionIssue(p, item.id) : '';
+  if (queueIssue) throw Error(queueIssue);
+  if (!parallelConcept && !parallelStoryboard && !parallelVideo && p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status)))
+    throw Error('Дождитесь текущей серии или отмените неотправленные попытки.');
+  if (ms.some(m => m.kind !== ms[0].kind)) throw Error('Сравнивайте модели одного типа.');
+  if (ms.some(m => m.provider === 'sync')) throw Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   const kind = ms[0].kind;
-  const refs = kind === 'image' ? filterPlanReferences(p,item,s.referenceMode==='selected'?assertSelectedReferences(p,s.refs):characterImageRefs(p,item,s.refs)) : s.refs;
-  if(kind==='video')videoCharacters(p,s.characterIds);
-  const characterIds=kind==='video'?planCharacterIds(p,item,s.characterIds):undefined;
-  const characterRefs = kind === 'video' ? videoCharacterRefs(p,ms.some(m=>m.provider==='xai')?'xai':'',characterIds) : [];
-  if(kind==='image') for(const m of ms) assertCharacterRefLimit(refs,m.provider==='xai'?5:8);
-  assertCharacterRefLimit(characterRefs,7);
-  let imageBytes=0;
-  const imageAssets:{mime:string;size:number}[]=[];
-  for (const ref of [...new Set([...refs,...characterRefs])]) {
-    const a = await asset(user, ref, p);
-    if(refs.includes(ref))imageAssets.push(a);
-    if(ms.some(m=>isOpenAIImage(m.id))&&(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024))throw new Error('GPT Image: каждый референс должен быть PNG, JPEG или WebP до 10 МБ.');
-    if(refs.includes(ref))imageBytes+=a.size;
-    if (!a.mime.startsWith('image/'))
-      throw new Error('Референс должен быть изображением.');
-  }
-  if(ms.some(m=>isOpenAIImage(m.id))&&imageBytes>OPENAI_IMAGE_REFS_BYTES)throw new Error('GPT Image: выберите референсы суммарно до 20 МБ. Запрос не отправлен.');
-  if(ms.some(m=>isMiniMaxImage(m.id))){const issue=miniMaxImageRefIssue(imageAssets);if(issue)throw new Error(issue);}
-  const motionPrompt = kind === 'video' ? videoGenerationPrompt(p,item,s.prompt,characterIds) : '';
+  const refs = kind === 'image' ? s.referenceMode === 'selected' ? assertSelectedReferences(p, s.refs) : characterImageRefs(p, item, s.refs) : s.refs;
+  if (kind === 'video') videoCharacters(p, s.characterIds);
+  const characterIds = kind === 'video' ? planCharacterIds(p, item, s.characterIds) : undefined;
+  const characterRefs = kind === 'video' ? videoCharacterRefs(p, 'xai', characterIds) : [];
   const shot = ['image', 'video'].includes(kind) && [5, 7].includes(item.stage) ? videoShot(p, item) : undefined;
   const fields = shot ? planFields(p, item, chosen(item)) : undefined;
   if (kind === 'video') {
-    if (motionPrompt.length > selectedVideoPromptLimit(s.models))
-      throw new Error(`Видеопромпт вместе с описаниями героев содержит ${motionPrompt.length} символов. Сократите задачу до общего лимита ${selectedVideoPromptLimit(s.models)}; запрос не отправлен.`);
-    if (item.stage === 7 && !shot)
-      throw new Error('Подтяните планы из утверждённого подробного сценария и выберите нужный план.');
-    if (shot && videoDurationIssue(item.title,shot.duration,s.models))
-      throw new Error(videoDurationIssue(item.title,shot.duration,s.models));
+    if (item.stage === 7 && !shot) throw Error('Подтяните планы из утверждённого подробного сценария и выберите нужный план.');
+    if (shot && videoDurationIssue(item.title, shot.duration, s.models)) throw Error(videoDurationIssue(item.title, shot.duration, s.models));
+    if (s.refs.length !== 1) throw Error('Для видео выберите ровно один первый кадр.');
   }
   const speechSource = kind === 'audio' ? resolveSpeechSource(p, s.speechSource) : undefined;
-  const info = kind==='audio' ? (s.speechType ? speechInfo(s) : speechSource ? speechInfo(speechSource) : planSpeech(p,item,chosen(item))) : planSpeech(p,item,kind==='video'?undefined:chosen(item));
-  const dialogue = kind === 'audio' ? spokenText(s.dialogue, [...speechCharacters(p),info.speaker]) : fields?.dialogue ?? s.dialogue;
-  if (kind==='audio') assertSpeech(info,dialogue);
-  if(kind==='audio'&&p.productionOrder==='video-first'&&item.sourceShot){const target=speechPlans(p).find(r=>r.item?.id===item.id);if(target?.timingIssue)throw Error(target.timingIssue);}
-  if (kind==='audio'&&info.speechType==='character'&&!item.sourceShot) throw new Error('Для реплик героев сначала нажмите «Подготовить озвучку по планам». Общая дорожка предназначена для закадрового текста.');
-  if (kind==='video') assertSpeech(info,'');
-  if (kind === 'video' && s.refs.length !== 1)
-    throw new Error('Для видео выберите ровно один первый кадр.');
-  if (kind === 'audio' && (!s.voiceId.trim() || !dialogue))
-    throw new Error('Укажите voice_id и произносимую реплику. Служебные пометки не озвучиваются.');
-  if (
-    ms.some((m) => m.provider === 'xai') &&
-    kind === 'image' &&
-    s.refs.length > 5
-  )
-    throw new Error('Grok принимает до пяти референсов.');
-  const linked = p.items.find((i) => i.stage === 5 && !i.planArchive && i.title === item.title);
-  const basis =
-    chosen(item) ?? linked?.variants.find((v) => v.id === linked.approvedId);
-  const imageRequests=kind==='image'&&item.stage===5?Array.from({length:s.count},(_,n)=>storyboardImageRequest(p,item,s.prompt,refs,n+1,s.count)):[];
-  for(const request of imageRequests)for(const m of ms.filter(m=>!isMiniMaxImage(m.id)&&!isZenCreatorImage(m.id)&&!isFalImage(m.id))){const issue=storyboardImagePromptIssue(request,m.id,item.title);if(issue)throw new Error(issue);}
-  const jobs: Job[] = ms.flatMap((m) =>
-    Array.from({ length: s.count }, (_, n) => ({
-      id: id(),
-      batchId: s.batchId,
-      itemId: item.id,
-      model: m.id,
-      shotSource: fields?.shotSource??(kind==='audio'?scriptVideo(p).variant?.id:undefined),
-      kind,
+  const info = kind === 'audio' ? s.speechType ? speechInfo(s) : speechSource ? speechInfo(speechSource) : planSpeech(p, item, chosen(item)) : planSpeech(p, item, kind === 'video' ? undefined : chosen(item));
+  const dialogue = kind === 'audio' ? spokenText(s.dialogue, [...speechCharacters(p), info.speaker]) : fields?.dialogue ?? s.dialogue;
+  if (kind === 'audio') assertSpeech(info, dialogue);
+  if (kind === 'audio' && p.productionOrder === 'video-first' && item.sourceShot) {
+    const target = speechPlans(p).find(r => r.item?.id === item.id); if (target?.timingIssue) throw Error(target.timingIssue);
+  }
+  if (kind === 'audio' && info.speechType === 'character' && !item.sourceShot) throw Error('Для реплик героев сначала нажмите «Подготовить озвучку по планам». Общая дорожка предназначена для закадрового текста.');
+  if (kind === 'video') assertSpeech(info, '');
+  if (kind === 'audio' && (!s.voiceId.trim() || !dialogue)) throw Error('Укажите voice_id и произносимую реплику. Служебные пометки не озвучиваются.');
+  const linked = p.items.find(i => i.stage === 5 && !i.planArchive && i.title === item.title);
+  const basis = chosen(item) ?? linked?.variants.find(v => v.id === linked.approvedId);
+  const jobs: Job[] = ms.flatMap(m => Array.from({ length: s.count }, (_, n) => {
+    const job: Job = {
+      id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind,
+      shotSource: fields?.shotSource ?? (kind === 'audio' ? scriptVideo(p).variant?.id : undefined),
       ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
-      ...(['audio','image','video'].includes(kind)&&item.stage>=5?info:{}),
-      brief: s.prompt,
-      camera: fields?.camera ?? basis?.camera ?? 'Статичная камера',
-      continuity: fields?.continuity ?? basis?.continuity ?? '',
-      offset: speechSource?.offset ?? basis?.offset ?? 0,
-      volume: basis?.volume ?? 1,
-      character: item.stage===1 ? item.character : undefined,
-      location: item.stage===3 ? item.location??chosen(item)?.location : undefined,
-      characterRefs: kind==='video'&&m.provider==='xai'?characterRefs:undefined,
-      characterIds: kind==='video'?characterIds:undefined,
-      prompt: kind==='image'&&item.stage===1 ? characterImageRequest(p,item,s.prompt,refs,n+1,s.count,m.id).prompt : isFalImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,FAL_PROMPT_BUDGET).prompt : isZenCreatorImage(m.id) ? compactImageRequest(p,item,s.prompt,refs,n+1,s.count,ZEN_IMAGE_PROMPT_LIMIT).prompt : isMiniMaxImage(m.id) ? miniMaxImageRequest(p,item,s.prompt,refs,n+1,s.count).prompt : kind === 'video' ? motionPrompt : imageRequests[n]?.prompt ?? (promptFor(
-        p,
-        item,
-        (item.character ? characterPrompt(item.character)+'\n\nПравки к этой попытке: ' : '')+s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`,
-        basis,
-      ) + (kind==='image'&&item.stage>=4?characterReferenceNote(p,refs):'') + (kind==='image'&&item.stage===5?'\n\n'+withSpeechDirection('',info):'')),
-      refs,
-      dialogue,
-      voiceId: s.voiceId,
-      duration:
-        kind === 'video'
-          ? (shot?.duration ?? Math.min(basis?.duration ?? 6, 6))
-          : (speechSource?.duration ?? fields?.duration ?? basis?.duration ?? 5),
-      deps: dependencies(p, item.stage),
-      created: now(),
-      status: 'queued',
-      transportVersion: 2,
-      estimate: m.id === GROK_IMAGE_MODEL ? grokImageEstimate(s.imageSettings, refs.length) : s.estimates[m.id] ?? null,
-      actual: null,
-    })),
-  );
-  if(jobs.some(j=>isOpenAIImage(j.model)&&j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT))throw new Error('GPT Image: полный промпт с утверждённой основой длиннее 32 000 символов. Сократите задачу или описания. Запрос не отправлен.');
-  if(jobs.some(j=>isMiniMaxImage(j.model)&&j.prompt.length>MINIMAX_IMAGE_PROMPT_LIMIT))throw new Error('MiniMax image-01: сократите имена героев и описания до общего лимита 1500 символов. Запрос не отправлен.');
-  prepareFalJobs(jobs, imageAssets);
-  prepareGoogleJobs(jobs, imageAssets);
-  prepareZenJobs(jobs, imageAssets);
-  if(parallelConcept||parallelStoryboard||parallelVideo)return Response.json(await enqueuePlanJobs(p,jobs,()=>loadProject(user,p.id),(next,revision)=>saveProject(user,next,revision)));
-  assertBudget(p, jobs);
-  stampGenerationVersions(p,jobs);
-  p.jobs.push(...jobs);
+      ...(['audio', 'image', 'video'].includes(kind) && item.stage >= 5 ? info : {}),
+      brief: s.prompt, prompt: ['image', 'video'].includes(kind) ? '' : promptFor(p, item,
+        (item.character ? characterPrompt(item.character) + '\n\nПравки к этой попытке: ' : '') + s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`, basis),
+      refs, characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
+      characterIds, character: item.stage === 1 ? item.character : undefined,
+      location: item.stage === 3 ? item.location ?? chosen(item)?.location : undefined,
+      camera: fields?.camera ?? basis?.camera ?? 'Статичная камера', continuity: fields?.continuity ?? basis?.continuity ?? '',
+      offset: speechSource?.offset ?? basis?.offset ?? 0, volume: basis?.volume ?? 1, dialogue, voiceId: s.voiceId,
+      duration: kind === 'video' ? shot?.duration ?? Math.min(basis?.duration ?? 6, 6) : speechSource?.duration ?? fields?.duration ?? basis?.duration ?? 5,
+      deps: dependencies(p, item.stage), created: now(), status: 'queued', transportVersion: 2,
+      estimate: s.estimates[m.id] ?? null, actual: null,
+    };
+    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { instruction: s.instruction, variantIndex: n + 1, variantCount: s.count }) : job;
+  }));
+  // Compile every model first. A critical conflict must stop the batch before storage reads or reservation.
+  const loaded = new Map<string, Promise<PromptAsset>>();
+  const load = (ref: string) => { let value = loaded.get(ref); if (!value) { value = asset(user, ref, p); loaded.set(ref, value); } return value; };
+  for (const job of jobs) {
+    if (job.kind === 'image' || job.kind === 'video') await validateCompiledMediaAssets(job, load);
+    else for (const ref of job.refs) if (!(await load(ref)).mime.startsWith('image/')) throw Error('Референс должен быть изображением.');
+  }
+  for (const m of ms) await getKey(user, m.provider);
+  if (parallelConcept || parallelStoryboard || parallelVideo) return Response.json(await enqueuePlanJobs(p, jobs, () => loadProject(user, p.id), (next, revision) => saveProject(user, next, revision)));
+  assertBudget(p, jobs); stampGenerationVersions(p, jobs); p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));
 });
