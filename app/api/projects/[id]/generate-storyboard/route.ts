@@ -1,3 +1,4 @@
+import {prepareKeyframeGeneration,selectedKeyframe} from '@/lib/keyframes';
 import { compileMediaJob } from '@/lib/prompt-jobs';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
 import {stampGenerationVersions} from '@/lib/creative-versions';
@@ -11,7 +12,7 @@ import { planFields, storyboardBatchPlans } from '@/lib/storyboard';
 import { characterImageRefs } from '@/lib/characters';
 
 const input = z.object({
-  revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
+  keyframe:z.enum(['start','middle','end']).default('start'),revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
   imageSettings: imageSettingsSchema.optional(),
@@ -36,18 +37,21 @@ export const POST = api(async (req, ctx) => {
     const entry = available.find(x => x.item.id === row.itemId);
     if (!entry || entry.blocked) throw new Error(entry?.blocked || 'План не найден в раскадровке утверждённого сценария.');
     const refs=row.refs!==undefined?assertSelectedReferences(p,row.refs):s.referenceMode==='selected'?s.refs:characterImageRefs(p,entry.item,s.refs);
+    const first=selectedKeyframe(entry.item,'start');
+    const frameModel=s.keyframe==='start'?m:model(first?.jobId?first.model:m.id);
+    const prepared=prepareKeyframeGeneration(p,entry.item.id,s.keyframe,{model:frameModel.id,refs,imageSettings:frameModel.id===GROK_IMAGE_MODEL?s.imageSettings??FINAL_IMAGE_SETTINGS:undefined});
     const basis = chosen(entry.item), fields = planFields(p, entry.item, basis);
-    const job:Job={ id: id(), batchId: s.batchId, itemId: entry.item.id, model: m.id, kind: 'image',
-      brief: row.prompt, prompt: '', refs,
-      ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
+    const job:Job={ id: id(), batchId: s.batchId, itemId: entry.item.id, model: frameModel.id, kind: 'image',keyframe:prepared.keyframe,pairId:prepared.pairId,sourceFrameVariantId:prepared.sourceFrameVariantId,keyframeSourceBasis:prepared.keyframeSourceBasis,keyframeReviewBasis:prepared.keyframeReviewBasis,
+      brief: row.prompt, prompt: '', refs:prepared.refs,
+      ...(frameModel.id === GROK_IMAGE_MODEL ? { imageSettings: prepared.imageSettings??s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...fields, offset: 0, volume: 1, voiceId: '', deps: dependencies(p, 5), created: now(),
-      status: 'queued', transportVersion: 2, estimate:s.estimate, actual: null };
-    jobs.push(compileMediaJob(p,job,{instruction:row.instruction}));
+      status: 'queued', transportVersion: 2, estimate:s.keyframe==='start'?s.estimate:frameModel.estimate, actual: null };
+    jobs.push(compileMediaJob(p,job,{keyframe:s.keyframe,keyframeInstruction:prepared.roleInstruction,instruction:row.instruction}));
   }
   const loaded=new Map<string,Promise<PromptAsset>>();
   const load=(ref:string)=>{let value=loaded.get(ref);if(!value){value=asset(user,ref,p);loaded.set(ref,value);}return value;};
   for(const job of jobs)await validateCompiledMediaAssets(job,load);
-  await getKey(user, m.provider);
+  for(const provider of new Set(jobs.map(j=>model(j.model).provider)))await getKey(user,provider);
   assertBudget(p, jobs);
   stampGenerationVersions(p,jobs);
   p.jobs.push(...jobs);

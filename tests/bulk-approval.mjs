@@ -30,7 +30,7 @@ const linked={id:D.id(),stage:6,title:'Реплика',sourceShot:{scriptId:p.it
 D.addVariant(plans,linked.id,{kind:'video',assetId:D.id()});assert.equal(selections(plans,6).length,0);
 D.addVariant(plans,linked.id,{kind:'audio',assetId:D.id()});assert.equal(selections(plans,6).length,1);
 assert.throws(()=>B.approvalBatch(p,4));
-const plugin={name:'server-mock',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'mock',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw new Error('Unauthorized');return 'owner'};export const loadProject=async()=>structuredClone(globalThis.current);export const saveProject=async(_,p)=>{p.revision++;globalThis.current=p;return p};export const asset=async()=>({});`}));}};
+const plugin={name:'server-mock',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'mock',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw new Error('Unauthorized');return 'owner'};export const loadProject=async()=>structuredClone(globalThis.current);export const saveProject=async(_,p)=>{p.revision++;globalThis.current=p;return p};export const asset=async(_,id)=>({mime:(globalThis.current.items.flatMap(i=>i.variants).find(v=>v.assetId===id)?.kind??'image')+'/mock'});`}));}};
 await build({entryPoints:['app/api/projects/[id]/route.ts'],bundle:true,platform:'node',format:'esm',outfile:'work/tests/bulk-approval/route.mjs',plugins:[plugin]});
 const Q=await import('../work/tests/bulk-approval/route.mjs');
 const payload={revision:pending.revision,action:'approveBatch',data:{stage:5,selections:selections(pending,5)}};

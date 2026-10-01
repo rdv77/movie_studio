@@ -1,3 +1,4 @@
+import {prepareKeyframeGeneration,keyframeRoleInstruction,type KeyframeRole} from '@/lib/keyframes';
 import { planCharacterIds } from '@/lib/plan-references';
 import { stampGenerationVersions } from '@/lib/creative-versions';
 import { imageSettingsSchema, FINAL_IMAGE_SETTINGS, GROK_IMAGE_MODEL } from '@/lib/image-quality';
@@ -26,7 +27,7 @@ export const POST = api(async (req, ctx) => {
     revision: z.number().int(), batchId: z.string().uuid(), itemId: z.string().uuid(),
     models: z.array(z.string()).min(1).max(MODELS.length), count: z.number().int().min(1).max(4),
     prompt: z.string().trim().min(1).max(20000), instruction: z.string().trim().max(20000).optional(),
-    refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
+    keyframe:z.enum(['start','middle','end']).optional(), refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
     referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(),
     dialogue: z.string().max(9500), voiceId: z.string().max(150), speechSource: z.string().max(200).optional(),
     speechType: z.enum(['voiceover', 'character', 'none']).optional(), speaker: z.string().trim().max(100).optional(),
@@ -50,6 +51,8 @@ export const POST = api(async (req, ctx) => {
   if (ms.some(m => m.kind !== ms[0].kind)) throw Error('Сравнивайте модели одного типа.');
   if (ms.some(m => m.provider === 'sync')) throw Error('Для sync.so откройте «Синхронизировать губы · выбранные планы».');
   const kind = ms[0].kind;
+  if(s.keyframe&&(kind!=='image'||item.stage!==5))throw Error('Ключевые кадры создаются в раскадровке.');
+  const keyframeRole=s.keyframe??(kind==='image'&&item.stage===5?'start':undefined);
   const refs = kind === 'image' ? s.referenceMode === 'selected' ? assertSelectedReferences(p, s.refs) : characterImageRefs(p, item, s.refs) : s.refs;
   if (kind === 'video') videoCharacters(p, s.characterIds);
   const characterIds = kind === 'video' ? planCharacterIds(p, item, s.characterIds) : undefined;
@@ -74,14 +77,16 @@ export const POST = api(async (req, ctx) => {
   const linked = p.items.find(i => i.stage === 5 && !i.planArchive && i.title === item.title);
   const basis = chosen(item) ?? linked?.variants.find(v => v.id === linked.approvedId);
   const jobs: Job[] = ms.flatMap(m => Array.from({ length: s.count }, (_, n) => {
+    const prepared=keyframeRole?prepareKeyframeGeneration(p,item.id,keyframeRole,{model:m.id,refs,imageSettings:m.id===GROK_IMAGE_MODEL?s.imageSettings??FINAL_IMAGE_SETTINGS:undefined}):undefined;
     const job: Job = {
+      ...(prepared?{keyframe:prepared.keyframe,pairId:prepared.pairId,sourceFrameVariantId:prepared.sourceFrameVariantId,keyframeSourceBasis:prepared.keyframeSourceBasis,keyframeReviewBasis:prepared.keyframeReviewBasis}:{}),
       id: id(), batchId: s.batchId, itemId: item.id, model: m.id, kind,
       shotSource: fields?.shotSource ?? (kind === 'audio' ? scriptVideo(p).variant?.id : undefined),
-      ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
+      ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: prepared?.imageSettings??s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...(['audio', 'image', 'video'].includes(kind) && item.stage >= 5 ? info : {}),
       brief: s.prompt, prompt: ['image', 'video'].includes(kind) ? '' : promptFor(p, item,
         (item.character ? characterPrompt(item.character) + '\n\nПравки к этой попытке: ' : '') + s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`, basis),
-      refs, characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
+      refs:prepared?.refs??refs, characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
       characterIds, character: item.stage === 1 ? item.character : undefined,
       location: item.stage === 3 ? item.location ?? chosen(item)?.location : undefined,
       camera: fields?.camera ?? basis?.camera ?? 'Статичная камера', continuity: fields?.continuity ?? basis?.continuity ?? '',
@@ -90,7 +95,7 @@ export const POST = api(async (req, ctx) => {
       deps: dependencies(p, item.stage), created: now(), status: 'queued', transportVersion: 2,
       estimate: s.estimates[m.id] ?? null, actual: null,
     };
-    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { instruction: s.instruction, variantIndex: n + 1, variantCount: s.count }) : job;
+    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { keyframe:keyframeRole,keyframeInstruction:prepared?.roleInstruction,instruction:s.instruction, variantIndex: n + 1, variantCount: s.count }) : job;
   }));
   // Compile every model first. A critical conflict must stop the batch before storage reads or reservation.
   const loaded = new Map<string, Promise<PromptAsset>>();

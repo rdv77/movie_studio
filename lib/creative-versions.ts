@@ -1,3 +1,4 @@
+import {keyframeFoundationBasis} from './keyframes';
 import { effectiveCreativeBrief } from './creative-brief';
 import type { CharacterBrief, Item, Job, Project, Variant } from './domain';
 import type { DirectingState, Scene } from './directing';
@@ -85,6 +86,7 @@ export function stampGenerationVersions(p:Project,jobs:Job[]) {
     if(p.directing&&[5,6,7].includes(item.stage)){
       job.basisVersion=2;job.reviewBasis=materialBasis(p,item,job)||undefined;
     }
+    if(job.keyframe)job.keyframeReviewBasis=keyframeFoundationBasis(p,item,job.keyframe,job);
   }
 }
 export function creativeSnapshot(p:Project):CreativeSnapshot|undefined {

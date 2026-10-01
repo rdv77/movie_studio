@@ -1,3 +1,7 @@
+import type {KeyframeRole,KeyframeSelection,KeyframeApproval} from './keyframes';
+import {hasKeyframeConfig,keyframesApproved,approveKeyframes,selectedKeyframe,keyframeFoundationBasis} from './keyframes';
+import type {MediaReview} from './media-review';
+import type {PromptCompilationSnapshot} from './prompt-jobs';
 import type { ActorProfile,LocationProfile } from './world-assets';
 import { renderCreativeInstructions } from './creative-brief';
 import type { SpeechType } from './speech-mode';
@@ -34,6 +38,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;characterDraft?:boolean;
   basisVersion?: 2;
   versionInfo?: VersionInfo;
@@ -68,6 +73,7 @@ export type Variant = {
   lipsync?: LipsyncBasis;
 };
 export type Item = {
+  keyframeMode?:'single'|'pair'|'triple';keyframeSelection?:KeyframeSelection;approvedKeyframes?:KeyframeApproval;
   location?:LocationProfile;
   characterHistory?: CharacterVersion[];
   characterVersionId?: string;
@@ -84,6 +90,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;
   basisVersion?: 2;
   versionInfo?: VersionInfo;
@@ -97,7 +104,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'music' | 'music-ideas' | 'directing';
+  purpose?: 'voice-test' | 'music' | 'music-ideas' | 'directing' | 'media-review';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -144,6 +151,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  mediaReviews?:MediaReview[];
   creativeHistory?: CreativeVersion[];
   creativeVersionId?: string;
   directing?: DirectingState;
@@ -219,6 +227,7 @@ export function visibleVariants(item: Item) {
     ? item.variants.filter(v=>!isStoryboardDraft(v)) : item.variants;
 }
 export function chosen(item: Item) {
+  if(item.stage===5&&item.keyframeSelection?.startId)return selectedKeyframe(item,'start');
   const selected=item.variants.find((v) => v.id === item.selectedId);
   // Old projects may still point at the automatic text brief after generation.
   // Respect an explicit image choice; never approve anything on selection.
@@ -251,6 +260,7 @@ export function independentApproval(stage: number) {
   return stage >= 1 && stage <= 3;
 }
 export function variantCurrent(p: Project, item: Item, variant: Variant) {
+  if(item.stage===5&&variant.keyframeReviewBasis)return variant.keyframeReviewBasis===keyframeFoundationBasis(p,item,variant.keyframe??'start',variant);
   if(variant.reviewBasis&&[5,6,7].includes(item.stage))return variant.reviewBasis===materialBasis(p,item,variant);
   return independentApproval(item.stage) || variant.deps === dependencies(p, item.stage);
 }
@@ -260,6 +270,7 @@ export function jobCurrent(p: Project, item: Item, job: Job) {
   return job.deps===dependencies(p,item.stage);
 }
 export function approvalCurrent(p: Project, item: Item): boolean {
+  if(item.stage===5&&hasKeyframeConfig(p,item))return keyframesApproved(p,item);
   const variant = item.variants.find(v => v.id === item.approvedId);
   if(variant?.lipsync&&p.items.find(i=>i.id===variant.lipsync!.audioItemId)?.approvedId!==variant.lipsync.audioVariantId)return false;
   return !item.removedAt && !item.planArchive && !!variant && variantCurrent(p, item, variant);
@@ -297,11 +308,12 @@ export function makeVariant(
   data: Partial<Variant>,
 ): Variant {
   const sameFile = data.assetId ? p.items.flatMap(i => i.variants).find(v => v.assetId === data.assetId && v.lipsync) : undefined;
-  const imageSource = data.assetId ? item.variants.find(v => v.assetId === data.assetId && v.imageSettings) : undefined;
+  const imageSource = data.assetId ? item.variants.find(v => v.assetId === data.assetId && v.kind==='image') : undefined;
   const basisVersion = data.basisVersion ?? (!data.reviewBasis&&p.directing&&[5,6,7].includes(item.stage)?2:undefined);
   const versionInfo = data.versionInfo ?? captureVersionInfo(p,item,data,data.imageSettings);
   return {
     ...(p.directing&&[5,6,7].includes(item.stage)?{reviewBasis:materialBasis(p,item,{...data,basisVersion,versionInfo})}:{}),
+    ...(imageSource?{keyframe:imageSource.keyframe,pairId:imageSource.pairId,sourceFrameVariantId:imageSource.sourceFrameVariantId,keyframeSourceBasis:imageSource.keyframeSourceBasis,keyframeReviewBasis:imageSource.keyframeReviewBasis,compilation:imageSource.compilation}:{}),
     title: 'Новый вариант',
     text: '',
     kind: 'text',
@@ -336,11 +348,13 @@ export function deleteVariant(p: Project, itemId: string, variantId: string) {
   const variant = item.variants.find(v => v.id === variantId);
   if (!variant) throw new Error('Вариант уже удалён или не найден. Обновите карточку.');
   const active = p.jobs.filter(j => ['queued','dispatching','pending','saving'].includes(j.status));
-  if (active.some(j => j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId ||
-    (j.purpose !== 'voice-test' && item.approvedId === variantId && precedesStage(item.stage,getItem(p,j.itemId).stage))))
+  if (active.some(j => !['media-review','directing'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
+    (j.purpose !== 'voice-test' && (item.approvedId === variantId || [item.approvedKeyframes?.startId,item.approvedKeyframes?.middleId,item.approvedKeyframes?.endId].includes(variantId)) && precedesStage(item.stage,getItem(p,j.itemId).stage)))))
     throw new Error('Этот вариант используется текущей генерацией. Дождитесь её завершения или отмените неотправленные попытки.');
   p.removedVariants ??= [];
   p.removedVariants.push({itemId,variant,removedAt:now()});
+  if ([item.approvedKeyframes?.startId,item.approvedKeyframes?.middleId,item.approvedKeyframes?.endId,
+    item.keyframeSelection?.startId,item.keyframeSelection?.middleId,item.keyframeSelection?.endId].includes(variantId)) item.approvedKeyframes=undefined;
   item.variants = item.variants.filter(v => v.id !== variantId);
   if (item.approvedId === variantId) item.approvedId = undefined;
   if (item.selectedId === variantId) item.selectedId = undefined;
@@ -375,6 +389,7 @@ export function addAnimatic(p: Project, itemId: string, data: Partial<Variant>) 
 }
 export function approve(p: Project, itemId: string) {
   const i = getItem(p, itemId);
+  if(i.stage===5&&hasKeyframeConfig(p,i)){approveKeyframes(p,itemId,undefined,{canApprove:(p,i)=>stageReady(p,i.stage)?'':'Сначала утвердите предыдущие этапы.'});return;}
   if(i.planArchive)throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(i.removedAt)throw new Error('Сначала восстановите удалённую карточку героя.');
   const v = chosen(i);

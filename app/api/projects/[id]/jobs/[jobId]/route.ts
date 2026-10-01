@@ -1,3 +1,6 @@
+import {keyframeQueueIssue} from '@/lib/keyframes';
+import {mediaReviewCurrent,parseMediaReview} from '@/lib/media-review';
+import {generateMediaReview} from '@/lib/media-review-provider';
 import { retrieveGoogle } from '@/lib/google-provider';
 import {waitExpired,stopJobWait,resumeJobWait} from '@/lib/job-wait';
 import {isMusicJob,musicBasis,parseMusicIdeas,DEFAULT_MUSIC} from '@/lib/music';
@@ -98,7 +101,9 @@ export const POST = api(async (req, ctx) => {
       // CAS in mutate makes the slot reservation global across browser tabs.
       // A full pool leaves the request queued; it has not reached the provider.
       if(parallelJob(p,job)&&p.jobs.filter(j=>j.id!==job.id&&parallelJob(p,j)&&generationInProgress(j)).length>=PARALLEL_GENERATIONS)return;
-      const i = job.purpose==='voice-test'||isMusicJob(job)?undefined:getItem(p, job.itemId);
+      const i = job.purpose==='voice-test'||job.purpose==='media-review'||isMusicJob(job)?undefined:getItem(p, job.itemId);
+      if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review||review.removedAt||!mediaReviewCurrent(p,review)){job.status='cancelled';job.actual='0';job.actualSource='Материал проверки изменился до отправки';return;}}
+      if(job.keyframe){const issue=keyframeQueueIssue(p,job);if(issue){job.status='cancelled';job.actual='0';job.actualSource='Основа ключевого кадра изменилась до отправки';job.error=issue;return;}}
       if(isMusicJob(job)&&job.deps!==musicBasis(p)){job.status='cancelled';job.actual='0';job.actualSource='Сценарий или стиль изменились до отправки';return;}
       if (i && (!jobCurrent(p,i,job) || !stageReady(p, i.stage))) {
         job.status = 'cancelled';
@@ -135,7 +140,7 @@ export const POST = api(async (req, ctx) => {
         ? []
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
-    const result: Result = refreshZen ? await poll(j, key) : saving
+    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):refreshZen ? await poll(j, key) : saving
       ? j.output!
       : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
           // Transfer private files directly; never grant public access to the asset library.
@@ -157,6 +162,7 @@ export const POST = api(async (req, ctx) => {
         job.actualSource = 'Ответ API';
       }
       if (result.usage) job.usage = result.usage;
+      if(job.purpose==='media-review'&&result.text)job.output={text:result.text};
       if(job.purpose==='music-ideas'&&result.text)job.output={text:result.text.slice(0,20000)};
       if (result.requestId) job.requestId = result.requestId;
       if (result.pollingUrl) job.pollingUrl = result.pollingUrl;
@@ -202,6 +208,7 @@ export const POST = api(async (req, ctx) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       // A late, valid result is still retained after stopping local waiting.
       job.waitStoppedAt=undefined;job.waitStopReason=undefined;job.resumeStatus=undefined;
+      if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review)throw Error('Проверка не найдена.');try{review.result=parseMediaReview(result.text??job.output?.text??'');}catch(e){throw new ProviderError(e instanceof Error?e.message:'Некорректный ответ визуального редактора.',true);}job.status='done';job.error=undefined;return;}
       if(isMusicJob(job)){
         p.music??={variants:[],settings:{...DEFAULT_MUSIC}};
         if(job.purpose==='music-ideas'){
@@ -222,7 +229,7 @@ export const POST = api(async (req, ctx) => {
       if (!item.variants.some((v) => v.jobId === jobId)) {
         const compilation=(job as typeof job&{compilation?:PromptCompilationSnapshot}).compilation;
         const v = makeVariant(p, item, {
-          ...(compilation?{compilation}:{}),
+          ...(compilation?{compilation}:{}),keyframe:job.keyframe,pairId:job.pairId,sourceFrameVariantId:job.sourceFrameVariantId,keyframeSourceBasis:job.keyframeSourceBasis,keyframeReviewBasis:job.keyframeReviewBasis,endFrameAssetId:job.endFrameAssetId,
           id: jobId,
           reviewBasis:job.reviewBasis,
           basisVersion:job.basisVersion,
@@ -256,7 +263,8 @@ export const POST = api(async (req, ctx) => {
         });
         item.variants.push(v);
         const previousSelection=item.variants.find(value=>value.id===item.selectedId);
-        if (!item.selectedId || (item.stage===5&&v.kind==='image'&&v.assetId&&previousSelection&&isStoryboardDraft(previousSelection))) item.selectedId = v.id;
+        if(item.stage===5&&job.keyframe){const field=job.keyframe==='start'?'startId':job.keyframe==='middle'?'middleId':'endId';if(!item.keyframeSelection?.[field])item.keyframeSelection={...item.keyframeSelection,[field]:v.id};}
+        if ((!job.keyframe||job.keyframe==='start')&&(!item.selectedId || (item.stage===5&&v.kind==='image'&&v.assetId&&previousSelection&&isStoryboardDraft(previousSelection)))) item.selectedId = v.id;
       }
       job.status = 'done';
       job.error = undefined;

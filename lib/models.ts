@@ -138,7 +138,7 @@ export const PROVIDERS = [
   { id: 'sync', name: 'sync.so · синхронизация губ', url: 'https://sync.so/' },
 ];
 export function model(id: string) {
-  const m = [...MODELS, ...SYNC_MODELS, ...MUSIC_MODELS].find((m) => m.id === id);
+  const m = [...MODELS, ...SYNC_MODELS, ...MUSIC_MODELS,{id:'grok-4.7',name:'Grok 4.7 · визуальная проверка',provider:'xai',kind:'text' as const,estimate:null,note:'Проверка выборочных кадров; оплата по токенам'}].find((m) => m.id === id);
   if (!m) throw new Error('Модель не поддерживается.');
   return m;
 }

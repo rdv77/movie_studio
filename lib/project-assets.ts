@@ -1,5 +1,8 @@
 import type { CharacterBrief, Project, Variant } from './domain';
 import type {LocationProfile} from './world-assets';
+// Only the persisted file slots are needed here; keep the collector independent
+// of the later animatic renderer and its runtime schemas.
+type SavedManifestSources={schemaVersion:1;projectId:string;clips:{frames?:{role:string;assetId:string}[]}[];audio:{assetId:string}[];music?:{assetId:string}};
 
 /**
  * Asset candidates referenced by a trusted, already saved project snapshot.
@@ -22,7 +25,7 @@ export function projectAssetIds(p: Project): Set<string> {
     if (!basis) return;
     let value: unknown;
     try { value = JSON.parse(basis); } catch { return; }
-    if (!Array.isArray(value) || value.length !== 7 || !Number.isSafeInteger(value[0]) ||
+    if (!Array.isArray(value) || value.length < 7 || !Number.isSafeInteger(value[0]) ||
       !['16:9', '9:16'].includes(value[1]) || typeof value[2] !== 'number' ||
       !['track', 'plans'].includes(value[3]) || !Array.isArray(value[4]) ||
       !Array.isArray(value[5]) || !Array.isArray(value[6])) return;
@@ -32,14 +35,29 @@ export function projectAssetIds(p: Project): Set<string> {
           row.slice(2, 6).every(number => typeof number === 'number' && Number.isFinite(number))) add(row[1]);
       }
     }
+    // R09 appends a role-set snapshot. Inspect only its documented asset slots;
+    // captions, variant IDs and arbitrary nested JSON never grant membership.
+    for(const extra of value.slice(7))if(Array.isArray(extra))for(const set of extra){
+      if(!set||typeof set!=='object'||typeof set.id!=='string'||!['single','pair','triple'].includes(set.mode)||!Array.isArray(set.frames)||set.frames.length!==3)continue;
+      for(const frame of set.frames)if(Array.isArray(frame)&&frame.length===4&&typeof frame[0]==='string')add(frame[1]);
+    }
+  };
+  const manifestSources=(value?:SavedManifestSources)=>{
+    if(value?.schemaVersion!==1||value.projectId!==p.id||!Array.isArray(value.clips)||!Array.isArray(value.audio))return;
+    for(const clip of value.clips)if(Array.isArray(clip?.frames))for(const frame of clip.frames)
+      if(frame&&['start','middle','end'].includes(frame.role))add(frame.assetId);
+    for(const audio of value.audio)add(audio?.assetId);
+    add(value.music?.assetId);
   };
   const variant = (value: Variant) => {
     add(value.assetId);
+    add(value.endFrameAssetId);
     refs(value.refs);
     refs(value.characterRefs);
     character(value.character);
     location(value.location);provenance(value.versionInfo);
     animaticSources(value.animaticBasis);
+    manifestSources((value as Variant&{animaticManifest?:SavedManifestSources}).animaticManifest);
     // Variant.lipsync contains item/variant identifiers, not file identifiers.
   };
 
@@ -58,6 +76,7 @@ export function projectAssetIds(p: Project): Set<string> {
 
   for (const job of p.jobs) {
     refs(job.refs);
+    add(job.endFrameAssetId);
     refs(job.characterRefs);
     character(job.character);
     location(job.location);provenance(job.versionInfo);
@@ -72,6 +91,8 @@ export function projectAssetIds(p: Project): Set<string> {
     if (job.kind === 'image' || job.kind === 'audio' || job.kind === 'video') add(job.id);
   }
   for(const run of p.directing?.runs??[]){character(run.characterInput?.character);provenance(run.characterInput?.versionInfo);}
+  for(const review of p.mediaReviews??[])for(const sample of review.samples??[])
+    if(['target','start','end','reference','video-sample'].includes(sample.role))add(sample.assetId);
   for (const comparison of p.voiceComparisons ?? []) {
     for (const sample of comparison.samples) add(sample.assetId);
   }

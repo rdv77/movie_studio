@@ -3,7 +3,9 @@ import { materialBasis } from './material-basis';
 import { stagePosition } from './stage-order';
 import { unchangedSpeechReason } from './speech-approval';
 import { resolveFinalClip } from './render';
-export type ReviewRow={itemId:string;variantId?:string;stage:number;title:string;status:'ready'|'review'|'conflict'|'missing'|'approved';reason:string;};
+import {hasKeyframeConfig,type KeyframeSelection} from './keyframes';
+import {storyboardSelection,storyboardSetReview,assertStoryboardSelection,approveStoryboardSelection,type StoryboardSelection} from './storyboard-approval';
+export type ReviewRow={itemId:string;variantId?:string;stage:number;title:string;status:'ready'|'review'|'conflict'|'missing'|'approved';reason:string;keyframes?:KeyframeSelection;};
 export function pairedItem(p:Project,item:Item,stage:number){return p.items.find(i=>i.stage===stage&&participates(p,i)&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.scriptId===item.sourceShot?.scriptId&&i.sourceShot?.title===item.sourceShot?.title));}
 export function timingConflict(p:Project,item:Item){
   if(![6,7].includes(item.stage)||!item.sourceShot)return '';
@@ -19,21 +21,22 @@ export function timingConflict(p:Project,item:Item){
 }
 export function reviewRows(p:Project):ReviewRow[]{
   return p.items.filter(i=>participates(p,i)&&i.stage!==8).sort((a,b)=>stagePosition(a.stage)-stagePosition(b.stage)).map(item=>{
-    const v=chosen(item),base={itemId:item.id,variantId:v?.id,stage:item.stage,title:item.title};
+    const v=chosen(item),base={itemId:item.id,variantId:v?.id,stage:item.stage,title:item.title,keyframes:storyboardSelection(p,item)};
     if(!v)return {...base,status:'missing',reason:'Выберите готовый вариант.'};
     if(item.character&&(v.kind!=='image'||!v.assetId||!v.character))return {...base,status:'missing',reason:'Выберите готовый образ героя с сохранённым описанием.'};
     if([5,6,7].includes(item.stage)&&(!v.assetId||v.kind!==({5:'image',6:'audio',7:'video'} as any)[item.stage]))return {...base,status:'missing',reason:'Нужен готовый файл.'};
     const conflict=timingConflict(p,item);
     if(conflict)return {...base,status:'conflict',reason:conflict};
     if(v.lipsync&&p.items.find(i=>i.id===v.lipsync!.audioItemId)?.approvedId!==v.lipsync.audioVariantId)return {...base,status:'conflict',reason:'После синхронизации выбран другой голос. Повторите синхронизацию губ.'};
-    if(p.jobs.some(j=>j.itemId===item.id&&['queued','dispatching','pending','saving'].includes(j.status)))return {...base,status:'conflict',reason:'Материал ещё создаётся.'};
+    if(p.jobs.some(j=>j.itemId===item.id&&j.purpose!=='media-review'&&['queued','dispatching','pending','saving'].includes(j.status)))return {...base,status:'conflict',reason:'Материал ещё создаётся.'};
     if(isApproved(p,item)&&v.id===item.approvedId)return {...base,status:'approved',reason:'Утверждён.'};
+    if(item.stage===5&&hasKeyframeConfig(p,item))return {...base,...storyboardSetReview(p,item)};
     if(variantCurrent(p,item,v))return {...base,status:'ready',reason:'Выбран актуальный вариант.'};
     if(item.stage===6&&!unchangedSpeechReason(p,item.id,v.id))return {...base,status:'ready',reason:'Реплика не изменилась.'};
     return {...base,status:'review',reason:'Основа изменилась. Посмотрите материал и отметьте, если он подходит текущему фильму.'};
   });
 }
-export function approveReview(p:Project,selections:{itemId:string;variantId:string;reviewed?:boolean}[]){
+export function approveReview(p:Project,selections:(StoryboardSelection&{reviewed?:boolean})[]){
   if(!selections.length||new Set(selections.map(s=>s.itemId)).size!==selections.length)throw Error('Выберите материалы без повторов.');
   const copy=structuredClone(p);
   const rows=reviewRows(copy);
@@ -43,6 +46,11 @@ export function approveReview(p:Project,selections:{itemId:string;variantId:stri
     if(row.variantId!==selections.find(s=>s.itemId===row.itemId)?.variantId)throw Error('Выбор изменился. Обновите данные.');
     if(['conflict','missing'].includes(currentRow.status))throw Error(`${row.title}: ${currentRow.reason}`);
     const item=copy.items.find(i=>i.id===row.itemId)!,v=chosen(item)!;
+    const selection=selections.find(s=>s.itemId===row.itemId)!;
+    if(item.stage===5&&hasKeyframeConfig(copy,item)){
+      assertStoryboardSelection(copy,item,selection);
+      approveStoryboardSelection(copy,selection,!!selection.reviewed);continue;
+    }
     // Explicit multi-card director approval: preserve file, ID, source and cost.
     v.deps=dependencies(copy,item.stage);
     if([5,6,7].includes(item.stage))v.reviewBasis=materialBasis(copy,item,v)||undefined;

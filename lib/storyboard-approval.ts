@@ -1,7 +1,58 @@
 import { materialBasis } from './material-basis';
-import { approve, chosen, dependencies, getItem, isApproved, participates, stageReady, type Project, type Item } from './domain';
+import { approve, chosen, dependencies, getItem, isApproved, participates, stageReady, variantCurrent, type Project, type Item, type Variant } from './domain';
 import { scriptVideo, videoShot } from './video';
 import { shotSchema } from './shots';
+import {hasKeyframeConfig,keyframeIssues,keyframeSelection,keyframesApproved,planKeyframeMode,requiredKeyframeRoles,selectedKeyframe,approveKeyframes,reviewKeyframeForCurrentBasis,type KeyframeSelection,type KeyframeIssue} from './keyframes';
+
+export type StoryboardSelection={itemId:string;variantId:string;keyframes?:KeyframeSelection};
+export function storyboardSelection(p:Project,item:Item):KeyframeSelection|undefined {
+  return item.stage===5&&hasKeyframeConfig(p,item)?keyframeSelection(item):undefined;
+}
+/** Every file in the selected set is checked, not only the start image. */
+export function storyboardApprovalVariants(p:Project,item:Item):Variant[] {
+  return item.stage===5&&hasKeyframeConfig(p,item)
+    ?requiredKeyframeRoles(planKeyframeMode(p,item)).flatMap(role=>{const v=selectedKeyframe(item,role);return v?[v]:[];})
+    :chosen(item)?[chosen(item)!]:[];
+}
+export function assertStoryboardSelection(p:Project,item:Item,selection:StoryboardSelection) {
+  if(chosen(item)?.id!==selection.variantId)throw Error('Выбор изменился. Обновите проект перед утверждением.');
+  if(selection.keyframes){
+    const actual=keyframeSelection(item);
+    if(requiredKeyframeRoles(planKeyframeMode(p,item)).some(role=>actual[`${role}Id`]!==selection.keyframes![`${role}Id`]))
+      throw Error('Выбор ключевых кадров изменился. Обновите проект перед утверждением.');
+  }
+}
+export function storyboardSetIssues(p:Project,item:Item):KeyframeIssue[] {
+  if(!hasKeyframeConfig(p,item))return [];
+  const issues=keyframeIssues(p,item);
+  // A migrated legacy start can lack a semantic snapshot. Do not let choosing
+  // pair/single mode silently bypass its old dependency checks.
+  if(!keyframesApproved(p,item))for(const role of requiredKeyframeRoles(planKeyframeMode(p,item))){
+    const v=selectedKeyframe(item,role);
+    if(v&&!v.keyframeReviewBasis&&!variantCurrent(p,item,v)&&!issues.some(i=>i.role===role&&i.code==='foundation_changed'))
+      issues.push({code:'foundation_changed',role,variantId:v.id,message:'Основа этого кадра изменилась. Просмотрите изображение и явно подтвердите его для текущей версии.'});
+  }
+  return issues;
+}
+export function storyboardSetReview(p:Project,item:Item):{status:'ready'|'review'|'missing'|'conflict';reason:string} {
+  const issues=storyboardSetIssues(p,item);
+  const structural=issues.find(i=>!['foundation_changed','missing_basis'].includes(i.code));
+  if(structural)return {status:structural.code.startsWith('missing_')?'missing':'conflict',reason:structural.message};
+  if(issues.length)return {status:'review',reason:issues[0].message};
+  return {status:'ready',reason:'Выбран полный актуальный набор ключевых кадров.'};
+}
+export function approveStoryboardSelection(p:Project,selection:StoryboardSelection,reviewChanged=false) {
+  const item=getItem(p,selection.itemId);assertStoryboardSelection(p,item,selection);
+  if(!stageReady(p,5))throw Error('Сначала утвердите предыдущие этапы.');
+  if(p.jobs.some(j=>j.itemId===item.id&&j.purpose!=='media-review'&&['queued','dispatching','pending','saving'].includes(j.status)))throw Error('Дождитесь завершения генерации этого плана.');
+  if(!hasKeyframeConfig(p,item)){approve(p,item.id);return;}
+  const state=storyboardSetReview(p,item);
+  if(['conflict','missing'].includes(state.status)||state.status==='review'&&!reviewChanged)throw Error(state.reason);
+  if(reviewChanged)for(const role of requiredKeyframeRoles(planKeyframeMode(p,item))){
+    const v=selectedKeyframe(item,role)!;reviewKeyframeForCurrentBasis(p,item.id,role,v.id);
+  }
+  approveKeyframes(p,item.id,selection.keyframes,{reviewChanged,canApprove:(p)=>stageReady(p,5)?'':'Сначала утвердите предыдущие этапы.'});
+}
 
 export function storyboardReapprovalReason(p:Project,itemId:string,variantId:string) {
   const item=getItem(p,itemId),variant=chosen(item);
@@ -10,15 +61,25 @@ export function storyboardReapprovalReason(p:Project,itemId:string,variantId:str
     return 'Выберите изображение или описание в актуальной карточке раскадровки.';
   if(!stageReady(p,5)) return 'Сначала утвердите предыдущие этапы, перечисленные в списке выше.';
   if(item.sourceShot&&!videoShot(p,item)) return 'Этого плана больше нет в утверждённом сценарии. Подготовьте карточки по текущему сценарию.';
+  if(hasKeyframeConfig(p,item)){
+    if(p.jobs.some(j=>j.itemId===item.id&&j.purpose!=='media-review'&&['queued','dispatching','pending','saving'].includes(j.status)))return 'Дождитесь завершения генерации этого плана.';
+    const state=storyboardSetReview(p,item);
+    if(state.status==='missing'||state.status==='conflict')return state.reason;
+    return state.status==='review'?'':'Этот набор уже относится к текущей основе. Используйте обычное утверждение.';
+  }
   if(p.jobs.some(j=>['queued','dispatching','pending','saving'].includes(j.status))) return 'Дождитесь завершения текущих задач.';
   if(variant.deps===dependencies(p,5)) return 'Этот вариант уже относится к текущей основе. Используйте обычное утверждение.';
   return '';
 }
 
-export function reapproveStoryboard(p:Project,itemId:string,variantId:string) {
+export function reapproveStoryboard(p:Project,itemId:string,variantId:string,keyframes?:KeyframeSelection) {
   const reason=storyboardReapprovalReason(p,itemId,variantId);
   if(reason)throw new Error(reason);
   const copy=structuredClone(p),item=getItem(copy,itemId);
+  if(hasKeyframeConfig(copy,item)){
+    approveStoryboardSelection(copy,{itemId,variantId,keyframes},true);
+    Object.assign(getItem(p,itemId),item);return;
+  }
   // Explicit director review, without duplicating media or rewriting the
   // original generation record. Derived stages retain their existing basis.
   chosen(item)!.deps=dependencies(copy,5);
@@ -42,6 +103,13 @@ function scriptData(text:string) {
 function unchangedReason(p:Project,item:Item) {
   const v=chosen(item);
   if(!v||v.id!==item.approvedId)return 'Выбранный вариант ранее не был утверждён. Проверьте его отдельно.';
+  if(hasKeyframeConfig(p,item)){
+    const saved=item.approvedKeyframes,selection=keyframeSelection(item);
+    if(!saved||requiredKeyframeRoles(planKeyframeMode(p,item)).some(role=>saved[`${role}Id`]!==selection[`${role}Id`]))
+      return 'Выбран другой набор ключевых кадров. Проверьте его отдельно.';
+    const state=storyboardSetReview(p,item);
+    return state.status==='ready'?'':state.reason;
+  }
   const unavailable=storyboardReapprovalReason(p,item.id,v.id);
   if(unavailable)return unavailable;
   const script=scriptVideo(p);
@@ -72,11 +140,11 @@ function unchangedReason(p:Project,item:Item) {
 }
 
 export function unchangedStoryboardBatch(p:Project) {
-  return p.items.filter(i=>i.stage===5&&participates(p,i)&&!isApproved(p,i)&&chosen(i)?.deps!==dependencies(p,5))
-    .map(i=>({itemId:i.id,variantId:chosen(i)?.id,title:i.title,reason:unchangedReason(p,i)}));
+  return p.items.filter(i=>i.stage===5&&participates(p,i)&&!isApproved(p,i)&&(hasKeyframeConfig(p,i)||!chosen(i)||!variantCurrent(p,i,chosen(i)!)))
+    .map(i=>({itemId:i.id,variantId:chosen(i)?.id,title:i.title,keyframes:storyboardSelection(p,i),reason:unchangedReason(p,i)}));
 }
 
-export function reapproveUnchangedStoryboard(p:Project,selections:{itemId:string;variantId:string}[]) {
+export function reapproveUnchangedStoryboard(p:Project,selections:StoryboardSelection[]) {
   if(!selections.length||new Set(selections.map(s=>s.itemId)).size!==selections.length)
     throw new Error('Нет карточек для утверждения или карточки повторяются.');
   const rows=unchangedStoryboardBatch(p);
@@ -84,8 +152,13 @@ export function reapproveUnchangedStoryboard(p:Project,selections:{itemId:string
     const row=rows.find(r=>r.itemId===s.itemId&&r.variantId===s.variantId);
     if(!row)throw new Error('Выбор изменился. Обновите проект перед утверждением.');
     if(row.reason)throw new Error(`${row.title}: ${row.reason}`);
+    assertStoryboardSelection(p,getItem(p,s.itemId),s);
   }
   const copy=structuredClone(p);
-  for(const s of selections)reapproveStoryboard(copy,s.itemId,s.variantId);
+  for(const s of selections){
+    const item=getItem(copy,s.itemId);
+    if(hasKeyframeConfig(copy,item))approveStoryboardSelection(copy,s);
+    else reapproveStoryboard(copy,s.itemId,s.variantId);
+  }
   for(const s of selections)Object.assign(getItem(p,s.itemId),getItem(copy,s.itemId));
 }

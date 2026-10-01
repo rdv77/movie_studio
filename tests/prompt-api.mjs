@@ -2,7 +2,7 @@ import {build} from 'esbuild';
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 await mkdir('work/tests',{recursive:true});
-await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as C from './lib/prompt-compiler';export {POST as single} from './app/api/projects/[id]/generate/route';export {POST as storyboard} from './app/api/projects/[id]/generate-storyboard/route';export {POST as remaining} from './app/api/projects/[id]/generate-remaining/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/prompt-api.mjs',plugins:[{name:'offline-prompt-api',setup(b){
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as C from './lib/prompt-compiler';export {prepareKeyframeGeneration} from './lib/keyframes';export {POST as single} from './app/api/projects/[id]/generate/route';export {POST as storyboard} from './app/api/projects/[id]/generate-storyboard/route';export {POST as remaining} from './app/api/projects/[id]/generate-remaining/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/prompt-api.mjs',plugins:[{name:'offline-prompt-api',setup(b){
   b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'prompt-api'}));
   b.onLoad({filter:/.*/,namespace:'prompt-api'},()=>({contents:`
     export const api=fn=>async(req,ctx)=>{try{return await fn(req,ctx)}catch(e){return Response.json({error:e.message},{status:e.status??400})}};
@@ -13,7 +13,7 @@ await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib
     export const asset=async(_,id,p)=>{globalThis.promptAssetLookups.push(id);const a=globalThis.promptAssets.get(id);if(!p||a?.projectId!==p.id)throw Error('Foreign asset');return a};
   `}));
 }}]});
-const {D,C,single,storyboard,remaining}=await import('../work/tests/prompt-api.mjs');
+const {D,C,prepareKeyframeGeneration,single,storyboard,remaining}=await import('../work/tests/prompt-api.mjs');
 globalThis.promptAssets=new Map();globalThis.promptAssetLookups=[];
 let calls=0;const originalFetch=globalThis.fetch;globalThis.fetch=async()=>{calls++;throw Error('Paid API calls forbidden')};
 const request=body=>new Request('http://localhost/offline',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
@@ -46,7 +46,7 @@ try {
   assert(gpt.prompt.length>grok.prompt.length && gpt.prompt.length<=32000 && grok.prompt.length<=5000,'Every selected model compiles independently');
   for(const job of [gpt,grok]){assert.deepEqual(job.refs,[heroAsset,locAsset]);assert(job.compilation);assert.equal(job.compilation.budget.compiledCharacters,job.prompt.length);assert(job.prompt.includes('Синий плащ') && job.prompt.includes('Сумка на левом плече'));}
   assert.equal(grok.estimate,'1000000000');assert(grok.compilation.compression.omitted.some(x=>x.reason==='budget'));
-  const pure=C.compilePrompt(ready,frames[0],grok.model,{kind:'image',prompt:'Нарисуй начало плана.',references:[heroAsset,locAsset,foreignAsset],allowLegacyModel:true});assert.equal(grok.prompt,pure.prompt);
+  const pure=C.compilePrompt(ready,frames[0],grok.model,{kind:'image',keyframe:'start',keyframeInstruction:prepareKeyframeGeneration(ready,frames[0].id,'start',{model:grok.model,refs:[heroAsset,locAsset,foreignAsset]}).roleInstruction,prompt:'Нарисуй начало плана.',references:[heroAsset,locAsset,foreignAsset],allowLegacyModel:true});assert.equal(grok.prompt,pure.prompt);
 
   reset();const batch=await storyboard(request({revision:ready.revision,batchId:D.id(),model:'grok-imagine-image-2.0',refs:[],estimate:'1',plans:frames.map(frame=>({itemId:frame.id,prompt:'Нарисуй начало плана.',refs:[heroAsset,locAsset,foreignAsset]}))}),context());
   assert.equal(batch.status,200,await batch.clone().text());assert.equal(globalThis.promptState.jobs.length,2);for(const job of globalThis.promptState.jobs){assert(job.compilation);assert.equal(job.estimate,'1000000000');assert.deepEqual(job.refs,[heroAsset,locAsset]);}

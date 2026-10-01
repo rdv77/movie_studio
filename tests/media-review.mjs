@@ -1,0 +1,13 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as R from './lib/media-review';export {generateMediaReview} from './lib/media-review-provider';export * as D from './lib/domain';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/media-review.mjs'});
+const {R,D,generateMediaReview}=await import('../work/tests/media-review.mjs');
+const p=D.newProject('Проверка'),item=p.items.find(i=>i.stage===5),v=D.makeVariant(p,item,{kind:'image',assetId:'file',text:'Мальчик смотрит'});item.variants.push(v);
+const sample={assetId:'file',role:'target'},prompt=R.mediaReviewPrompt(p,item,v,[sample],'image');assert.match(prompt,/непрерывное|неподвижное/);assert.match(prompt,/uncertain/);
+const result={summary:'Нужно уточнить крупность',issues:[{severity:'note',criterion:'Крупность',evidence:'Лицо мелкое',suggestion:'Более близкая камера'}],checks:[{criterion:'Рот',result:'uncertain',evidence:'Не различим'}],limitations:['Нет движения']};assert.deepEqual(R.parseMediaReview(JSON.stringify(result)),result);assert.throws(()=>R.parseMediaReview('bad'),/JSON/);
+const r={itemId:item.id,variantId:v.id,basis:R.reviewBasis(p,item,v)};assert(R.mediaReviewCurrent(p,r));v.assetId='another';assert(!R.mediaReviewCurrent(p,r));
+let calls=0,payload;globalThis.fetch=async(url,options)=>{calls++;assert.equal(url,'https://api.x.ai/v1/responses');payload=JSON.parse(options.body);return Response.json({id:'response-id',status:'completed',usage:{cost_in_usd_ticks:123},output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(result)}]}]});};
+const job={model:'grok-4.7',prompt};await assert.rejects(generateMediaReview(job,'test-key',[]),/от 1 до 8/);assert.equal(calls,0);
+const output=await generateMediaReview(job,'test-key',['data:image/jpeg;base64,aGVsbG8=']);assert.equal(calls,1);assert.equal(payload.store,false);assert.equal(payload.input[0].content[1].type,'input_image');assert.equal(output.requestId,'response-id');assert.equal(output.actual,'123');assert.deepEqual(R.parseMediaReview(output.text),result);
+globalThis.fetch=async()=>{throw Error('lost transport');};await assert.rejects(generateMediaReview(job,'test-key',['data:image/jpeg;base64,aGVsbG8=']),e=>e.definite===false&&/Исход запроса неизвестен/.test(e.message));
+console.log('PASS media review: evidence/uncertainty, pinned source, vision payload, usage receipt, no hidden retry or approval. Mock API only.');

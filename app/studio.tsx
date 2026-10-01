@@ -1,6 +1,10 @@
 'use client';
 import {compilePrompt,type CompiledPrompt,type PromptInput} from '@/lib/prompt-compiler';
 import {mediaVariantPrompt} from '@/lib/prompt-jobs';
+import {KeyframeEditor} from './keyframe-editor';
+import {MediaReviewPanel} from './media-review-panel';
+import {KeyframeBatchEditor} from './keyframe-batch-editor';
+import {keyframeRoleInstruction,selectedKeyframe,sourceImageSettings,prepareKeyframeGeneration,planKeyframeMode,type KeyframeRole} from '@/lib/keyframes';
 import {PromptPreview} from './prompt-preview';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { directorRunActive } from '@/lib/directing';
@@ -298,6 +302,7 @@ function Workspace() {
   const closeDialog = () => {
     if (activeProject.current === projectId && dialogEpoch.current === openedDialogEpoch) setDialog(null);
   };
+  const [frameRole,setFrameRole]=useState<KeyframeRole>('start');
   const [voiceView,setVoiceView]=useState('plans');
   const [characterTarget,setCharacterTarget] = useState<string>();
   const [editing, setEditing] = useState<Variant | undefined>();
@@ -787,7 +792,7 @@ function Workspace() {
                   {step !== 8 && (
                     <Button
                       disabled={!ready || busy}
-                      onClick={() => setDialog('generate')}
+                      onClick={() => {setFrameRole('start');setDialog('generate');}}
                     >
                       <Sparkles />
                       Создать с ИИ
@@ -959,6 +964,9 @@ function Workspace() {
                   </div>
                 </div>
               )}
+              {step===5&&item&&<KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/>}
+              {step===5&&<KeyframeBatchEditor p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
+              {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
                 <div className="editor-surface p-5 mb-5">
                   <strong>{currentShot.title} · {currentShot.duration} сек · из утверждённого сценария</strong>
@@ -1491,6 +1499,7 @@ function Workspace() {
       )}
       {p && item && dialog === 'generate' && (
         <GenerateDialog key={`${p.id}:${item.id}`}
+          frameRole={step===5?frameRole:undefined}
           allowNewSeries={(jobId:string)=>action('allowNewSeries',{jobId})}
           referenceAction={(assetId:string,restore=false)=>action(restore?'restoreReference':'hideReference',{assetId})}
           open={dialog === 'generate'}
@@ -1889,6 +1898,7 @@ function VariantEditor({
   );
 }
 function GenerateDialog({
+  frameRole,
   allowNewSeries,
   referenceAction,
   open,
@@ -1939,8 +1949,9 @@ function GenerateDialog({
       setKind(k);
       setModelSearch('');
       const preferred=k==='audio'&&MODELS.some(m=>m.id===p.preferredVoice?.model&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))?p.preferredVoice:undefined;
-      setModels(preferred?[preferred.model]:[]);
-      setCount(k === 'audio'?1:k === 'video' ? 2 : 3);
+      const first=frameRole&&frameRole!=='start'?selectedKeyframe(item,'start'):undefined;
+      setModels(first?.jobId&&MODELS.some(m=>m.id===first.model)?[first.model]:preferred?[preferred.model]:[]);
+      setCount(frameRole&&frameRole!=='start'?1:k === 'audio'?1:k === 'video' ? 2 : 3);
       setPrompt(
         k === 'text'
           ? item.stage === 0
@@ -1959,7 +1970,7 @@ function GenerateDialog({
             .filter(x => x.id === i.approvedId && x.kind === 'image' && x.assetId)
             .map(x => x.assetId!)).slice(0, 5);
       setRefs(k === 'image'
-        ? selectedReferences(p, characterImageRefs(p, item, imageDefaults))
+        ? selectedReferences(p, characterImageRefs(p, item, first?.assetId?[first.assetId,...imageDefaults]:imageDefaults))
         : k === 'video'
           ? (videoFrame(p, item) ? [videoFrame(p, item)!] : planFrameIds(p,item).slice(0,1))
           : v?.refs ?? []);
@@ -1969,7 +1980,7 @@ function GenerateDialog({
       setSpeechSource(k === 'audio' ? initial.sourceId : 'current');
       setVoice(preferred?.voiceId ?? v?.voiceId ?? '');
       setEstimates({});
-      setImageSettings(FINAL_IMAGE_SETTINGS);
+      setImageSettings(first?sourceImageSettings(first)??FINAL_IMAGE_SETTINGS:FINAL_IMAGE_SETTINGS);
       setBatch(crypto.randomUUID());
     }
   }, [open, p.id, item.id]);
@@ -1978,10 +1989,12 @@ function GenerateDialog({
   const selected = choices.filter((m) => models.includes(m.id));
   const selectableRefs=kind==='image';
   const excludedRefs=hiddenReferences(p);
-  const effectiveRefs=selectableRefs?filterPlanReferences(p,item,refs):refs;
+  const baseRefs=selectableRefs?filterPlanReferences(p,item,refs):refs;
+  const pinnedStart=frameRole&&frameRole!=='start'?selectedKeyframe(item,'start')?.assetId:undefined;
+  const effectiveRefs=pinnedStart?[pinnedStart,...baseRefs.filter(r=>r!==pinnedStart)]:baseRefs;
   const visibleReferenceIds=[5,7].includes(item.stage)?new Set([...(kind==='video'?planFrameIds(p,item):[...planReferenceIds(p,item),...planFrameIds(p,item)]),...effectiveRefs]):undefined;
   const effectiveCharacters=[5,7].includes(item.stage)?planCharacterIds(p,item,characterIds):characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
-  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:shot?.duration,allowLegacyModel:!p.directing});
+  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',keyframe:frameRole,keyframeInstruction:frameRole?keyframeRoleInstruction(p,item,frameRole):undefined,prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:shot?.duration,allowLegacyModel:!p.directing});
   const compiledModels=new Map<string,{result?:CompiledPrompt,error?:string}>();
   if(kind==='image'||kind==='video')for(const m of selected){try{compiledModels.set(m.id,{result:compilePrompt(p,item,m.id,mediaInput(m))});}catch(error){compiledModels.set(m.id,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'});}}
   const imagePromptError=[...compiledModels.values()].map(x=>x.error).find(Boolean)??'';
@@ -2007,7 +2020,7 @@ function GenerateDialog({
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent className="sm:max-w-3xl modal-scroll">
         <DialogHeader>
-          <DialogTitle>Серия вариантов</DialogTitle>
+          <DialogTitle>{frameRole&&frameRole!=='start'?'Серия вариантов · '+(frameRole==='end'?'конечный кадр':'промежуточный кадр'):'Серия вариантов'}</DialogTitle>
           <DialogDescription>
             {kind === 'video'
               ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
@@ -2316,6 +2329,7 @@ function GenerateDialog({
                   revision: p.revision,
                   batchId: batch,
                   itemId: item.id,
+                  ...(frameRole?{keyframe:frameRole}:{}),
                   models,
                   count,
                   prompt,

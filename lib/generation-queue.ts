@@ -1,3 +1,4 @@
+import {keyframeQueueIssue} from './keyframes';
 import { assertBudget, dependencies, jobCurrent, getItem, stageReady, type Job, type Project } from './domain';
 import { selectedReferences } from './reference-selection';
 import {unresolvedJobBlocks} from './job-wait';
@@ -78,6 +79,7 @@ export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promi
     for(const itemId of items){const issue=stage===5?storyboardAdmissionIssue(p,itemId):stage===7?videoAdmissionIssue(p,itemId):conceptImageAdmissionIssue(p,itemId);if(issue)throw new Error(issue);}
     if(stage!==7&&JSON.stringify(p.hiddenReferenceIds??[])!==JSON.stringify(snapshot.hiddenReferenceIds??[])&&jobs.some(j=>selectedReferences(p,j.refs).length!==j.refs.length))
       throw new Error('Список референсов изменился. Проверьте галочки заново.');
+    for(const j of jobs){const issue=keyframeQueueIssue(p,j);if(issue)throw Error(issue);}
     assertBudget(p,jobs);
     const revision=p.revision;
     p.jobs.push(...jobs);

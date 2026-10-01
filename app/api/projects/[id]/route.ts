@@ -8,7 +8,8 @@ import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
 import { reapproveVideo } from '@/lib/video-approval';
 import { reapproveStyle } from '@/lib/style-approval';
 import { reapproveScript } from '@/lib/script-approval';
-import { reapproveStoryboard, reapproveUnchangedStoryboard } from '@/lib/storyboard-approval';
+import { reapproveStoryboard, reapproveUnchangedStoryboard, storyboardApprovalVariants, approveStoryboardSelection } from '@/lib/storyboard-approval';
+import {hasKeyframeConfig,chooseKeyframe,keyframeSelectionSchema,keyframeSelection} from '@/lib/keyframes';
 import { reapproveSpeech } from '@/lib/speech-approval';
 import { removeCharacter, restoreCharacter } from '@/lib/character-removal';
 import { preparePlanCards } from '@/lib/storyboard';
@@ -17,6 +18,7 @@ import {
   addVariant,
   addAnimatic,
   approve,
+  chosen,
   getItem,
   id as uid,
   makeVariant,
@@ -24,6 +26,7 @@ import {
   isApproved,
   deleteVariant,
   restoreVariant,
+  type Project,
   type Kind,
 } from '@/lib/domain';
 import { z } from 'zod';
@@ -57,6 +60,16 @@ const variant = z.object({
   parentVariantId: z.string().uuid().optional(),
   mergedFromIds: z.array(z.string().uuid()).min(2).max(2).optional(),
 });
+const approvalSelection=z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),keyframes:keyframeSelectionSchema.optional()});
+async function checkApprovalAssets(user:string,p:Project,itemId:string,variantId:string){
+  const item=getItem(p,itemId),selected=item.stage===5&&hasKeyframeConfig(p,item)
+    ?storyboardApprovalVariants(p,item):item.variants.filter(v=>v.id===variantId);
+  for(const v of selected){
+    if(!v.assetId)continue;
+    const file=await asset(user,v.assetId,p);
+    if(typeof file.mime!=='string'||!file.mime.startsWith(v.kind+'/'))throw Error('Файл выбранного варианта недоступен или имеет другой тип.');
+  }
+}
 export const GET = api(async (req, ctx) =>
   Response.json(await loadProject(await owner(req), (await ctx.params).id)),
 );
@@ -83,8 +96,8 @@ export const PATCH = api(async (req, ctx) => {
       p.mediaDurations={...p.mediaDurations,...durations};break;
     }
     case 'approveReview': {
-      const {selections}=z.object({selections:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),reviewed:z.boolean().optional()})).min(1).max(120)}).parse(d);
-      for(const s of selections){const v=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);if(v?.assetId)await asset(user,v.assetId,p);}
+      const {selections}=z.object({selections:z.array(approvalSelection.extend({reviewed:z.boolean().optional()})).min(1).max(120)}).parse(d);
+      for(const s of selections)await checkApprovalAssets(user,p,s.itemId,s.variantId);
       approveReview(p,selections);break;
     }
     case 'removePlan':setPlanExcluded(p,body.itemId!,true);break;
@@ -166,18 +179,20 @@ export const PATCH = api(async (req, ctx) => {
       reapproveScript(p,body.itemId!,variantId);break;
     }
     case 'reapproveStoryboard': {
-      const {variantId}=z.object({variantId:z.string().uuid()}).parse(d);
+      const {variantId,keyframes}=z.object({variantId:z.string().uuid(),keyframes:keyframeSelectionSchema.optional()}).parse(d);
       const source=getItem(p,body.itemId!).variants.find(v=>v.id===variantId);
       if(source?.kind==='image'&&(!source.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('image/')))
         throw new Error('Изображение недоступно. Выберите готовый кадр.');
-      reapproveStoryboard(p,body.itemId!,variantId);break;
+      await checkApprovalAssets(user,p,body.itemId!,variantId);
+      reapproveStoryboard(p,body.itemId!,variantId,keyframes);break;
     }
     case 'reapproveUnchangedStoryboard': {
-      const {selections}=z.object({selections:z.array(z.object({itemId:z.string().uuid(),variantId:z.string().uuid()})).min(1).max(120)}).parse(d);
+      const {selections}=z.object({selections:z.array(approvalSelection).min(1).max(120)}).parse(d);
       for(const s of selections) {
         const source=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);
         if(source?.kind==='image'&&(!source.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('image/')))
           throw new Error('Изображение недоступно. Выберите готовый кадр.');
+        await checkApprovalAssets(user,p,s.itemId,s.variantId);
       }
       reapproveUnchangedStoryboard(p,selections);break;
     }
@@ -224,6 +239,15 @@ export const PATCH = api(async (req, ctx) => {
     case 'restoreVariant': {
       const {variantId} = z.object({variantId:z.string().uuid()}).parse(d);
       (body.action === 'deleteVariant' ? deleteVariant : restoreVariant)(p,body.itemId!,variantId);
+      if(body.action==='deleteVariant'){
+        const item=getItem(p,body.itemId!);
+        if(item.stage===5&&hasKeyframeConfig(p,item)){
+          const selected=keyframeSelection(item);
+          // Keep an explicit missing role so reading the card cannot silently
+          // select another paid image. Restore only restores content, never approval.
+          if(Object.values(selected).includes(variantId)||Object.values(item.approvedKeyframes??{}).includes(variantId))item.approvedKeyframes=undefined;
+        }
+      }
       break;
     }
     case 'approveSelectedSpeech': {
@@ -234,13 +258,14 @@ export const PATCH = api(async (req, ctx) => {
     case 'approveBatch': {
       const batch = z.object({
         stage: z.union([z.literal(5), z.literal(6), z.literal(7)]),
-        selections: z.array(z.object({ itemId: z.string().uuid(), variantId: z.string().uuid() })).min(1).max(120),
+        selections: z.array(approvalSelection).min(1).max(120),
       }).parse(d);
       if(batch.stage===6)for(const s of batch.selections){
         const source=getItem(p,s.itemId).variants.find(v=>v.id===s.variantId);
         if(!source?.assetId||!(await asset(user,source.assetId,p)).mime.startsWith('audio/'))
           throw new Error('Аудиофайл недоступен. Выберите готовую запись.');
       }
+      if(batch.stage!==6)for(const s of batch.selections)await checkApprovalAssets(user,p,s.itemId,s.variantId);
       approveBatch(p, batch.stage, batch.selections);
       break;
     }
@@ -288,15 +313,22 @@ export const PATCH = api(async (req, ctx) => {
       const v = i.variants.find((v) => v.id === d?.variantId);
       if (!v) throw new Error('Вариант не найден.');
       if(i.stage===1&&v.characterDraft)throw Error('Выберите описание через «Актёрский образ». Выбор изображения героя выполняется отдельно.');
-      i.selectedId = v.id;
+      if(i.stage===5&&hasKeyframeConfig(p,i))chooseKeyframe(p,i.id,v.keyframe??'start',v.id);
+      else i.selectedId = v.id;
       break;
     }
-    case 'approve':
-      approve(p, body.itemId!);
+    case 'approve': {
+      const item=getItem(p,body.itemId!),selected=chosen(item)?.id;
+      if(selected)await checkApprovalAssets(user,p,item.id,selected);
+      if(item.stage===5&&p.jobs.some(j=>j.itemId===item.id&&j.purpose!=='media-review'&&['queued','dispatching','pending','saving'].includes(j.status)))throw Error('Дождитесь завершения генерации этого плана.');
+      if(item.stage===5&&hasKeyframeConfig(p,item))approveStoryboardSelection(p,{itemId:item.id,variantId:selected??''});
+      else approve(p, body.itemId!);
       break;
-    case 'unapprove':
-      getItem(p, body.itemId!).approvedId = undefined;
+    }
+    case 'unapprove': {
+      const item=getItem(p,body.itemId!);item.approvedId=undefined;item.approvedKeyframes=undefined;
       break;
+    }
     case 'addItem': {
       const x = z
         .object({
