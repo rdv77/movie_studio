@@ -1,3 +1,6 @@
+import {renderKeyframeClip} from './animatic-render';
+import {buildAnimaticManifest} from './animatic-manifest';
+import {hasKeyframeConfig} from './keyframes';
 import { wasmUrl } from './wasm';
 import { captionForPlan, captionPng } from './captions';
 import type { Project, Variant } from './domain';
@@ -7,7 +10,9 @@ import {musicIssue,musicSettings,musicEnvelope,type MusicSettings} from './music
 import {runtimeLimit,checkRuntime} from './runtime-policy';
 type RenderClip = Variant & { assemblyMode?: 'full' | 'custom' };
 export function editPlan(p: Project, animatic = false) {
-  if(!animatic&&musicIssue(p))throw new Error(musicIssue(p));
+  const settings=(p as Project&{animaticSettings?:{sound?:'silent'|'voices';music?:boolean;motion?:boolean}}).animaticSettings;
+  const silent=animatic&&settings?.sound==='silent';
+  if((!animatic||settings?.music===true)&&musicIssue(p))throw new Error(musicIssue(p));
   const stage = animatic ? 5 : 7;
   const items = p.items.filter((i) => i.stage === stage && participates(p,i));
   if (!items.length) throw new Error('В последовательности нет планов. Восстановите план из раздела «Удалённые планы» или подготовьте новые карточки.');
@@ -30,8 +35,8 @@ export function editPlan(p: Project, animatic = false) {
   const seconds = clips.reduce((sum, v) => sum + v.duration, 0);
   if (clips.some(v => !Number.isFinite(v.duration) || v.duration <= 0) || !Number.isFinite(seconds) || seconds <= 0)
     throw new Error('Укажите положительную длительность каждого плана.');
-  const soundItems = p.items.filter((i) => i.stage === 6 && participates(p, i));
-  if (p.speechMode === 'plans') {
+  const soundItems = silent?[]:p.items.filter((i) => i.stage === 6 && participates(p, i));
+  if (!silent&&p.speechMode === 'plans') {
     const rows = speechPlans(p);
     for (const row of rows) {
       if (!row.item || (!animatic && !isApproved(p, row.item))) throw new Error(`Выберите${animatic ? '' : ' и утвердите'} озвучку: ${row.title}.`);
@@ -61,7 +66,7 @@ export function editPlan(p: Project, animatic = false) {
       return { ...v, title: i.title, offset: clips.slice(0, index).reduce((s, c) => s + c.duration, 0), duration: clips[index].duration };
     })
     .filter((v) => v.kind === 'audio' && v.assetId);
-  if (!audio.length && scriptSpeech(p).sources.length)
+  if (!silent&&!audio.length && scriptSpeech(p).sources.length)
     throw new Error('В сценарии есть реплики, но нет утверждённой озвучки. Создайте или выберите аудиозапись и нажмите «Утвердить вариант» перед сборкой.');
   for (const v of audio) {
     if (v.volume <= 0) throw new Error(`У озвучки «${v.title}» громкость равна нулю. Исправьте её через «Правки» и утвердите вариант.`);
@@ -69,7 +74,7 @@ export function editPlan(p: Project, animatic = false) {
   }
   return {
     ...(runtimeLimit(p)!==undefined?{runtimeLimit:runtimeLimit(p)}:{}),
-    music:!animatic&&musicSettings(p).enabled?p.music?.variants.find(v=>v.id===p.music?.approvedId):undefined,
+    music:(!animatic||settings?.music===true)&&musicSettings(p).enabled?p.music?.variants.find(v=>v.id===p.music?.approvedId):undefined,
     musicSettings:musicSettings(p),
     clips,
     audio,
@@ -282,12 +287,15 @@ export async function renderFilm(
       }
     }
     if (animatic && p.speechMode === 'plans') plan = fitPlanToSpeech(plan, speechSeconds);
-    if(animatic)checkRuntime(plan.seconds,plan.runtimeLimit);
+    if(animatic){
+      if(p.speechMode!=='plans'){const clips=plan.clips.map(v=>({...v,duration:Math.ceil(v.duration*24-1e-8)/24}));plan={...plan,clips,seconds:clips.reduce((n,v)=>n+v.duration,0)};}
+      checkRuntime(plan.seconds,plan.runtimeLimit);
+    }
     const videoSeconds: number[] = [];
     progress(`Хронометраж с озвучкой: ${plan.seconds.toFixed(2)} сек. Подготовка кадров…`);
     for (let i = 0; i < plan.clips.length; i++) {
       progress(`Подготовка плана ${i + 1} из ${plan.clips.length}…`);
-      await input('in' + i, plan.clips[i]);
+      if(!animatic)await input('in' + i, plan.clips[i]);
       const item=p.items.filter(item=>item.stage===(animatic?5:7)&&participates(p,item))[i];
       const caption=captionForPlan(p,item),captionFile=caption?`caption${i}.png`:undefined;
       if(caption&&captionFile)await ff.writeFile(captionFile,await captionPng(caption,plan.width,plan.height));
@@ -318,15 +326,11 @@ export async function renderFilm(
         const speech=Math.max(0,...plan.audio.flatMap((v,n)=>plan.audioClipIndexes[n]===i?[speechSeconds[n]-v.trim]:[]));
         plan.clips[i]=resolveFinalClip(plan.clips[i],sourceDuration,speech);
       }
-      if (
-        (await ff.exec(
-          clipArgs(plan.clips[i], i, plan.width, plan.height, animatic, captionFile),
-        )) !== 0
-      )
-        throw new Error(
-          `Не удалось обработать план ${i + 1}. Проверьте длительность и формат исходного файла.`,
-        );
-      await ff.deleteFile('in' + i);
+      if(animatic)await renderKeyframeClip(p,item,plan.clips[i],i,plan.width,plan.height,ff,input,clipArgs,captionFile);
+      else {
+        if(await ff.exec(clipArgs(plan.clips[i],i,plan.width,plan.height,false,captionFile))!==0)throw new Error(`Не удалось обработать план ${i+1}. Проверьте длительность и формат исходного файла.`);
+        await ff.deleteFile('in'+i);
+      }
       if(captionFile)await ff.deleteFile(captionFile);
     }
     if(!animatic)plan=fitFinalPlan(plan,videoSeconds,speechSeconds);
@@ -374,6 +378,7 @@ export async function renderFilm(
     if (typeof bytes === 'string')
       throw new Error('Некорректный результат сборки.');
     return { blob: new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), seconds: plan.seconds,
+      ...(animatic?{manifest:buildAnimaticManifest(p,plan,(await import('./animatic')).animaticBasis(p))}:{}),
       timing: plan.clips.map((v, n) => `${n + 1}. ${v.duration.toFixed(3)} сек`).join('\n') };
   } finally {
     signal?.removeEventListener('abort', cancel);

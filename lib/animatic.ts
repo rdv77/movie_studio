@@ -1,4 +1,7 @@
 import { chosen, dependencies, id, isApproved, makeVariant, participates, type Project, type Variant } from './domain';
+import {validateAnimaticManifest,type AnimaticManifest} from './animatic-manifest';
+import {hasKeyframeConfig,planKeyframeMode,keyframeSelection,selectedKeyframe} from './keyframes';
+import {versionShot} from './creative-versions';
 import { editPlan } from './render';
 
 // Capture the actual selected soundtrack, not just stage-6 dependencies (which
@@ -6,21 +9,25 @@ import { editPlan } from './render';
 export function animaticBasis(p: Project) {
   const plan=editPlan(p,true);
   const fields=(v:Variant)=>[v.id,v.assetId,v.duration,v.trim,v.offset,v.volume,v.speechType,v.speaker];
-  return JSON.stringify([p.configVersion,p.format,p.seconds,p.speechMode??'track',plan.clips.map(fields),plan.audio.map(fields),plan.audioClipIndexes,...(p.captions?.length?[p.captions]:[])]);
+  const pairBasis=p.items.filter(i=>i.stage===5&&participates(p,i)&&hasKeyframeConfig(p,i)).map(i=>({id:i.id,mode:planKeyframeMode(p,i),selection:keyframeSelection(i),frames:['start','middle','end'].map(role=>{const v=selectedKeyframe(i,role as 'start'|'middle'|'end');return v?[v.id,v.assetId,v.keyframeSourceBasis,v.keyframeReviewBasis]:null;}),direction:versionShot(p,i)?.direction}));
+  const settings=(p as Project&{animaticSettings?:unknown}).animaticSettings;
+  return JSON.stringify([p.configVersion,p.format,p.seconds,p.speechMode??'track',plan.clips.map(fields),plan.audio.map(fields),plan.audioClipIndexes,...(p.captions?.length?[p.captions]:[]),...(pairBasis.length?[pairBasis]:[]),...(settings?[settings]:[]),...(plan.music?[plan.music.id,plan.music.assetId,plan.musicSettings]:[])]);
 }
 export function animaticIssue(p:Project,v?:Variant) {
   if(!v?.assetId||v.kind!=='video')return 'Сначала соберите и выберите аниматик.';
   if(!v.animaticBasis)return 'Это прежний просмотр без списка источников. Соберите новый аниматик с текущими кадрами и голосами.';
   try {if(v.animaticBasis!==animaticBasis(p))return 'Кадры, голоса, титры или монтаж изменились. Соберите новый аниматик: сохранённый файл содержит прежнюю версию.';}
   catch(e){return (e as Error).message;}
-  const voices=p.items.filter(i=>i.stage===6&&participates(p,i)&&chosen(i)?.kind==='audio');
+  const voices=(p as Project&{animaticSettings?:{sound?:string}}).animaticSettings?.sound==='silent'?[]:p.items.filter(i=>i.stage===6&&participates(p,i)&&chosen(i)?.kind==='audio');
   if(voices.some(i=>i.selectedId!==i.approvedId||!isApproved(p,i)))return 'Сначала утвердите выбранные реплики на этапе «Голоса». Затем можно утвердить этот аниматик.';
   return '';
 }
-export function saveAnimatic(p:Project,data:Partial<Variant>,basis:string) {
+export function saveAnimatic(p:Project,data:Partial<Variant>&{animaticManifest?:AnimaticManifest},basis:string) {
   if(!basis||basis!==animaticBasis(p))throw new Error('Источники изменились во время сборки. Соберите аниматик заново с текущими голосами и кадрами.');
   if(data.kind!=='video'||!data.assetId)throw new Error('Для аниматика нужен видеофайл.');
+  const manifest=data.animaticManifest?validateAnimaticManifest(p,data.animaticManifest,basis):undefined;
   const v=makeVariant(p,{id:id(),stage:6,title:'Аниматик',variants:[]},{...data,animaticBasis:basis,deps:dependencies(p,6)});
+  if(manifest)(v as Variant&{animaticManifest?:AnimaticManifest}).animaticManifest=manifest;
   p.animatic??={variants:[]};p.animatic.variants.push(v);p.animatic.selectedId=v.id;
   return v;
 }

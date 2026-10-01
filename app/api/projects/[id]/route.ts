@@ -1,3 +1,4 @@
+import {animaticManifestSchema,manifestAssets} from '../../../../lib/animatic-manifest';
 import { approveReview } from '@/lib/review-center';
 import { recordCharacterVersion, restoreCharacterVersion, captureVersionInfo } from '@/lib/creative-versions';
 import { syncVideoPlans } from '@/lib/video';
@@ -133,11 +134,16 @@ export const PATCH = api(async (req, ctx) => {
     }
     case 'archiveJournal': archiveJournal(p); break;
     case 'restoreJournal': archiveJournal(p,true); break;
+    case 'setAnimaticSettings': {
+      p.animaticSettings=z.object({sound:z.enum(['silent','voices']),music:z.boolean(),motion:z.boolean()}).parse(d);break;
+    }
     case 'saveAnimaticPreview': {
       const v=variant.parse(d),basis=z.string().min(1).max(100000).parse(d?.basis);
       if(!v.assetId||(await asset(user, v.assetId, p)).mime!=='video/mp4')throw new Error('Для аниматика нужен файл MP4.');
       for (const ref of [...v.refs,...(v.characterRefs??[]),...(v.character?.refs??[])]) await asset(user,ref,p);
-      saveAnimatic(p,v,basis);break;
+      const manifest=d?.animaticManifest?animaticManifestSchema.parse(d.animaticManifest):undefined;
+      if(manifest)for(const ref of manifestAssets(manifest))await asset(user,ref,p);
+      saveAnimatic(p,{...v,animaticManifest:manifest},basis);break;
     }
     case 'selectAnimatic':
     case 'approveAnimatic':

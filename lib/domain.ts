@@ -1,3 +1,4 @@
+import type {AnimaticManifest} from './animatic-manifest';
 import type {KeyframeRole,KeyframeSelection,KeyframeApproval} from './keyframes';
 import {hasKeyframeConfig,keyframesApproved,approveKeyframes,selectedKeyframe,keyframeFoundationBasis} from './keyframes';
 import type {MediaReview} from './media-review';
@@ -38,6 +39,7 @@ export type LipsyncJob = { audioAssetId: string; seconds: number } & (
   (LipsyncBasis & { inputType: 'image'; imageAssetId: string; imageWidth: number; imageHeight: number })
 );
 export type Variant = {
+  animaticManifest?:AnimaticManifest;
   keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string;compilation?:PromptCompilationSnapshot;endFrameAssetId?:string;
   location?:LocationProfile;characterDraft?:boolean;
   basisVersion?: 2;
@@ -151,6 +153,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  animaticSettings?:{sound:'silent'|'voices';music:boolean;motion:boolean};
   mediaReviews?:MediaReview[];
   creativeHistory?: CreativeVersion[];
   creativeVersionId?: string;

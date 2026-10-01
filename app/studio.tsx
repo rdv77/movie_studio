@@ -1,4 +1,7 @@
 'use client';
+import {AnimaticTimeline} from './animatic-timeline';
+import {manifestAssets} from '../lib/animatic-manifest';
+
 import {compilePrompt,type CompiledPrompt,type PromptInput} from '@/lib/prompt-compiler';
 import {mediaVariantPrompt} from '@/lib/prompt-jobs';
 import {KeyframeEditor} from './keyframe-editor';
@@ -529,7 +532,7 @@ function Workspace() {
     let downloaded = false;
     try {
       const basis=animatic?animaticBasis(p):undefined;
-      const { blob, seconds, timing } = await renderFilm(
+      const { blob, seconds, timing, manifest } = await renderFilm(
         p,
         animatic,
         report,
@@ -550,6 +553,7 @@ function Workspace() {
         animatic ? 'saveAnimaticPreview' : 'addVariant',
         {
           ...(basis?{basis}:{}),
+          ...(manifest?{animaticManifest:manifest}:{}),
           title: animatic
             ? 'Аниматик · ' + new Date().toLocaleTimeString('ru-RU')
             : 'Монтаж · ' + new Date().toLocaleTimeString('ru-RU'),
@@ -559,7 +563,7 @@ function Workspace() {
           kind: 'video',
           assetId: a.id,
           duration: seconds,
-          refs: [],
+          refs: manifest?manifestAssets(manifest):[],
         },
         animatic?'':target?.id,
       );
@@ -1015,6 +1019,7 @@ function Workspace() {
                   perform={perform}
                 />
               )}
+              {step===9&&<AnimaticTimeline p={p} busy={busy} save={value=>action('setAnimaticSettings',value)} jump={id=>{setStep(5);setItemId(id);}}/>}
               {step===9&&<AnimaticPanel p={p} busy={busy} perform={perform} action={action} onContinue={()=>{setStep(7);setItemId('');}}/>}
               {step === 6 && voiceView==='plans' && <div className="editor-surface p-5 mb-5">
                 <strong>Озвучка по планам</strong>
