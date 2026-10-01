@@ -35,7 +35,10 @@ export function planReferenceIds(p:Project,item:Item) {
   const scene=p.directing?.scenes.find(s=>s.id===shot.sceneId);
   const explicitLocations=shot.locationIds??scene?.locationIds;
   const context=[shot.title,shot.description,shot.productionDesign,scene?.location].filter(Boolean).join('\n');
-  const ids=p.items.filter(i=>isApproved(p,i)).flatMap(i=>{
+  // Later production cards can never supply a hero/location reference. Reject
+  // them before approval validation, which checks their preceding materials.
+  // planCharacterIds has already validated the hero approvals in this snapshot.
+  const ids=p.items.filter(i=>heroes.has(i.id)||(i.stage===3&&isApproved(p,i))).flatMap(i=>{
     const v=i.variants.find(v=>v.id===i.approvedId)!;
     if(v.kind!=='image'||!v.assetId)return [];
     if(heroes.has(i.id))return [v.assetId];

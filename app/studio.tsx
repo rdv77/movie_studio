@@ -40,7 +40,7 @@ import { runnableJobs, newestProject, conceptImageAdmissionIssue, storyboardAdmi
 import { planCharacterIds, planReferenceIds, planFrameIds, filterPlanReferences } from '@/lib/plan-references';
 import { hiddenReferences, selectedReferences } from '@/lib/reference-selection';
 import { zenCredits, generationSeconds, isZenCreatorImage, ZEN_IMAGE_PROMPT_LIMIT } from '@/lib/zencreator-models';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   QueryClient,
   QueryClientProvider,
@@ -2754,27 +2754,42 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
   </DialogContent></Dialog>;
 }
 function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, submit, referenceAction }: any) {
-  const [snapshot, setSnapshot] = useState<Project>(p);
+  const [snapshot] = useState<Project>(p);
   const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter(m => m.kind === 'image' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
   const [modelId, setModelId] = useState(choices[0]?.id ?? '');
   const m = choices.find(x => x.id === modelId);
   const [batch] = useState(() => crypto.randomUUID());
-  const [rows, setRows] = useState(() => storyboardBatchPlans(snapshot).map(({ item, hasImage, blocked }) => ({
+  const itemsById = useMemo(() => new Map(snapshot.items.map(item => [item.id,item])), [snapshot]);
+  const initialRows = useMemo(() => storyboardBatchPlans(snapshot).map(({ item, hasImage, blocked }) => ({
     itemId: item.id, title: item.title, hasImage, blocked, include: !hasImage && !blocked,
     prompt: storyboardPrompt(snapshot, item), refs:planReferenceIds(snapshot,item),
-  })));
+  })), [snapshot]);
+  const [rows, setRows] = useState(() => initialRows);
   const [override, setOverride] = useState<string | undefined>();
   const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
-  const referenceOptions=new Map(rows.map(r=>[r.itemId,planReferenceIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!)]));
-  const referencesByPlan=new Map(rows.map(r=>[r.itemId,filterPlanReferences(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,r.refs)]));
+  const [openedPrompts, setOpenedPrompts] = useState<string[]>([]);
+  // This modal owns an immutable project snapshot. Do not rebuild all preceding
+  // approvals when a checkbox, model, quality setting or text field changes.
+  const referenceOptions = useMemo(() => new Map(initialRows.map(r => [r.itemId,r.refs])), [initialRows]);
+  // Every selectable reference came from this plan's scoped options above.
+  // Reuse that proof; the API revalidates current ownership and membership.
+  const referencesByPlan = useMemo(() => new Map(rows.map(r => [r.itemId,
+    selectedReferences(snapshot,r.refs.filter(id => referenceOptions.get(r.itemId)?.includes(id)))
+  ])), [snapshot,rows,referenceOptions]);
+  const candidates = useMemo(() => initialRows.map(r => ({
+    ...mediaBatchCandidate(snapshot,itemsById.get(r.itemId)!,'image'),blocked:r.blocked,
+  })), [snapshot,initialRows,itemsById]);
+  const included = useMemo(() => rows.filter(r => r.include && !r.blocked), [rows]);
   const rowRefs=(r:(typeof rows)[number])=>referencesByPlan.get(r.itemId)??[];
   const frameInput=(r:(typeof rows)[number]):PromptInput=>({kind:'image',prompt:r.prompt.trim(),references:rowRefs(r),allowLegacyModel:!snapshot.directing});
-  const compiled=new Map<string,{result?:CompiledPrompt,error?:string}>(rows.map(r=>{try{return [r.itemId,{result:compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,modelId,frameInput(r))}] as const;}catch(error){return [r.itemId,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'}] as const;}}));
+  const compiled = useMemo(() => new Map<string,{result?:CompiledPrompt,error?:string}>(included.map(r=>{
+    try{return [r.itemId,{result:compilePrompt(snapshot,itemsById.get(r.itemId)!,modelId,frameInput(r))}] as const;}
+    catch(error){return [r.itemId,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'}] as const;}
+  })), [snapshot,itemsById,modelId,included,referencesByPlan]);
   const compiledRefs=(r:(typeof rows)[number])=>compiled.get(r.itemId)?.result?.references.map(x=>x.assetId)??[];
-  const effectiveRefs=rows.filter(r=>r.include&&!r.blocked).map(compiledRefs).sort((a,b)=>b.length-a.length)[0]??[];
-  const excludedRefs=hiddenReferences(snapshot);
-  const images = (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id));
-  const included = rows.filter(r => r.include && !r.blocked);
+  const effectiveRefs=included.map(compiledRefs).sort((a,b)=>b.length-a.length)[0]??[];
+  const excludedRefs = useMemo(() => hiddenReferences(snapshot), [snapshot]);
+  const images = useMemo(() => (assets as Asset[]).filter(a => ['image/png', 'image/jpeg', 'image/webp'].includes(a.mime)&&!excludedRefs.has(a.id)), [assets,excludedRefs]);
   const isGrok = modelId === GROK_IMAGE_MODEL;
   const base = isGrok ? grokImageEstimate(imageSettings, Math.min(5,effectiveRefs.length)) : m?.estimate ?? null;
   let estimate = base, costError = '';
@@ -2800,16 +2815,19 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
-      <BatchScopeSelector rows={rows.map(r=>({...mediaBatchCandidate(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,'image'),blocked:r.blocked}))} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
+      <BatchScopeSelector rows={candidates} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
       {rows.map((r, index) => <section key={r.itemId} className="editor-surface p-4">
         <label className="row"><Checkbox disabled={!!r.blocked} checked={r.include} onCheckedChange={v => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, include: !!v } : x))} />
           <span><strong>{r.title}</strong><small className="block muted">{r.blocked || (r.hasImage ? 'Есть изображение · будет создан новый вариант' : 'Картинки пока нет')}</small></span></label>
         {r.include&&!r.blocked&&<div className="mt-3"><strong>Референсы этого плана · {rowRefs(r).length}</strong><div className="reference-grid">{images.filter(a=>referenceOptions.get(r.itemId)!.includes(a.id)).map(a=><label key={a.id} className={'reference '+(rowRefs(r).includes(a.id)?'active':'')}><img loading="lazy" src={'/api/assets/'+a.id} alt={a.name}/><Checkbox aria-label={r.title+' — '+a.name} checked={rowRefs(r).includes(a.id)} onCheckedChange={v=>setRows(rs=>rs.map(x=>x.itemId===r.itemId?{...x,refs:v?[...x.refs,a.id]:x.refs.filter(id=>id!==a.id)}:x))}/><span>{a.name}</span></label>)}</div>{!rowRefs(r).length&&<p className="muted">Нет подходящих изображений: используем описание этого плана и текст визуального стиля. Свой референс можно загрузить через «Создать с ИИ» в карточке плана.</p>}</div>}
-        {r.include && !r.blocked && <details className="mt-3"><summary>Проверить задачу из карточки · {r.prompt.trim().length} / 20000</summary>
+        {r.include && !r.blocked && <details className="mt-3" onToggle={event=>{
+          const open=event.currentTarget.open;
+          setOpenedPrompts(ids=>open?(ids.includes(r.itemId)?ids:[...ids,r.itemId]):ids.filter(id=>id!==r.itemId));
+        }}><summary>Проверить задачу из карточки · {r.prompt.trim().length} / 20000</summary>
           <Textarea className="edit-text short mt-3" aria-label={`Задача для кадра ${index + 1}`} value={r.prompt}
             onChange={e => setRows(rs => rs.map(x => x.itemId === r.itemId ? { ...x, prompt: e.target.value } : x))} />
           {(!r.prompt.trim() || r.prompt.trim().length > 20000) && <p role="alert">Введите задачу длиной от 1 до 20000 символов.</p>}
-          <PromptPreview project={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} modelIds={modelId?[modelId]:[]} input={frameInput(r)}/>
+          {openedPrompts.includes(r.itemId)&&<PromptPreview project={snapshot} item={itemsById.get(r.itemId)!} modelIds={modelId?[modelId]:[]} input={frameInput(r)}/>}
         </details>}
         {r.include&&!r.blocked&&promptErrors.get(r.itemId)&&<p role="alert">{promptErrors.get(r.itemId)}</p>}
       </section>)}
