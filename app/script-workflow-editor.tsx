@@ -4,10 +4,11 @@ import {Button} from '@/components/ui/button';
 import {Textarea} from '@/components/ui/textarea';
 import type {Project} from '@/lib/domain';
 import {money} from '@/lib/domain';
+import {MODELS} from '@/lib/models';
 import {directorRunActive} from '@/lib/directing';
 import {VersionComparison,type ComparisonVersion} from './version-comparison';
 import {SCRIPT_ROLES,SCRIPT_ROLE_NAMES,CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE,
-  isScriptWorkflowRun,scriptWorkflowResultSchema,createScriptWorkflowRun,scriptWorkflowPrompt,type ScriptRole,type ScriptWorkflowRun} from '@/lib/script-workflow';
+  isScriptWorkflowRun,isRecoverableUnsentScriptRun,scriptWorkflowResultSchema,createScriptWorkflowRun,scriptWorkflowPrompt,type ScriptRole,type ScriptWorkflowRun} from '@/lib/script-workflow';
 import type {CinemaMethodId} from '@/lib/cinema-methods';
 
 type Props={p:Project;model:string;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>};
@@ -82,6 +83,10 @@ export function ScriptWorkflowEditor({p,model,busy,submit}:Props){
         ...completed.map(({task,result})=>({id:task.id,label:SCRIPT_ROLE_NAMES[task.role]+' · '+result.title,text:result.text,metadata:{created:run.created,model:run.model,origin:SCRIPT_ROLE_NAMES[task.role],actualCost:money(p.jobs.find(j=>j.id===task.jobId)?.actual??null)}}))];
       return <details key={run.id} open={n===0} className="space-y-3 rounded border border-border p-3"><summary className="cursor-pointer text-sm font-medium">{new Date(run.created).toLocaleString('ru')} · {run.tasks.filter(t=>t.applied).length}/{run.tasks.length} · {run.stopped?'Остановлен':directorRunActive(run)?'В работе':run.tasks.some(t=>t.error)?'Требует внимания':'Завершён'}</summary>
         <p className="text-xs text-muted-foreground">Основа и настройки этого запуска сохранены отдельно. Утверждённые материалы фильма сохраняются до вашего выбора.</p>
+        {isRecoverableUnsentScriptRun(p,run)&&<div className="space-y-2 rounded border border-primary/40 bg-primary/5 p-3">
+          <p className="text-sm">Запрос к модели не отправлен. Можно продолжить этот запуск с сохранённым исходным текстом, настройками и моделью: {MODELS.find(m=>m.id===run.model)?.name??run.model}.</p>
+          <Button type="button" size="sm" disabled={locked} onClick={()=>perform('resumeScriptRun',{runId:run.id},'Этот запуск продолжен с сохранённой основой. Результаты появятся ниже.')}>Продолжить этот запуск</Button>
+        </div>}
         <details><summary className="cursor-pointer text-xs">Творческое задание этого запуска</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(run.scriptInput.brief,null,2)}</pre></details>
         {completed.length>0&&<VersionComparison key={run.id} versions={versions} title="Сравнить исходный текст и результаты специалистов" initialLeftId={`input-${run.id}`} initialRightId={completed.at(-1)?.task.id}/>}
         <div className="space-y-3">{run.tasks.map(task=>{

@@ -5,7 +5,7 @@ const DIRECT_ENQUEUE_PATHS = new Set([
   'generate-lipsync', 'generate-voice-tests', 'media-review', 'queue',
 ]);
 const ACTIONS: Record<string, ReadonlySet<string>> = {
-  directing: new Set(['run', 'scriptRun', 'retry', 'advance']),
+  directing: new Set(['run', 'scriptRun', 'resumeScriptRun', 'retry', 'advance']),
   world: new Set(['generateActor']),
   music: new Set(['ideas', 'generate']),
   'voice-design': new Set(['design', 'proposeDelivery', 'saveVoice', 'advance']),

@@ -42,11 +42,41 @@ type RunLike={id:string;stopped?:boolean;tasks:{id:string;result?:unknown;error?
 type State={brief:CreativeBrief;durationMode?:'free'|'strict';runs:(RunLike|ScriptWorkflowRun)[];};
 const uuid=()=>crypto.randomUUID();
 const now=()=>new Date().toISOString();
-function stable(v:unknown):string{return Array.isArray(v)?'['+v.map(stable).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable((v as Record<string,unknown>)[k])).join(',')+'}':JSON.stringify(v)??'null';}
-export function scriptWorkflowBasis(input:ScriptWorkflowInput){let a=2166136261,b=5381;for(const c of stable(input)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
+function stable(v:unknown,includeUndefined=false):string{return Array.isArray(v)?'['+v.map(value=>stable(value,includeUndefined)).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).filter(k=>includeUndefined||(v as Record<string,unknown>)[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+stable((v as Record<string,unknown>)[k],includeUndefined)).join(',')+'}':JSON.stringify(v)??'null';}
+function fingerprint(input:unknown,includeUndefined=false){let a=2166136261,b=5381;for(const c of stable(input,includeUndefined)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
+export function scriptWorkflowBasis(input:ScriptWorkflowInput,storedBasis?:string){
+  const canonical=fingerprint(input);
+  if(!storedBasis||storedBasis===canonical)return canonical;
+  const settings=input.versionInfo.settings;
+  if(!settings||typeof settings!=='object'||Array.isArray(settings))return canonical;
+  // Older constructors included these four optional slots as undefined. JSON
+  // drops them; restore only those slots to recognize their original fingerprint.
+  // Existing values win, so compatibility never conceals changed parent IDs.
+  const legacy={parentRunId:undefined,parentTaskId:undefined,...input,versionInfo:{...input.versionInfo,settings:{parentRunId:undefined,parentTaskId:undefined,...settings}}};
+  return fingerprint(legacy,true)===storedBasis?storedBasis:canonical;
+}
 export function isScriptWorkflowRun(value:unknown):value is ScriptWorkflowRun{return !!value&&typeof value==='object'&&(value as ScriptWorkflowRun).mode==='script-workflow'&&!!(value as ScriptWorkflowRun).scriptInput;}
 function state(p:Project):State{if(!p.directing)throw Error('Сначала сохраните творческое задание.');return p.directing as unknown as State;}
-function checkedRun(run:ScriptWorkflowRun){const input=scriptWorkflowInputSchema.parse(run.scriptInput);if(run.basis!==scriptWorkflowBasis(input)||run.model!==input.model||run.tasks.length!==input.roles.length||run.tasks.some((t,n)=>t.role!==input.roles[n]||stable(t.requires)!==stable(n?[run.tasks[n-1].id]:[])))throw Error('Замороженный вход или состав цепочки изменился. Создайте новый запуск.');return input;}
+function checkedRun(run:ScriptWorkflowRun){const input=scriptWorkflowInputSchema.parse(run.scriptInput);if(run.basis!==scriptWorkflowBasis(input,run.basis)||run.model!==input.model||run.tasks.length!==input.roles.length||run.tasks.some((t,n)=>t.role!==input.roles[n]||stable(t.requires)!==stable(n?[run.tasks[n-1].id]:[])))throw Error('Замороженный вход или состав цепочки изменился. Создайте новый запуск.');return input;}
+function activeRun(run:RunLike){const viable=(task:RunLike['tasks'][number],seen=new Set<string>()):boolean=>{if(task.error||seen.has(task.id))return false;if(task.applied||task.result)return true;seen.add(task.id);return ((task as ScriptWorkflowTask).requires??[]).every(id=>{const parent=run.tasks.find(t=>t.id===id);return !!parent&&viable(parent,new Set(seen));});};return !run.stopped&&run.tasks.some(t=>!t.result&&!t.error&&!t.applied&&viable(t));}
+export function isRecoverableUnsentScriptRun(p:Project,run:unknown):run is ScriptWorkflowRun{
+  if(!isScriptWorkflowRun(run)||run.stopped!==true)return false;
+  try{
+    const input=checkedRun(run);
+    if(!z.string().uuid().safeParse(run.id).success||!z.string().datetime().safeParse(run.created).success||!Array.isArray(run.sceneIds)||run.sceneIds.length)return false;
+    if(new Set(run.tasks.map(t=>t.id)).size!==run.tasks.length||run.tasks.some(t=>!z.string().uuid().safeParse(t.id).success||t.requires.includes(t.id)))return false;
+    if(stable(input.roles)!==stable(SCRIPT_ROLES.filter(role=>input.roles.includes(role)))||new Set(input.methodologyIds).size!==input.methodologyIds.length)return false;
+    // Only the recognized pre-JSON fingerprint defect is recoverable here.
+    if(run.basis===scriptWorkflowBasis(input)||run.tasks.some(t=>t.jobId!==undefined||t.result!==undefined||t.error!==undefined||t.applied!==undefined||t.importedVariantId!==undefined||t.lateResult!==undefined))return false;
+    if(p.jobs.some(j=>j.batchId===run.id)||state(p).runs.some(other=>other.id!==run.id&&activeRun(other)))return false;
+    return state(p).runs.some(other=>other===run);
+  }catch{return false;}
+}
+export function resumeUnsentScriptRun(p:Project,runId:string):ScriptWorkflowRun{
+  const run=state(p).runs.find(r=>r.id===runId);
+  if(!isRecoverableUnsentScriptRun(p,run))throw Error('Возобновление недоступно: запуск уже отправлялся, остановлен вручную или его сохранённая основа изменилась.');
+  run.basis=scriptWorkflowBasis(run.scriptInput);run.stopped=false;return run;
+}
 function ownedTask(run:ScriptWorkflowRun,task:ScriptWorkflowTask){if(!run.tasks.some(t=>t===task)||!SCRIPT_ROLES.includes(task.role))throw Error('Задание не принадлежит этой цепочке.');}
 function previousResult(run:ScriptWorkflowRun,task:ScriptWorkflowTask):ScriptWorkflowResult|undefined{
   if(task.requires.length>1||task.requires.includes(task.id))throw Error('Некорректные зависимости цепочки.');
@@ -61,7 +91,7 @@ export function createScriptWorkflowRun(p:Project,model:string,roles:readonly Sc
   const d=state(p),selected=z.array(scriptRoleSchema).min(1).max(SCRIPT_ROLES.length).parse(roles);
   if(new Set(selected).size!==selected.length)throw Error('Специалисты повторяются.');
   if(!model.trim()||model.length>200)throw Error('Выберите текстовую модель.');
-  if(d.runs.some(r=>{const viable=(t:RunLike['tasks'][number],seen=new Set<string>()):boolean=>{if(t.error||seen.has(t.id))return false;if(t.applied||t.result)return true;seen.add(t.id);return ((t as ScriptWorkflowTask).requires??[]).every(id=>{const parent=r.tasks.find(v=>v.id===id);return !!parent&&viable(parent,new Set(seen));});};return !r.stopped&&r.tasks.some(t=>!t.result&&!t.error&&!t.applied&&viable(t));}))throw Error('Завершите или остановите текущую проработку.');
+  if(d.runs.some(activeRun))throw Error('Завершите или остановите текущую проработку.');
   const item=p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive&&i.variants.some(v=>v.id===sourceVariantId));
   const source=item?.variants.find(v=>v.id===sourceVariantId);
   if(!item||!source||source.kind!=='text'||!source.text.trim())throw Error('Выберите исходный текстовый вариант общего сценария этого проекта.');

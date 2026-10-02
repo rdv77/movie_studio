@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createScriptWorkflowRun,importScriptWorkflowCandidate,scriptRoleSchema,scriptPromptOverridesSchema,CINEMA_METHOD_IDS } from '@/lib/script-workflow';
+import { createScriptWorkflowRun,importScriptWorkflowCandidate,isRecoverableUnsentScriptRun,resumeUnsentScriptRun,scriptRoleSchema,scriptPromptOverridesSchema,CINEMA_METHOD_IDS } from '@/lib/script-workflow';
 import { recordCreativeVersion, restoreCreativeVersion, restoreSceneVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { model } from '@/lib/models';
@@ -34,6 +34,13 @@ export const POST=api(async(req,ctx)=>{
       const m=model(input.model);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Выберите текстовую модель.');
       await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовых агентов расходы определяются по токенам. Снимите лимит на время прохода и сверяйте журнал.');
       createScriptWorkflowRun(p,input.model,input.roles,input.sourceVariantId,input.sourceTaskId,{methodologyIds:input.methodologyIds,promptOverrides:input.promptOverrides});break;
+    }
+    case 'resumeScriptRun':{
+      const runId=z.string().uuid().parse(v.runId),run=d.runs.find(r=>r.id===runId);
+      if(!isRecoverableUnsentScriptRun(p,run))throw Error('Этот запуск нельзя продолжить: нет подтверждения, что запрос к модели не отправлялся.');
+      const m=model(run.model);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Выберите текстовую модель.');
+      await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовых агентов расходы определяются по токенам. Снимите лимит на время прохода и сверяйте журнал.');
+      resumeUnsentScriptRun(p,runId);break;
     }
     case 'importScriptCandidate':importScriptWorkflowCandidate(p,z.string().uuid().parse(v.runId),z.string().uuid().parse(v.taskId));break;
     case 'runtimePolicy':{

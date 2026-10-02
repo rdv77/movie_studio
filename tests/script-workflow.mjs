@@ -8,6 +8,25 @@ const fixture=()=>{const p=D.newProject('Сказка'),d=ensureDirecting(p);d.b
 const result=text=>({title:'Кандидат',text,changes:[],findings:[]});
 let checks=0;
 function test(name,fn){fn();checks++;console.log('PASS script workflow:',name);}
+test('canonical fingerprint and frozen prompts survive JSON serialization, including absent optional fields',()=>{
+  const {p,d,item,source}=fixture();item.approvedId=undefined;d.brief.strengths=undefined;d.brief.promptNotes=undefined;
+  const run=S.createScriptWorkflowRun(p,'gpt-6-astra',[...S.SCRIPT_ROLES],source.id,undefined,{promptOverrides:{'script-adaptation':undefined}});
+  const prompt=S.scriptWorkflowPrompt(p,run,run.tasks[0]),saved=JSON.parse(JSON.stringify(p)),loaded=saved.directing.runs[0],before=JSON.stringify(saved);
+  assert.equal(S.scriptWorkflowBasis(loaded.scriptInput),run.basis);assert.equal(S.scriptWorkflowPrompt(saved,loaded,loaded.tasks[0]),prompt);
+  assert.equal(JSON.stringify(saved),before);assert.equal(saved.jobs.length,0);assert.equal(saved.items[0].approvedId,undefined);
+});
+test('known old fingerprint remains readable after optional parent slots disappear; tampering still rejected',()=>{
+  const {p,source}=fixture(),run=S.createScriptWorkflowRun(p,'gpt-6-astra',['script-adaptation'],source.id);
+  const legacy=v=>Array.isArray(v)?'['+v.map(legacy).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+legacy(v[k])).join(',')+'}':JSON.stringify(v)??'null';
+  let a=2166136261,b=5381;for(const c of legacy(run.scriptInput)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}run.basis=(a>>>0).toString(16)+(b>>>0).toString(16);
+  const saved=JSON.parse(JSON.stringify(p)),loaded=saved.directing.runs[0],before=JSON.stringify(saved);
+  assert.notEqual(S.scriptWorkflowBasis(loaded.scriptInput),loaded.basis);assert.equal(S.scriptWorkflowBasis(loaded.scriptInput,loaded.basis),loaded.basis);
+  assert.doesNotThrow(()=>S.scriptWorkflowPrompt(saved,loaded,loaded.tasks[0]));assert.equal(JSON.stringify(saved),before);
+  for(const mutate of [input=>{input.text+=' Подмена.';},input=>{input.parentRunId='Подменённый родитель';},input=>{input.versionInfo.settings.parentTaskId='Подменённый результат';}]){
+    const copy=JSON.parse(JSON.stringify(saved)),candidate=copy.directing.runs[0];mutate(candidate.scriptInput);
+    assert.throws(()=>S.scriptWorkflowPrompt(copy,candidate,candidate.tasks[0]),/изменился/);
+  }
+});
 test('seven source-backed method cards and strict input validation',()=>{
   assert.equal(S.CINEMA_METHODS.length,7);assert.equal(new Set(S.CINEMA_METHOD_IDS).size,7);assert(S.CINEMA_METHODS.every(m=>m.sourceUrl.startsWith('https://')&&m.checks.length>0&&m.principle.length>30&&m.example.startsWith('Авторский пример приложения:')&&m.limits.length>30));
   for(const field of ['principle','example','limits'])assert.equal(new Set(S.CINEMA_METHODS.map(m=>m[field])).size,7,'Method cards must have individual '+field);

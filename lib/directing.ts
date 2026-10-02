@@ -89,7 +89,7 @@ export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return sig
 export function foundation(p:Project){return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId};});}
 export function directorBasis(p:Project){return signature({brief:p.directing?.brief,foundation:foundation(p)});}
 export function editorBasis(p:Project){return signature([directorBasis(p),p.directing?.scenes.map(s=>[sceneOutline(s),s.shots.map(shot=>shotApproval(s,shot))])]);}
-export function directorRunBasis(p:Project,run:DirectorRun){return isScriptWorkflowRun(run)?scriptWorkflowBasis(run.scriptInput):run.characterInput?signature(run.characterInput):directorBasis(p);}
+export function directorRunBasis(p:Project,run:DirectorRun){return isScriptWorkflowRun(run)?scriptWorkflowBasis(run.scriptInput,run.basis):run.characterInput?signature(run.characterInput):directorBasis(p);}
 export function directorRunActive(run:DirectorRun){
   const viable=(t:DirectorTask,seen=new Set<string>()):boolean=>{if(t.error||seen.has(t.id))return false;if(t.applied||t.result)return true;seen.add(t.id);return t.requires.every(id=>{const parent=run.tasks.find(v=>v.id===id);return !!parent&&viable(parent,new Set(seen));});};
   return !run.stopped&&run.tasks.some(t=>!t.applied&&!t.result&&!t.error&&viable(t));
