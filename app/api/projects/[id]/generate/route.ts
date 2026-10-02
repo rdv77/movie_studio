@@ -1,3 +1,4 @@
+import {scenarioVariantInstruction} from '@/lib/scenario-generation';
 import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import {prepareKeyframeGeneration,keyframeRoleInstruction,type KeyframeRole} from '@/lib/keyframes';
 import { planCharacterIds } from '@/lib/plan-references';
@@ -90,7 +91,7 @@ export const POST = api(async (req, ctx) => {
       ...(m.id === GROK_IMAGE_MODEL ? { imageSettings: prepared?.imageSettings??s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...(['audio', 'image', 'video'].includes(kind) && item.stage >= 5 ? info : {}),
       brief: s.prompt, prompt: ['image', 'video'].includes(kind) ? '' : promptFor(p, item,
-        (item.character ? characterPrompt(item.character) + '\n\nПравки к этой попытке: ' : '') + s.prompt + `\nПредложи вариант ${n + 1} из ${s.count}.`, basis),
+        (item.character ? characterPrompt(item.character) + '\n\nПравки к этой попытке: ' : '') + (item.stage===0?scenarioVariantInstruction(s.prompt,n+1,s.count):s.prompt+`\nПредложи вариант ${n + 1} из ${s.count}.`), basis),
       refs:prepared?.refs??(videoInput?.startFrameId?[videoInput.startFrameId]:refs), characterRefs: kind === 'video' && m.provider === 'xai' ? characterRefs : undefined,
       characterIds, character: item.stage === 1 ? item.character : undefined,
       location: item.stage === 3 ? item.location ?? chosen(item)?.location : undefined,

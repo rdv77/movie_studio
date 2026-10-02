@@ -1,7 +1,8 @@
 import type {Project} from './domain';
 import {money} from './domain';
 import {MODELS} from './models';
-import {isScriptWorkflowRun,scriptWorkflowResultSchema,SCRIPT_ROLE_NAMES} from './script-workflow';
+import {isScriptWorkflowRun,scriptWorkflowResultSchema,scriptTaskChain} from './script-workflow';
+import {scriptVariantLabel} from './script-labels';
 import type {ComparisonVersion} from './version-comparison';
 
 export type ScriptComparisonVersion=ComparisonVersion&{variantId?:string;runId?:string;taskId?:string};
@@ -12,7 +13,7 @@ export function scriptComparisonVersions(p:Project):ScriptComparisonVersion[]{
   for(const item of p.items.filter(i=>i.stage===0&&!i.removedAt&&!i.planArchive))for(const v of item.variants){
     if(v.kind!=='text'||!v.text.trim())continue;
     const job=p.jobs.find(j=>j.id===v.jobId);
-    versions.push({id:`variant-${v.id}`,variantId:v.id,label:`Сценарий · ${v.title}`,text:v.text,
+    versions.push({id:`variant-${v.id}`,variantId:v.id,label:`Сценарий · ${scriptVariantLabel(p,v)}`,text:v.text,
       metadata:{created:v.created,origin:'Вариант общего сценария',model:MODELS.find(m=>m.id===v.model)?.name??v.model,
         ...(job?{actualCost:money(job.actual)}:{})}});
   }
@@ -23,9 +24,10 @@ export function scriptComparisonVersions(p:Project):ScriptComparisonVersion[]{
       const result=scriptWorkflowResultSchema.safeParse(task.result);
       if(!task.applied||task.error||!result.success)continue;
       const job=p.jobs.find(j=>j.id===task.jobId);
+      const chain=scriptTaskChain(p,run,task.id),pass=(p.directing?.runs.filter(isScriptWorkflowRun).findIndex(r=>r.id===run.id)??0)+1;
       versions.push({id:`task-${task.id}`,runId:run.id,taskId:task.id,
-        label:`${SCRIPT_ROLE_NAMES[task.role]} · ${result.data.title} · ${when}`,text:result.data.text,
-        metadata:{created:run.created,origin:SCRIPT_ROLE_NAMES[task.role],model:MODELS.find(m=>m.id===run.model)?.name??run.model,
+        label:`${chain} · ${result.data.title} · проход ${pass}, шаг ${run.tasks.indexOf(task)+1} · ${when}`,text:result.data.text,
+        metadata:{created:run.created,origin:chain,model:MODELS.find(m=>m.id===run.model)?.name??run.model,
           settings:{Жанр:run.scriptInput.brief.genre,'Режиссёрский подход':run.scriptInput.brief.director},actualCost:money(job?.actual??null)}});
     }
     // Keep an older frozen source when the editable original has changed.

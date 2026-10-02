@@ -44,3 +44,43 @@ assert.equal(W.nextStage(0),13);assert.equal(W.nextStage(13),12);assert(W.workfl
 assert.equal(W.stageComplete(p,13),W.stageComplete(p,0));
 assert.equal(W.projectWorkflow({...p,productionOrder:'video-first'}).findIndex(s=>s.id===13),1);
 console.log('PASS script development: cross-run and cross-role comparison, independent sides, whole texts, frozen originals, separate stage, saved conclusions, no mutations or provider calls');
+
+// Labels describe only the work actually performed before a result, even when
+// the model returns the same title or later steps keep the same complete text.
+const chainProject=structuredClone(p);
+const chain=S.createScriptWorkflowRun(chainProject,'gpt-6-astra',['script-critic','script-dramaturg','script-control'],raw.id);
+S.applyScriptWorkflowResult(chainProject,chain,chain.tasks[0],{title:'Стрела у тихой воды',text:raw.text,changes:[],findings:[]});
+S.applyScriptWorkflowResult(chainProject,chain,chain.tasks[1],{title:'Стрела у тихой воды',text:'Новая драматургическая версия.',changes:['Подготовлен выбор.'],findings:[]});
+S.applyScriptWorkflowResult(chainProject,chain,chain.tasks[2],{title:'Стрела у тихой воды',text:chain.tasks[1].result.text,changes:[],findings:[]});
+assert.equal(S.scriptTaskChain(chainProject,chain,chain.tasks[1].id),'Критик сценария → Драматург');
+const catalog=scriptComparisonVersions(chainProject);
+const standalone=catalog.find(v=>v.taskId===drama.tasks[0].id),inChain=catalog.find(v=>v.taskId===chain.tasks[1].id);
+assert.notEqual(standalone.label,inChain.label);assert(inChain.label.includes('Критик сценария → Драматург'));
+assert(!inChain.label.includes('Контроль сценария'));
+const imported=S.importScriptWorkflowCandidate(chainProject,chain.id,chain.tasks[1].id);
+assert(scriptComparisonVersions(chainProject).find(v=>v.variantId===imported.id).label.includes('Критик сценария → Драматург'));
+const branch=S.createScriptWorkflowRun(chainProject,'gpt-6-astra',['script-producer'],raw.id,chain.tasks[1].id);
+S.applyScriptWorkflowResult(chainProject,branch,branch.tasks[0],{title:'Тот же заголовок',text:'Версия продюсера.',changes:[],findings:[]});
+assert.equal(S.scriptTaskChain(chainProject,branch,branch.tasks[0].id),'Критик сценария → Драматург → Продюсер');
+const continued=S.createScriptWorkflowRun(chainProject,'gpt-6-astra',['script-producer'],imported.id);
+S.applyScriptWorkflowResult(chainProject,continued,continued.tasks[0],{title:'Тот же заголовок',text:'Доработка импортированного текста.',changes:[],findings:[]});
+assert.equal(S.scriptTaskChain(chainProject,continued,continued.tasks[0].id),'Критик сценария → Драматург → Продюсер');
+const chainBefore=structuredClone(chainProject),stageTwo=renderToStaticMarkup(createElement(ScriptDevelopmentEditor,{p:chainProject,busy:false,submit:async()=>{throw Error('No mutations');},open:()=>{}}));
+assert(!stageTwo.includes('Только творческая адаптация'));
+assert(stageTwo.includes('Только драматург'));
+const reportProject=structuredClone(chainProject);reportProject.directing.runs=[chain];
+const reportHtml=renderToStaticMarkup(createElement(ScriptDevelopmentEditor,{p:reportProject,busy:false,submit:async()=>{throw Error('No mutations');},open:()=>{}}));
+assert(reportHtml.includes('Это проверка: полный текст сохранён без изменений'));
+assert.deepEqual(chainProject,chainBefore);
+console.log('PASS script provenance: standalone vs chain, intermediate steps, explicit branches, imported ancestry, historical adaptation preserved, read-only labels');
+
+const scenario=structuredClone(p);scenario.directing.brief={...scenario.directing.brief,genre:'Хоррор',director:'Хичкок',targetSeconds:120,locked:'Лягушка уже носит корону.',strengths:{style:9,genre:8}};
+const scenarioBefore=structuredClone(scenario);
+for(let n=1;n<=3;n++){
+  const request=D.promptFor(scenario,scenario.items.find(i=>i.stage===0),`Предложи вариант ${n} из 3.`,raw);
+  assert(request.includes('Хичкок')&&request.includes('Хоррор')&&request.includes('Лягушка уже носит корону.')&&request.includes(raw.text));
+  assert(request.includes(`вариант ${n} из 3`)&&request.includes('с ориентиром 120 секунд'));
+  assert(request.includes('Верни только полный сценарий, без рецензии'));
+}
+assert.deepEqual(scenario,scenarioBefore);
+console.log('PASS stage-one adaptation: saved genre, director, locked facts, source, distinct variant request numbers, advisory timing, no calls or state changes');

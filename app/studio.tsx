@@ -26,6 +26,9 @@ import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImag
 import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
 import { ScriptDevelopmentEditor } from './script-development-editor';
+import {scriptVariantLabel} from '@/lib/script-labels';
+import {promptFor} from '@/lib/domain';
+import {scenarioGenerationInstruction,scenarioVariantInstruction} from '@/lib/scenario-generation';
 import {LocationLibraryEditor,ActorProfileEditor} from './world-editor';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
@@ -809,11 +812,11 @@ function Workspace() {
                   </Button>
                   {step !== 8 && (
                     <Button
-                      disabled={!ready || busy}
+                      disabled={!ready || busy || (step===0&&!p.directing)}
                       onClick={() => {setFrameRole('start');setDialog('generate');}}
                     >
                       <Sparkles />
-                      Создать с ИИ
+                      {step===0?'Создать варианты по заданию':'Создать с ИИ'}
                     </Button>
                   )}
                 </div>}
@@ -821,7 +824,7 @@ function Workspace() {
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {[1,6].includes(step)&&<VoiceStudioShell p={p} busy={busy} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
-              {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
+              {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
@@ -1080,7 +1083,7 @@ function Workspace() {
                   </div>
                   {[0,1,4].includes(step)&&<TabsContent value="compare"><VersionComparison
                     title={step===1?'Сравнить описания героя':'Сравнить варианты сценария'}
-                    versions={visibleVariants(item).map(v=>{const j=p.jobs.find(j=>j.id===v.jobId);return {id:v.id,label:v.title,text:step===1&&v.character?[v.character.appearance,v.character.description,v.character.instructions].filter(Boolean).join('\n\n'):v.text,
+                    versions={visibleVariants(item).map(v=>{const j=p.jobs.find(j=>j.id===v.jobId);return {id:v.id,label:step===0?scriptVariantLabel(p,v):v.title,text:step===1&&v.character?[v.character.appearance,v.character.description,v.character.instructions].filter(Boolean).join('\n\n'):v.text,
                       metadata:{origin:v.versionInfo?.parentVariantId?`На основе: ${item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'предыдущая версия'}`:'Исходный материал',model:MODELS.find(m=>m.id===v.model)?.name??v.model,created:v.created,
                         settings:v.versionInfo?.settings as Record<string,unknown>|undefined,actualCost:j?money(j.actual):'Без генерации',estimatedCost:j?money(j.estimate):undefined}} satisfies ComparisonVersion;})}
                     selectedId={item.selectedId} approvedId={isApproved(p,item)?item.approvedId:undefined} disabled={busy}
@@ -1195,7 +1198,7 @@ function Workspace() {
                                   </div>
                                   <Media v={v} />
                                   <div className="variant-body">
-                                    <h2>{v.title}</h2>
+                                    <h2>{step===0?scriptVariantLabel(p,v):v.title}</h2>
                                     {v.versionInfo&&<details><summary>Происхождение варианта</summary><p>{v.versionInfo.reason}</p><p className="muted">Родитель: {item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'Исходный материал'} · использовано источников: {v.versionInfo.sources.length}</p></details>}
                                     {v.kind==='image'&&v.model===GROK_IMAGE_MODEL&&<p className="muted">{imageSettingsLabel(v.imageSettings??LEGACY_IMAGE_SETTINGS)}</p>}
                                     {v.character&&<details><summary>Описание этого образа · {v.character.name}</summary><p>{v.character.appearance}</p><p className="whitespace-pre-wrap">{v.character.description}</p><p className="whitespace-pre-wrap">{v.character.instructions}</p></details>}
@@ -1307,7 +1310,7 @@ function Workspace() {
                         </h2>
                         <p>
                           {selected
-                            ? selected.title
+                            ? step===0?scriptVariantLabel(p,selected):selected.title
                             : 'Сохраните описание или создайте несколько вариантов, затем выберите лучший.'}
                         </p>
                         <div className="rule-line" />
@@ -1978,9 +1981,7 @@ function GenerateDialog({
       setPrompt(
         k === 'text'
           ? item.stage === 0
-            ? v
-              ? `Доработай выбранный сценарий для анимационного фильма на ${p.seconds} секунд. Сохрани героев и основную идею. Усиль завязку, конфликт и финал, сделай диалоги естественными. Верни один цельный вариант сценария.`
-              : `Предложи сценарий анимационного фильма на ${p.seconds} секунд с ясной завязкой, конфликтом и финалом.`
+            ? scenarioGenerationInstruction(p)
             : 'Предложи доработанный вариант текущего материала с учетом утвержденной основы. Сохрани ключевые решения и учти мои правки.'
           : item.character ? 'Создай один вариант образа героя по сохранённой карточке. Учти исходные изображения и указания режиссёра.'
           : k === 'video' ? videoPrompt(p, item) : k === 'image' && item.stage === 5 && videoShot(p, item)
@@ -2049,7 +2050,7 @@ function GenerateDialog({
             {kind === 'video'
               ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
               : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
-              : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте доступные модели одного типа; число вариантов задается для каждой.'}
+              : kind==='text'&&item.stage===0 ? 'Создаём варианты общего сценария по сохранённому жанру, режиссёрскому подходу и шкалам. Исходный текст передаётся отдельно. Каждый результат появится в карточках ниже для выбора и утверждения.' : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте доступные модели одного типа; число вариантов задается для каждой.'}
           </DialogDescription>
         </DialogHeader>
         <div className="form-grid">
@@ -2153,14 +2154,15 @@ function GenerateDialog({
             );
           })}
         </div>
+        {kind==='text'&&item.stage===0&&<div className="note"><p><b>Творческое задание:</b> {p.directing?.brief.genre??'Сначала сохраните задание'} · {p.directing?.brief.director}</p><details><summary>Полный промпт творческой адаптации · первый вариант</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{promptFor(p,item,scenarioVariantInstruction(prompt.trim(),1,count),source)}</pre></details></div>}
         {models.includes(GROK_IMAGE_MODEL) && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
         {kind === 'text' && source?.text && (
           <Field
-            label={item.stage === 0 ? 'Сценарий для доработки' : 'Материал для доработки'}
+            label={item.stage === 0 ? 'Исходный текст для творческой адаптации' : 'Материал для доработки'}
             hint={`Вариант «${source.title}» передается модели автоматически. Для изменения исходного текста используйте «Правки» на его карточке.`}
           >
             <Textarea
-              aria-label={item.stage === 0 ? 'Сценарий для доработки' : 'Материал для доработки'}
+              aria-label={item.stage === 0 ? 'Исходный текст для творческой адаптации' : 'Материал для доработки'}
               className="h-40 min-h-24 resize-y"
               value={source.text}
               readOnly

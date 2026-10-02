@@ -8,6 +8,7 @@ import {CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE,type CinemaMethodId
 export {CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE} from './cinema-methods';
 export const SCRIPT_ROLES=['script-adaptation','script-critic','script-dramaturg','script-producer','script-control'] as const;
 export type ScriptRole=typeof SCRIPT_ROLES[number];
+export const SCRIPT_SPECIALIST_ROLES=SCRIPT_ROLES.filter(role=>role!=='script-adaptation');
 export const SCRIPT_ROLE_NAMES:Record<ScriptRole,string>={
   'script-adaptation':'Творческая адаптация','script-critic':'Критик сценария',
   'script-dramaturg':'Драматург','script-producer':'Продюсер','script-control':'Контроль сценария',
@@ -38,6 +39,24 @@ export type ScriptWorkflowResult=z.infer<typeof scriptWorkflowResultSchema>;
 export type ScriptWorkflowTask={id:string;role:ScriptRole;requires:string[];jobId?:string;result?:unknown;applied?:boolean;error?:string;importedVariantId?:string;lateResult?:boolean;};
 export type ScriptWorkflowRun={id:string;created:string;basis:string;model:string;mode:'script-workflow';sceneIds:string[];tasks:ScriptWorkflowTask[];scriptInput:ScriptWorkflowInput;stopped?:boolean;};
 export type ScriptWorkflowOptions={methodologyIds?:CinemaMethodId[];promptOverrides?:Partial<Record<ScriptRole,string>>;};
+
+/** Actual ancestry up to this result, excluding later, unexecuted steps. */
+export function scriptTaskChain(p:Project,run:ScriptWorkflowRun,taskId:string):string{
+  const visited=new Set<string>();
+  const collect=(current:ScriptWorkflowRun,targetId:string):ScriptRole[]=>{
+    if(visited.has(current.id)||visited.size>=64)return [];
+    visited.add(current.id);
+    const index=current.tasks.findIndex(t=>t.id===targetId);
+    if(index<0)return [];
+    const source=p.items.flatMap(i=>i.variants).find(v=>v.id===current.scriptInput.sourceVariantId)??p.removedVariants?.find(r=>r.variant.id===current.scriptInput.sourceVariantId)?.variant;
+    const provenance=source?.versionInfo?.settings as {runId?:string;taskId?:string;brief?:unknown}|undefined;
+    const parentId=current.scriptInput.parentRunId??provenance?.runId,target=current.scriptInput.parentTaskId??provenance?.taskId;
+    const parent=p.directing?.runs.find(r=>r.id===parentId);
+    const prior=isScriptWorkflowRun(parent)&&target?collect(parent,target):source?.jobId&&provenance?.brief?['script-adaptation' as const]:[];
+    return [...prior,...current.tasks.slice(0,index+1).map(t=>t.role)];
+  };
+  return collect(run,taskId).map(role=>SCRIPT_ROLE_NAMES[role]).join(' → ');
+}
 type RunLike={id:string;stopped?:boolean;tasks:{id:string;result?:unknown;error?:string;applied?:boolean;jobId?:string;}[];};
 type State={brief:CreativeBrief;durationMode?:'free'|'strict';runs:(RunLike|ScriptWorkflowRun)[];};
 const uuid=()=>crypto.randomUUID();
@@ -165,7 +184,7 @@ export function importScriptWorkflowCandidate(p:Project,runId:string,taskId:stri
   if(!item)throw Error('Карточка общего сценария больше недоступна.');
   if(task.importedVariantId){const existing=item.variants.find(v=>v.id===task.importedVariantId);if(!existing)throw Error('Этот результат уже переносился, затем вариант был удалён. Восстановите его из истории.');return existing;}
   const data=scriptWorkflowResultSchema.parse(task.result),created=now();
-  const versionInfo:VersionInfo={...structuredClone(input.versionInfo),created,reason:SCRIPT_ROLE_NAMES[task.role]+' · результат цепочки',
+  const versionInfo:VersionInfo={...structuredClone(input.versionInfo),created,reason:scriptTaskChain(p,run,task.id)+' · результат цепочки',
     settings:{brief:structuredClone(input.brief),methodologyIds:[...input.methodologyIds],roles:run.tasks.map(t=>t.role),runId:run.id,taskId:task.id,parentRunId:input.parentRunId,parentTaskId:input.parentTaskId,changes:structuredClone(data.changes)}};
   const candidate:Variant={id:uuid(),created,title:data.title,text:data.text,kind:'text',model:run.model,jobId:task.jobId,
     deps:JSON.stringify([input.configVersion]),refs:[],duration:0,trim:0,offset:0,volume:1,camera:'',dialogue:'',continuity:'',voiceId:'',versionInfo};

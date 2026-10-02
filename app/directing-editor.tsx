@@ -20,9 +20,9 @@ import { MODELS } from '@/lib/models';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,directorPrompt,directorRunActive,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
 
-type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void};
+type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void;generateScenario?:()=>void};
 const F=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
-export function DirectingEditor({p,stage,busy,submit,open}:Props){
+export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Props){
   const d=p.directing;
   const [brief,setBriefState]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
   const [briefDirty,setBriefDirty]=useState(false),draftVersion=useRef(0);
@@ -65,8 +65,8 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
   const patchPreview=(patch:EditorPatch)=>{const target=scenes.find(s=>s.shots.some(v=>v.id===patch.shotId)),shot=target?.shots.find(s=>s.id===patch.shotId);return <details key={patch.id} className="border rounded p-3"><summary>{target?.title} · {shot?.title??'План'} · {EDITOR_SECTION_NAMES[patch.section]} {patch.applied&&'✓ Применено'}</summary><p>{patch.reason}</p><p className="whitespace-pre-wrap"><b>Было:</b> {patch.before||'Пусто'}</p><p className="whitespace-pre-wrap"><b>Предложение:</b> {patch.after||'Пусто'}</p></details>;};
   return <section className="editor-surface p-5 mb-6 space-y-5" aria-label="Команда сценаристов и режиссёров">
     <div className="row spread wrap"><div><div className="eyebrow">РЕЖИССЁРСКАЯ ГРУППА</div><h2>{stage===0?'Творческое задание':stage===12?'Структура сцен':'Проработка всех планов'}</h2></div>
-      <F label="Модель команды"><select className="rounded border p-2 bg-background" aria-label="Модель режиссёрской группы" value={model} disabled={locked} onChange={e=>setModel(e.target.value)}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></F></div>
-    <p className="muted">Один вариант по умолчанию. Специалисты работают параллельно; утверждение остаётся за вами. Стоимость каждого вызова — в журнале проекта.</p>
+      {stage!==0&&<F label="Модель команды"><select className="rounded border p-2 bg-background" aria-label="Модель режиссёрской группы" value={model} disabled={locked} onChange={e=>setModel(e.target.value)}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></F>}</div>
+    <p className="muted">{stage===0?'Сохраните задание → создайте варианты по жанру и режиссёрскому подходу → выберите и утвердите текст в карточках ниже → перейдите к специалистам для дальнейшей доработки. Число вариантов и модель задаются в окне генерации.':'Один вариант по умолчанию. Специалисты работают параллельно; утверждение остаётся за вами. Стоимость каждого вызова — в журнале проекта.'}</p>
     {!!p.creativeHistory?.length&&[12,4].includes(stage)&&<details><summary>Сравнить версии сцен в двух окнах</summary>{stage===4&&<p>Сравнивается выбранная ниже сцена. Выбор переносит только её; остальные сцены и оплаченные материалы сохраняются.</p>}<VersionComparison disabled={locked}
       title={stage===4?`Версии: ${scene?.title??'сцена'}`:'Версии структуры сцен'} selectedId={p.creativeVersionId}
       versions={p.creativeHistory.filter(v=>stage!==4||v.snapshot.scenes.some(s=>s.id===scene?.id)).map(v=>({id:v.id,label:`${new Date(v.created).toLocaleString('ru-RU')} · ${v.reason}`,text:v.snapshot.scenes.filter(s=>stage!==4||s.id===scene?.id).map(sceneText).join('\n\n'),metadata:{origin:v.reason,created:v.created,settings:v.snapshot.brief}}))}
@@ -93,7 +93,7 @@ export function DirectingEditor({p,stage,busy,submit,open}:Props){
       <CreativeStrengthControls value={brief.strengths} disabled={locked} onChange={strengths=>setBrief({...brief,strengths})}/>
       <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
       <label className="row"><input type="checkbox" checked={brief.factual} onChange={e=>setBrief({...brief,factual:e.target.checked})}/>Неигровое кино: сохранять факты, отмечать сведения для проверки</label>
-      <div className="row wrap"><Button disabled={locked} onClick={saveBrief}>Сохранить творческое задание</Button><Button variant="outline" disabled={locked||!d||briefDirty} onClick={()=>open(13)}>Доработать сценарий со специалистами</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
+      <div className="row wrap"><Button disabled={locked} onClick={saveBrief}>Сохранить творческое задание</Button>{generateScenario&&<Button disabled={locked||!d||briefDirty} onClick={generateScenario}>Создать варианты по заданию</Button>}<Button variant="outline" disabled={locked||!d||briefDirty||!p.items.some(i=>i.stage===0&&!i.removedAt&&!i.planArchive&&i.variants.some(v=>v.id===i.selectedId&&v.kind==='text'&&!!v.text.trim()))} onClick={()=>open(13)}>Доработать сценарий со специалистами</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
       {briefDirty&&<p role="status">Есть несохранённые настройки. Сохраните творческое задание перед запуском команды.</p>}
     </>}
     {stage===12&&<>
