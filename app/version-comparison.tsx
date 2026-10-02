@@ -19,6 +19,9 @@ export type VersionComparisonProps = {
   initialRightId?: string;
   onChoose?: (version: ComparisonVersion) => void | Promise<void>;
   onMerge?: (result: ComparisonMerge) => void | Promise<void>;
+  initialMode?: 'full' | 'diff';
+  allowFullText?: boolean;
+  renderActions?: (version: ComparisonVersion) => React.ReactNode;
 };
 
 /** Changing the viewed pair has no persistence side effects. */
@@ -53,6 +56,7 @@ function ComparisonContent({ left, right, ...props }: VersionComparisonProps & {
   const [operation, setOperation] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [mode,setMode]=useState(props.initialMode??'diff');
   const locked = props.disabled || operation;
   const perform = async (callback: () => void | Promise<void>, success: string) => {
     setOperation(true); setError(''); setNotice('');
@@ -69,9 +73,10 @@ function ComparisonContent({ left, right, ...props }: VersionComparisonProps & {
     setChoices(next); setDraft(mergeParagraphs(diff.rows, next)); setNotice('');
   };
   return <div className="space-y-4">
-    <p className="text-sm text-muted-foreground">{diff.coarse
+    {props.allowFullText&&<div className="flex flex-wrap gap-2" aria-label="Режим сравнения текстов"><Button type="button" size="sm" variant={mode==='full'?'default':'outline'} aria-pressed={mode==='full'} onClick={()=>setMode('full')}>Цельные тексты</Button><Button type="button" size="sm" variant={mode==='diff'?'default':'outline'} aria-pressed={mode==='diff'} onClick={()=>setMode('diff')}>Различия по абзацам</Button></div>}
+    {mode==='diff'&&<p className="text-sm text-muted-foreground">{diff.coarse
       ? 'Длинные тексты: укрупнённое сравнение. Всё содержание сохранено.'
-      : 'Выделенные абзацы отличаются. Одинаковые показаны без выделения.'}</p>
+      : 'Выделенные абзацы отличаются. Одинаковые показаны без выделения.'}</p>}
     <div className="grid items-start gap-4 md:grid-cols-2">
       {(['left', 'right'] as const).map(side => {
         const version = side === 'left' ? left : right;
@@ -87,6 +92,7 @@ function ComparisonContent({ left, right, ...props }: VersionComparisonProps & {
             {props.selectedId === version.id ? '✓ Выбран для проекта' : 'Выбрать для проекта'}
           </Button>}
           <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1" tabIndex={0} aria-label={`Текст: ${version.label}`}>
+            {mode==='full'?<p className="whitespace-pre-wrap break-words text-sm">{version.text||'Текст пуст.'}</p>:<>
             {!diff.rows.length && <p className="text-sm text-muted-foreground">Текст пуст.</p>}
             {diff.rows.map((row, index) => {
               const text = row[side], choice = choices[index];
@@ -98,8 +104,9 @@ function ComparisonContent({ left, right, ...props }: VersionComparisonProps & {
                   В новый вариант
                 </label>}
               </div>;
-            })}
+            })}</>}
           </div>
+          {props.renderActions?.(version)}
         </article>;
       })}
     </div>

@@ -44,7 +44,7 @@ await build({
   }}],
 });
 const {D,S,ensureDirecting,DirectingEditor,ScriptWorkflowEditor,createHarness}=await import('../work/tests/script-editor-lifecycle.mjs');
-function nodes(tree){if(tree===null||tree===undefined||typeof tree!=='object')return [];if(Array.isArray(tree))return tree.flatMap(nodes);return [tree,...nodes(tree.props?.children)];}
+function nodes(tree){if(tree===null||tree===undefined||typeof tree!=='object')return [];if(Array.isArray(tree))return tree.flatMap(nodes);return [tree,...nodes(tree.props?.children),...(tree.props?.renderActions?tree.props.versions.flatMap(v=>nodes(tree.props.renderActions(v))):[])];}
 function find(tree,predicate){const found=nodes(tree).find(predicate);assert(found,'Expected UI element');return found;}
 function text(tree){if(tree===null||tree===undefined||typeof tree==='boolean')return '';if(Array.isArray(tree))return tree.map(text).join('');return typeof tree==='object'?text(tree.props?.children):String(tree);}
 const button=(tree,label)=>find(tree,node=>node.type?.name==='Button'&&text(node)===label);
@@ -67,7 +67,9 @@ function fixture(title='Редактор сценария'){
     p=next;host.updateProps({...hostProps(),busy:false});syncScript();
   };
   const hostProps=()=>({p,stage:0,busy:false,submit,open:()=>{}});
-  const scriptProps=()=>find(host.tree,node=>node.type===ScriptWorkflowEditor).props;
+  // The source/brief editor and specialist editor now live on separate pages.
+  // Exercise their saved-state handoff without assuming one nests the other.
+  const scriptProps=()=>({p,model:'gpt-6-astra',busy:text(host.tree).includes(dirtyText),submit});
   const syncScript=()=>{if(script)script.updateProps(scriptProps());};
   host=createHarness(DirectingEditor,hostProps());script=createHarness(ScriptWorkflowEditor,scriptProps());
   const refresh=()=>{host.flush();syncScript();};

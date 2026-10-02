@@ -25,6 +25,7 @@ import {PromptPreview} from './prompt-preview';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
 import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
+import { ScriptDevelopmentEditor } from './script-development-editor';
 import {LocationLibraryEditor,ActorProfileEditor} from './world-editor';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
@@ -360,7 +361,7 @@ function Workspace() {
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
   const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
-  const showCards=step!==12&&step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
+  const showCards=step!==13&&step!==12&&step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
@@ -784,7 +785,7 @@ function Workspace() {
                   </div>
                   <h1>{stageTitle(step)}</h1>
                   <p className="muted">
-                    {step===11 ? 'Выберите музыку, атмосферу и звуковые события. Настройте их громкость во время речи.' : step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
+                    {step===13 ? 'Сравните исходник и результаты специалистов. Каждый проход сохраняется отдельно; утверждение сценария остаётся за вами.' : step===11 ? 'Выберите музыку, атмосферу и звуковые события. Настройте их громкость во время речи.' : step===10 ? 'Добавьте точные надписи к выбранным планам. Этот этап необязателен; титры накладываются при сборке.' : step===9 ? 'Соберите кадры с выбранными голосами, проверьте ритм и утвердите аниматик.' : step===6 ? 'Сравните голоса на одной фразе, затем создайте и утвердите реплики планов.' : step === 8
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
@@ -819,6 +820,7 @@ function Workspace() {
               </div>
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {[1,6].includes(step)&&<VoiceStudioShell p={p} busy={busy} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
+              {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
