@@ -7,6 +7,8 @@ import type {Item,Project} from '@/lib/domain';
 import {money} from '@/lib/domain';
 import type {Scene} from '@/lib/directing';
 import {MODELS} from '@/lib/models';
+import {availableForDirecting} from '@/lib/model-capabilities';
+import {createLocationImageJobs,locationImageItems,hasLocationImage} from '@/lib/scene-locations';
 import {VersionComparison} from './version-comparison';
 import {
   actorForItem,actorProfileText,actorDraftPrompt,emptyActorProfile,emptyLocation,emptyLocationState,
@@ -37,23 +39,30 @@ function ImagePicker({p,value,onChange,disabled,onUpload}:{p:Project;value:strin
   }}/></label>}{error&&<p role="alert">{error}</p>}</div>;
 }
 
-export type LocationLibraryEditorProps={p:Project;busy:boolean;onSave:(itemId:string|undefined,profile:LocationProfile)=>Promise<unknown>;onRemove?:(itemId:string)=>Promise<unknown>;onRestore?:(itemId:string)=>Promise<unknown>;onUpload?:(file:File)=>Promise<string>};
+export type LocationLibraryEditorProps={p:Project;busy:boolean;onSave:(itemId:string|undefined,profile:LocationProfile)=>Promise<unknown>;onRemove?:(itemId:string)=>Promise<unknown>;onRestore?:(itemId:string)=>Promise<unknown>;onUpload?:(file:File)=>Promise<string>;onPrepare?:()=>Promise<unknown>;onGenerate?:(data:{revision:number;batchId:string;model:string;itemIds:string[];count:number;estimate:string|null})=>Promise<unknown>;onSaveScene?:SceneLocationEditorProps['onSave'];connections?:{providers?:{id:string;configured:boolean}[]}};
 export function LocationLibraryEditor(props:LocationLibraryEditorProps){
   const [id,setId]=useState(locationItems(props.p)[0]?.id??'new');const item=props.p.items.find(i=>i.id===id&&!i.removedAt&&!i.planArchive);
   const [newForm,setNewForm]=useState(0),[pending,setPending]=useState<{profile:LocationProfile;previousIds:string[]}>();
+  const [dirty,setDirty]=useState(false);
+  useEffect(()=>{if(id==='new'&&newForm===0&&!dirty&&!pending&&locationItems(props.p).length)setId(locationItems(props.p)[0].id);},[props.p.items,id,newForm,dirty,pending]);
   useEffect(()=>{if(!pending)return;const matches=locationItems(props.p).filter(i=>!pending.previousIds.includes(i.id)&&JSON.stringify(locationDraftForItem(i))===JSON.stringify(pending.profile));if(matches.length===1){setId(matches[0].id);setPending(undefined);}},[props.p.items,pending]);
   const save=async(itemId:string|undefined,profile:LocationProfile)=>{await props.onSave(itemId,profile);if(!itemId)setPending({profile,previousIds:props.p.items.map(i=>i.id)});};
   return <section className="editor-surface p-5 space-y-4" aria-label="Библиотека постоянных локаций"><h3>Постоянные локации фильма</h3><p className="text-sm text-muted-foreground">Сохраните место один раз. Свет, погоду, время суток и состояние декораций задавайте отдельно для сцены. Новые версии и изображения сохраняются в карточке локации.</p>
-    <div className="flex flex-wrap gap-2"><select className="rounded border p-2 bg-background" value={item?.id??'new'} aria-label="Локация для редактирования" onChange={e=>setId(e.target.value)} disabled={props.busy||!!pending}><option value="new">Новая локация</option>{locationItems(props.p).map(i=><option key={i.id} value={i.id}>{locationDraftForItem(i)?.name??i.title}</option>)}</select><Button variant="outline" disabled={props.busy||!!pending} onClick={()=>{setId('new');setNewForm(n=>n+1);}}>Добавить локацию</Button></div>
-    <LocationForm key={props.p.id+':'+(item?.id??'new:'+newForm)} {...props} busy={props.busy||!!pending} onSave={save} item={item}/>
+    {!!props.onPrepare&&<Button variant="outline" disabled={props.busy||dirty||!!pending} onClick={()=>void props.onPrepare!()}>Выделить недостающие локации из сцен</Button>}
+    <div className="space-y-2">{locationItems(props.p).map(i=><div key={i.id} className="border rounded p-3"><strong>{locationDraftForItem(i)?.name??i.title}</strong><p className="text-sm">Сцены: {props.p.directing?.scenes.filter(s=>s.locationIds?.includes(i.id)).map(s=>s.title).join('; ')||'не привязана'} · {hasLocationImage(i)?'изображение создано':'нужно изображение'}</p></div>)}</div>
+    <div className="flex flex-wrap gap-2"><select className="rounded border p-2 bg-background" value={item?.id??'new'} aria-label="Локация для редактирования" onChange={e=>{setId(e.target.value);setDirty(false);if(e.target.value==='new')setNewForm(n=>n+1);}} disabled={props.busy||!!pending||dirty}><option value="new">Новая локация</option>{locationItems(props.p).map(i=><option key={i.id} value={i.id}>{locationDraftForItem(i)?.name??i.title}</option>)}</select><Button variant="outline" disabled={props.busy||!!pending||dirty} onClick={()=>{setId('new');setNewForm(n=>n+1);}}>Добавить локацию</Button></div>
+    <LocationForm key={props.p.id+':'+(item?.id??'new:'+newForm)} {...props} busy={props.busy||!!pending} onSave={save} item={item} onDirty={setDirty}/>
+    {dirty&&<p role="status">Сохраните правки локации перед переключением или запуском серии.</p>}
+    {!!props.onGenerate&&<LocationGenerationEditor {...props} busy={props.busy||dirty||!!pending} onGenerate={props.onGenerate}/>}
+    {!!props.onSaveScene&&!!props.p.directing?.scenes.length&&<details><summary>Привязка локаций, свет и состояние по сценам</summary><div className="space-y-4 mt-4">{props.p.directing.scenes.map(scene=><SceneLocationEditor key={props.p.id+':'+scene.id+':'+JSON.stringify([scene.locationIds,scene.locationState])} p={props.p} scene={scene} busy={props.busy||dirty} onSave={props.onSaveScene!}/>)}</div></details>}
     {!!props.onRestore&&props.p.items.some(i=>i.stage===3&&i.removedAt)&&<details><summary>Удалённые локации</summary>{props.p.items.filter(i=>i.stage===3&&i.removedAt).map(i=><div key={i.id} className="flex items-center justify-between gap-2 py-2"><span>{i.title}</span><Button type="button" size="sm" variant="outline" disabled={props.busy} onClick={()=>void props.onRestore!(i.id)}>Восстановить локацию</Button></div>)}</details>}
   </section>;
 }
-function LocationForm({p,item,busy,onSave,onRemove,onUpload}:LocationLibraryEditorProps&{item?:Item}){
+function LocationForm({p,item,busy,onSave,onRemove,onUpload,onDirty}:LocationLibraryEditorProps&{item?:Item;onDirty?:(dirty:boolean)=>void}){
   const [draft,setDraft]=useState<LocationProfile>(()=>structuredClone(item?locationDraftForItem(item)??emptyLocation(item.title):emptyLocation()));
   const [working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');const disabled=busy||working;
-  const patch=<K extends keyof LocationProfile>(key:K,value:LocationProfile[K])=>{setDraft(d=>({...d,[key]:value}));setNotice('');};
-  async function save(){setWorking(true);setError('');try{const profile=locationProfileSchema.parse(draft);await onSave(item?.id,profile);setNotice('Локация сохранена новой версией. Выберите и утвердите её в карточке материалов.');}catch(err){setError(message(err));}finally{setWorking(false);}}
+  const patch=<K extends keyof LocationProfile>(key:K,value:LocationProfile[K])=>{setDraft(d=>({...d,[key]:value}));setNotice('');onDirty?.(true);};
+  async function save(){setWorking(true);setError('');try{const profile=locationProfileSchema.parse(draft);await onSave(item?.id,profile);onDirty?.(false);setNotice('Локация сохранена новой версией. Изображения создаются из этого описания; утвердите подходящий вариант в карточке материалов.');}catch(err){setError(message(err));}finally{setWorking(false);}}
   return <div className="space-y-4"><fieldset disabled={disabled} className="space-y-4">
     <Field label="Название локации"><Input value={draft.name} maxLength={100} onChange={e=>patch('name',e.target.value)}/></Field>
     {(['identity','geography','permanentProps'] as const).map((key,n)=><Field key={key} label={['Неизменные признаки места','География и пространственные связи','Постоянные предметы и декорации'][n]}><Textarea rows={3} maxLength={2000} value={draft[key]} onChange={e=>patch(key,e.target.value)}/></Field>)}
@@ -63,6 +72,29 @@ function LocationForm({p,item,busy,onSave,onRemove,onUpload}:LocationLibraryEdit
       <Button type="button" variant="outline" disabled={draft.approvedAngles.length>=24} onClick={()=>patch('approvedAngles',[...draft.approvedAngles,{id:crypto.randomUUID(),name:'Новый ракурс',description:'',refs:[]}])}>Добавить проверенный ракурс</Button>
     </div><div className="flex flex-wrap gap-2"><Button type="button" onClick={()=>void save()}>Сохранить локацию</Button>{item&&onRemove&&<Button type="button" variant="ghost" onClick={async()=>{setWorking(true);setError('');try{await onRemove(item.id);}catch(err){setError(message(err));}finally{setWorking(false);}}}>Удалить локацию</Button>}</div>
   </fieldset>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}{notice&&<p role="status" className="text-sm">{notice}</p>}</div>;
+}
+
+function LocationGenerationEditor({p,busy,connections,onGenerate}:LocationLibraryEditorProps&{onGenerate:NonNullable<LocationLibraryEditorProps['onGenerate']>}){
+  const models=MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some(c=>c.id===m.provider&&c.configured));
+  const [modelId,setModelId]=useState(models[0]?.id??''),[count,setCount]=useState(1),[scope,setScope]=useState<'remaining'|'all'>('remaining');
+  useEffect(()=>{if(!modelId&&models.length)setModelId(models[0].id);},[modelId,models[0]?.id]);
+  const [working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[batchId,setBatchId]=useState(()=>crypto.randomUUID());
+  const m=models.find(m=>m.id===modelId),rows=locationImageItems(p).filter(i=>scope==='all'||!hasLocationImage(i));
+  let preview:ReturnType<typeof createLocationImageJobs>=[],issue='';
+  try{if(rows.length&&m)preview=createLocationImageJobs(p,{batchId,model:m.id,count,itemIds:rows.map(i=>i.id),estimate:m.estimate});}catch(err){issue=message(err);}
+  const total=preview.some(j=>j.estimate===null)?null:preview.reduce((sum,j)=>sum+BigInt(j.estimate??'0'),0n).toString();
+  return <section className="border rounded p-4 space-y-3" aria-label="Генерация изображений локаций"><h4>Создать изображения локаций одним запуском</h4>
+    <fieldset disabled={busy||working} className="space-y-3">
+      <Field label="Модель изображений локаций"><select className="w-full rounded border p-2 bg-background" value={modelId} onChange={e=>{setModelId(e.target.value);setBatchId(crypto.randomUUID());setError('');}}>{models.map(m=><option value={m.id} key={m.id}>{m.name}</option>)}</select></Field>
+      {!models.length&&<p>Добавьте API-ключ модели изображений в «Подключениях».</p>}
+      <Field label="Набор локаций"><select className="w-full rounded border p-2 bg-background" value={scope} onChange={e=>{setScope(e.target.value as typeof scope);setBatchId(crypto.randomUUID());}}><option value="remaining">Только без изображений</option><option value="all">Все локации сцен — новые варианты</option></select></Field>
+      <Field label="Вариантов для каждой локации"><Input type="number" min={1} max={4} value={count} onChange={e=>{setCount(Number(e.target.value));setBatchId(crypto.randomUUID());}}/></Field>
+      <p>Локаций: {rows.length} · Изображений: {rows.length*count} · Оценка серии: {money(total)}. Повторная генерация оплачивается отдельно. Результаты сохраняются без автоматического утверждения.</p>
+      {!!preview.length&&<details><summary>Проверить промпты и смету</summary>{preview.map((job,n)=><article key={job.id} className="space-y-2 py-3"><strong>{p.items.find(i=>i.id===job.itemId)?.title} · вариант {n%count+1} · {money(job.estimate)}</strong><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-sm">{job.prompt}</pre></article>)}</details>}
+      {issue&&<p role="status">{issue}</p>}
+      <Button disabled={!m||!rows.length||!!issue} onClick={async()=>{setWorking(true);setError('');setNotice('');try{await onGenerate({revision:p.revision,batchId,model:modelId,count,itemIds:rows.map(i=>i.id),estimate:m!.estimate});setBatchId(crypto.randomUUID());setNotice('Изображения добавлены в общую параллельную очередь. Выберите и утвердите результаты в карточках локаций ниже.');}catch(err){setError(message(err));}finally{setWorking(false);}}}>Создать изображения {rows.length} локаций</Button>
+    </fieldset>{error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
+  </section>;
 }
 
 export type SceneLocationEditorProps={p:Project;scene:Scene&{locationState?:LocationState};busy:boolean;onSave:(sceneId:string,data:{locationIds:string[];locationState:LocationState})=>Promise<unknown>};

@@ -2,17 +2,25 @@ import {z} from 'zod';
 import {api,owner,loadProject,saveProject,asset,getKey} from '@/lib/server';
 import {id,now,makeVariant,chosen} from '@/lib/domain';
 import {model} from '@/lib/models';
-import {ensureDirecting,signature,directorRunActive,type DirectorRun} from '@/lib/directing';
+import {ensureDirecting,signature,directorRunActive,scenesBasis,type DirectorRun} from '@/lib/directing';
+import {prepareSceneLocations} from '@/lib/scene-locations';
 import {captureVersionInfo,recordCreativeVersion,recordCharacterVersion} from '@/lib/creative-versions';
 import {locationProfileSchema,locationStateSchema,actorProfileSchema,assertLocationAssets,assertSceneLocations,locationProfileText,actorDraftPrompt,chooseActorDraft} from '@/lib/world-assets';
 
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),p=await loadProject(user,(await ctx.params).id);
-  const b=z.object({revision:z.number().int(),action:z.enum(['saveLocation','removeLocation','restoreLocation','saveSceneLocation','saveActorProfile','generateActor','chooseActorDraft']),data:z.any()}).parse(await req.json());
+  const b=z.object({revision:z.number().int(),action:z.enum(['prepareLocations','saveLocation','removeLocation','restoreLocation','saveSceneLocation','saveActorProfile','generateActor','chooseActorDraft']),data:z.any()}).parse(await req.json());
   if(b.revision!==p.revision)throw Object.assign(Error('Проект изменился. Обновите данные перед сохранением.'),{status:409});
   const v=b.data;
   const hero=()=>{const i=p.items.find(i=>i.id===v.itemId&&i.stage===1&&!i.removedAt);if(!i?.character)throw Error('Герой текущего проекта не найден.');return i;};
   switch(b.action){
+    case 'prepareLocations':{
+      const d=ensureDirecting(p);if(d.runs.some(directorRunActive))throw Error('Дождитесь завершения проработки сцен.');
+      const approved=d.scenesApproved===scenesBasis(p);
+      if(!prepareSceneLocations(p))return Response.json(p);
+      if(approved)d.scenesApproved=scenesBasis(p);
+      recordCreativeVersion(p,'Локации выделены из сцен');break;
+    }
     case 'saveLocation':{
       const profile=locationProfileSchema.parse(v.profile),allowed=new Set<string>();
       for(const ref of [...new Set([...profile.refs,...profile.approvedAngles.flatMap(a=>a.refs)])]){const a=await asset(user,ref,p);if(!a.mime.startsWith('image/'))throw Error('Референс локации должен быть изображением.');allowed.add(ref);}
@@ -33,7 +41,9 @@ export const POST=api(async(req,ctx)=>{
     case 'saveSceneLocation':{
       const d=ensureDirecting(p),scene=d.scenes.find(s=>s.id===v.sceneId);if(!scene)throw Error('Сцена не найдена.');
       const data=z.object({locationIds:z.array(z.string().uuid()).max(20),locationState:locationStateSchema}).parse(v);
+      const approved=d.scenesApproved===scenesBasis(p);
       assertSceneLocations(p,data);recordCreativeVersion(p,'До изменения локации сцены');Object.assign(scene,data);d.editorBasis=undefined;
+      if(approved)d.scenesApproved=scenesBasis(p);
       recordCreativeVersion(p,'Локация сцены');break;
     }
     case 'saveActorProfile':{

@@ -30,6 +30,7 @@ import {scriptVariantLabel} from '@/lib/script-labels';
 import {promptFor} from '@/lib/domain';
 import {scenarioGenerationInstruction,scenarioVariantInstruction} from '@/lib/scenario-generation';
 import {LocationLibraryEditor,ActorProfileEditor} from './world-editor';
+import {sceneLocationsNeedPreparation} from '@/lib/scene-locations';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
 import { ReviewCenter } from './review-center';
 import { selectedVideoPromptLimit,videoPromptLimit,availableForDirecting } from '@/lib/model-capabilities';
@@ -436,6 +437,14 @@ function Workspace() {
     await perform(async()=>{next=await request('/api/projects/'+p.id+'/world','POST',{revision:p.revision,action:name,data});replace(next!);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время сохранения.');}});
     if(!next)throw Error('Изменение не сохранено. Проверьте сообщение об ошибке.');return next;
   }
+  const locationPreparationAttempt=useRef('');
+  useEffect(()=>{
+    if(!p||step!==3||busy||p.directing?.runs.some(directorRunActive)||!sceneLocationsNeedPreparation(p))return;
+    const key=p.id+':'+p.directing?.scenes.map(s=>s.id+':'+s.location).join('|');
+    if(locationPreparationAttempt.current===key)return;
+    locationPreparationAttempt.current=key;
+    void worldAction('prepareLocations',{}).catch(()=>{});
+  },[p,step,busy]);
   useEffect(() => {
     if (!p || ![5, 7].includes(step) || busy || !videoScript?.variant ||
       p.jobs.some(j => ['queued', 'dispatching', 'pending', 'saving'].includes(j.status))) return;
@@ -825,7 +834,7 @@ function Workspace() {
               {[1,6].includes(step)&&<VoiceStudioShell p={p} busy={busy} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
-              {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
+              {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} connections={cq.data} onPrepare={()=>worldAction('prepareLocations',{})} onGenerate={async data=>{const epoch=projectEpoch.current;let next:Project|undefined;await perform(async()=>{next=await request('/api/projects/'+p.id+'/generate-locations','POST',data);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время запуска.');}replace(next!);});if(!next)throw Error('Серия не сохранена. Проверьте сообщение об ошибке.');return next;}} onSaveScene={(sceneId,data)=>worldAction('saveSceneLocation',{sceneId,...data})} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>

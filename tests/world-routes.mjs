@@ -18,10 +18,10 @@ export const imageData=async()=> {throw Error('Unexpected image retrieval');};
 export const storeAsset=async()=> {throw Error('Unexpected media storage');};
 `;
 const provider=`export async function generate(job){globalThis.worldCalls++;globalThis.worldSent=structuredClone(job);if(globalThis.worldHold)await new Promise(resolve=>globalThis.worldRelease=resolve);if(globalThis.worldFailure)throw Error('Transport outcome unknown');return {text:JSON.stringify({appearance:'Голубые глаза',description:'Принимает решение вопреки страху.',actorProfile:globalThis.worldActorResult,notes:['Наблюдаемый выбор героя']}),requestId:'actor-receipt',actual:'250000000',usage:{input_tokens:120,output_tokens:80}};}`;
-await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as W from './lib/world-assets';export {projectAssetIds} from './lib/project-assets';export {POST} from './app/api/projects/[id]/world/route';export {PATCH} from './app/api/projects/[id]/route';export {runDirectorStep} from './lib/director-runner';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/world-routes.mjs',external:['@ffmpeg/ffmpeg'],plugins:[{name:'world-mocks',setup(b){
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as W from './lib/world-assets';export * as L from './lib/scene-locations';export {projectAssetIds} from './lib/project-assets';export {POST} from './app/api/projects/[id]/world/route';export {POST as generateLocations} from './app/api/projects/[id]/generate-locations/route';export {PATCH} from './app/api/projects/[id]/route';export {runDirectorStep} from './lib/director-runner';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/world-routes.mjs',external:['@ffmpeg/ffmpeg'],plugins:[{name:'world-mocks',setup(b){
  b.onResolve({filter:/^(?:@\/lib\/server|\.\/server)$/},()=>({path:'server',namespace:'world'}));b.onResolve({filter:/^\.\/providers$/},()=>({path:'provider',namespace:'world'}));b.onLoad({filter:/.*/,namespace:'world'},args=>({contents:args.path==='server'?server:provider,resolveDir:process.cwd()}));
 }}]});
-const {D,R,W,POST,PATCH,projectAssetIds,runDirectorStep}=await import('../work/tests/world-routes.mjs');
+const {D,R,W,L,POST,PATCH,generateLocations,projectAssetIds,runDirectorStep}=await import('../work/tests/world-routes.mjs');
 const actor={...W.emptyActorProfile(),identity:'Голубые глаза',role:'Главный герой',motivation:'Помочь другу',traits:[{name:'Гротеск',intensity:0,instruction:'Не усиливать'}]};
 const make=()=>{const p=D.newProject('Постоянный мир'),d=R.ensureDirecting(p),hero=p.items.find(i=>i.stage===1),place=p.items.find(i=>i.stage===3);hero.character={name:'Младший',appearance:'Голубые глаза',description:'Добрый мальчик',instructions:'Сохранить внешность',refs:[D.id()],actorProfile:structuredClone(actor)};const image=D.makeVariant(p,hero,{kind:'image',assetId:D.id(),character:structuredClone(hero.character)});hero.variants.push(image);hero.selectedId=image.id;hero.approvedId=image.id;
  const profile={...W.emptyLocation('Пруд'),identity:'Овальный пруд',refs:[D.id()],approvedAngles:[{id:D.id(),name:'Берег',description:'Мост справа',refs:[D.id()]}]};place.location=structuredClone(profile);const old=D.makeVariant(p,place,{kind:'image',assetId:D.id(),location:structuredClone(profile)});place.variants.push(old);place.selectedId=old.id;place.approvedId=old.id;return {p,d,hero,place,image,old,profile};};
@@ -60,6 +60,23 @@ await test('actor engine uses frozen actual input and provenance; late candidate
 });
 await test('unknown actor request is retained with no automatic paid retry',async()=>{
  const {p,hero}=make();setup(p);await request('generateActor',{itemId:hero.id,model:'gpt-6-astra',instruction:'Проработай героя',actorProfile:actor});worldFailure=true;await runDirectorStep('owner',p.id);assert.equal(worldState.jobs[0].status,'unknown');await runDirectorStep('owner',p.id);assert.equal(worldCalls,1);assert.equal(worldState.items.find(i=>i.id===hero.id).variants.length,1);
+});
+await test('automatic place preparation retains structure approval, profiles and previous files; repeat is a no-op',async()=>{
+ const {p,d,place,old}=make();d.scenes=[{id:D.id(),title:'Встреча',purpose:'Чудо',location:'Пруд. Мост справа.',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[]}];d.scenesApproved=R.scenesBasis(p);setup(p);
+ await request('prepareLocations',{});assert.equal(worldState.directing.scenes[0].locationIds[0],place.id);assert.equal(worldState.directing.scenesApproved,R.scenesBasis(worldState));assert.equal(worldState.items.find(i=>i.id===place.id).approvedId,old.id);
+ const revision=worldState.revision,before=JSON.stringify(worldState);await request('prepareLocations',{});assert.equal(worldState.revision,revision);assert.equal(JSON.stringify(worldState),before);
+ await request('saveSceneLocation',{sceneId:d.scenes[0].id,locationIds:[place.id],locationState:{...W.emptyLocationState(),light:'Мягкий свет слева'}});assert.equal(worldState.directing.scenesApproved,R.scenesBasis(worldState));assert.equal(worldCalls,0);
+});
+await test('bulk location route admits frozen per-place jobs once, ignoring fabricated estimate and never calling a provider',async()=>{
+ const {p,d,place}=make();for(const stage of [0,2]){const item=p.items.find(i=>i.stage===stage),v=D.makeVariant(p,item,{kind:'text',text:stage===0?'Сказка у пруда.':'Книжная живопись.'});item.variants.push(v);item.selectedId=v.id;item.approvedId=v.id;}
+ d.scenes=[{id:D.id(),title:'Встреча',purpose:'Чудо',location:'Пруд',locationIds:[place.id],conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[]}];d.scenesApproved=R.scenesBasis(p);setup(p);
+ const input={revision:p.revision,batchId:D.id(),model:'gpt-image-2.5-sunburst',itemIds:[place.id],count:2,estimate:'0'};
+ const send=data=>generateLocations(new Request('http://localhost/generate-locations',{method:'POST',body:JSON.stringify(data)}),{params:Promise.resolve({id:p.id})});
+ const response=await send(input);assert(response.ok);assert.equal(worldState.jobs.length,2);assert(worldState.jobs.every(j=>j.location.name==='Пруд'&&j.status==='queued'&&j.estimate===null&&j.versionInfo));assert.equal(worldCalls,0);
+ const before=JSON.stringify(worldState);await send(input);assert.equal(JSON.stringify(worldState),before,'Repeated batch is idempotent even with old revision');
+ await assert.rejects(send({...input,batchId:D.id()}),/изменился/);
+ await assert.rejects(send({...input,batchId:D.id(),revision:worldState.revision}),/карточки/);
+ worldUser='other';await assert.rejects(send(input),/Not found/);
 });
 for(const name of ['worldState','worldUser','worldOwner','worldFiles','worldCalls','worldSent','worldRelease','worldAssetChecks','worldCheckPristine','worldRace','worldHold','worldFailure','worldActorResult'])delete globalThis[name];
 console.log(`PASS ${checks} world route/runner regression groups. Owned files mocked; no paid provider requests.`);

@@ -1,7 +1,7 @@
 /** The hosted API wrapper wakes only work already authorized and saved by a route.
  * This module neither creates jobs nor calls a provider. Node uses its own worker. */
 const DIRECT_ENQUEUE_PATHS = new Set([
-  'generate', 'generate-storyboard', 'generate-speech', 'generate-remaining',
+  'generate', 'generate-storyboard', 'generate-speech', 'generate-remaining', 'generate-locations',
   'generate-lipsync', 'generate-voice-tests', 'media-review', 'queue',
 ]);
 const ACTIONS: Record<string, ReadonlySet<string>> = {

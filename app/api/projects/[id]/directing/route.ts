@@ -13,6 +13,7 @@ import {applyEditorSolutions} from '@/lib/directing-solutions';
 import {validateScenePlan,validateShotDirection} from '@/lib/shot-direction';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
 import {assertSceneLocations} from '@/lib/world-assets';
+import {prepareSceneLocations} from '@/lib/scene-locations';
 import {directorScopeSchema,assertDirectingShotReady} from '@/lib/directing-workflow';
 import {allowNewSeries} from '@/lib/job-wait';
 export const POST=api(async(req,ctx)=>{
@@ -85,7 +86,7 @@ export const POST=api(async(req,ctx)=>{
       else Object.assign(old,{...scene,shots:old.shots});break;
     }
     case 'removeScene':d.scenes=d.scenes.filter(s=>s.id!==v.sceneId);break;
-    case 'approveScenes':if(!d.scenes.length)throw Error('Сначала создайте сцены.');d.scenesApproved=scenesBasis(p);break;
+    case 'approveScenes':if(!d.scenes.length)throw Error('Сначала создайте сцены.');prepareSceneLocations(p);d.scenesApproved=scenesBasis(p);break;
     case 'saveShot':{
       const scene=d.scenes.find(s=>s.id===v.sceneId);if(!scene)throw Error('Сцена не найдена.');
       const shot=directingShotSchema.parse(v.shot),old=scene.shots.find(s=>s.id===shot.id);
