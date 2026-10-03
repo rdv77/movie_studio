@@ -16,7 +16,10 @@ export type VoiceProfile=z.infer<typeof voiceProfileSchema>&{id:string;created:s
 export type VoicePreview={id:string;generatedVoiceId:string;assetId?:string;duration?:number;mime:string;language?:string};
 export type VoiceDesign={id:string;provider:VoiceProfile['provider'];name:string;description:string;previewText:string;model:string;created:string;jobIds:string[];previews:VoicePreview[];selectedPreviewId?:string;savedVoiceId?:string;profileId?:string;saveJobId?:string;removedAt?:string};
 export type VoiceDirectionCandidate={id:string;jobId:string;itemId:string;delivery:VoiceDelivery;notes:string[];created:string;applied?:boolean};
-export type VoiceStudioState={profiles:VoiceProfile[];designs:VoiceDesign[];deliveries:Record<string,VoiceDelivery>;candidates:VoiceDirectionCandidate[];selectedProfileId?:string;castings?:Record<string,string>};
+export const CHARACTER_AUDIO_MODES=['skip','catalog','design','nonverbal'] as const;
+export const characterAudioModeSchema=z.enum(CHARACTER_AUDIO_MODES);
+export type CharacterAudioMode=z.infer<typeof characterAudioModeSchema>;
+export type VoiceStudioState={characterAudioMode?:CharacterAudioMode;profiles:VoiceProfile[];designs:VoiceDesign[];deliveries:Record<string,VoiceDelivery>;candidates:VoiceDirectionCandidate[];selectedProfileId?:string;castings?:Record<string,string>};
 export type VoiceStudioProject=Project&{voiceStudio?:VoiceStudioState};
 export const voiceStudio=(p:VoiceStudioProject):VoiceStudioState=>p.voiceStudio??={profiles:[],designs:[],deliveries:{},candidates:[]};
 export function readVoiceStudio(p:VoiceStudioProject):VoiceStudioState{return p.voiceStudio??{profiles:[],designs:[],deliveries:{},candidates:[]};}

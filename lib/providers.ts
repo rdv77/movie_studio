@@ -57,6 +57,8 @@ export async function generate(
     throw new ProviderError(`Видеопромпт длиннее ${videoPromptLimit(j.model)} символов. Сократите его и запустите новую серию. Запрос не отправлен.`, true, true);
   const m = model(j.model),
     h = headers(m.provider, key);
+  if(j.kind==='text'&&refs.length&& !['openai','xai'].includes(m.provider))
+    throw new ProviderError('Для анализа фотографий героя выберите GPT или Grok. Эта текстовая модель не принимает фотографии в студии. Запрос не отправлен.',true,true);
   const videoSeconds = j.kind === 'video' && Object.hasOwn(VIDEO_DURATION_CONTRACTS, j.model)
     ? videoRequestTiming(j.model, j.duration, !!endFrame || modernVideoTiming(j)).requestedSeconds : 6;
   if (m.provider === 'sync') throw new ProviderError('Используйте отдельное окно синхронизации губ.', true, true);
@@ -125,7 +127,7 @@ export async function generate(
         model: j.model,
         instructions:
           'Ты сценарист и режиссер короткого анимационного фильма. Отвечай по-русски. Учитывай утвержденную основу. Выполни задачу режиссера и верни один готовый вариант текущего материала. Не включай внутренние рассуждения.',
-        input: j.prompt,
+        input: refs.length?[{role:'user',content:[{type:'input_text',text:j.prompt},...refs.map(image_url=>({type:'input_image',image_url,detail:'high'}))]}]:j.prompt,
         reasoning: { effort: 'medium' },
         max_output_tokens: 12000,
         service_tier: 'default',
@@ -165,7 +167,7 @@ export async function generate(
               content:
                 'Ты сценарист и режиссер короткого анимационного фильма. Отвечай по-русски. Учитывай утвержденную основу. Не включай внутренние рассуждения.',
             },
-            { role: 'user', content: j.prompt },
+            { role: 'user', content: refs.length?[{type:'text',text:j.prompt},...refs.map(url=>({type:'image_url',image_url:{url,detail:'high'}}))]:j.prompt },
           ],
           stream: false,
           max_tokens: 7000,

@@ -228,6 +228,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     const physical = item.stage === 1 ? c : hero.variant?.character ?? c;
     add(`hero.${hero.item.id}`, `Постоянная идентичность ${c.name}`, [physical.appearance, physical.actorProfile?.identity].filter(Boolean).join('\n') || 'Сохранить лицо, возраст и пропорции утверждённого образа; не выдумывать новые постоянные черты.', true);
     add(`hero-source.${hero.item.id}`, item.stage === 1 ? 'Работа с прообразами героя' : `Постоянные указания к образу ${c.name}`, physical.instructions, true);
+    add(`hero-locked.${hero.item.id}`, `Нельзя менять у героя ${c.name}`, physical.locked, true);
     optional(`hero-performance.${hero.item.id}`, `Характер и манеры ${c.name}`, [c.description, c.actorProfile?.mannerisms].filter(Boolean).join('\n\n'), 65);
     if (c.actorProfile) {
       const actor = c.actorProfile;

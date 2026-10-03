@@ -38,7 +38,7 @@ import { saveAnimatic, approveAnimatic } from '@/lib/animatic';
 import { archiveJournal } from '@/lib/journal';
 import {actorProfileSchema,locationProfileSchema,assertLocationAssets} from '@/lib/world-assets';
 const character = z.object({name:z.string().trim().min(1).max(100),appearance:z.string().trim().max(160).default(''),
-  description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),refs:z.array(z.string().uuid()).max(5).default([]),actorProfile:actorProfileSchema.optional()});
+  description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),locked:z.string().trim().max(4000).optional(),refs:z.array(z.string().uuid()).max(5).default([]),actorProfile:actorProfileSchema.optional()});
 const variant = z.object({
   speechType: z.enum(['voiceover','character','none']).optional(),
   speaker: z.string().trim().max(100).optional(),

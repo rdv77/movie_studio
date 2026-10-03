@@ -2,8 +2,8 @@ import {z} from 'zod';
 import {id,now,assertBudget,type Project,type Job} from './domain';
 import {musicEnvelope} from './music';
 
-export const SOUND_KINDS=['ambience','foley','event'] as const;
-export const SOUND_KIND_NAMES={ambience:'Атмосфера',foley:'Шумы действий',event:'Звуковой акцент'} as const;
+export const SOUND_KINDS=['ambience','foley','event','vocal'] as const;
+export const SOUND_KIND_NAMES={ambience:'Атмосфера',foley:'Шумы действий',event:'Звуковой акцент',vocal:'Звуки героя без слов (смех, вздох, кваканье)'} as const;
 export const soundScopeSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('film')}).strict(),
   z.object({type:z.literal('plan'),itemId:z.string().uuid()}).strict(),

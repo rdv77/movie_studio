@@ -2,12 +2,12 @@ import {z} from 'zod';
 import {api,owner,loadProject,saveProject,getKey,HttpError} from '@/lib/server';
 import {model} from '@/lib/models';
 import {queueVoiceDesign,validateVoiceDesignInput,queueSaveVoice,selectVoicePreview,saveVoiceProfile,chooseVoiceProfile,assignVoiceProfile,queueVoiceDirection,applyVoiceDirectionCandidate,voiceWorkflowJobs,completeVoiceSave} from '@/lib/voice-design';
-import {saveVoiceDelivery,voiceStudio,type VoiceStudioProject} from '@/lib/voice-direction';
+import {saveVoiceDelivery,voiceStudio,characterAudioModeSchema,type VoiceStudioProject} from '@/lib/voice-direction';
 import {runVoiceWorkflowStep,stopVoiceWorkflow} from '@/lib/voice-design-runner';
 
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id,p=await loadProject(user,projectId) as VoiceStudioProject;
-  const body=z.object({revision:z.number().int(),action:z.enum(['design','advance','selectPreview','saveVoice','importSavedVoice','saveProfile','chooseProfile','assignProfile','saveDelivery','proposeDelivery','applyDelivery','stop','removeDesign','restoreDesign','removeProfile','restoreProfile']),data:z.any()}).parse(await req.json());
+  const body=z.object({revision:z.number().int(),action:z.enum(['setCharacterAudioMode','design','advance','selectPreview','saveVoice','importSavedVoice','saveProfile','chooseProfile','assignProfile','saveDelivery','proposeDelivery','applyDelivery','stop','removeDesign','restoreDesign','removeProfile','restoreProfile']),data:z.any()}).parse(await req.json());
   const v=body.data;
   if(body.action==='advance'){
     const jobId=v?.jobId===undefined?undefined:z.string().uuid().parse(v.jobId);
@@ -18,6 +18,7 @@ export const POST=api(async(req,ctx)=>{
   if(['design','proposeDelivery','saveVoice'].includes(body.action)&&typeof v?.batchId==='string'&&voiceWorkflowJobs(p).some(j=>j.batchId===v.batchId))return Response.json(p);
   if(body.revision!==p.revision)throw new HttpError('Проект изменился. Обновите данные перед сохранением.',409);
   switch(body.action){
+    case 'setCharacterAudioMode':voiceStudio(p).characterAudioMode=characterAudioModeSchema.parse(v.mode);break;
     case 'design':{
       const input=validateVoiceDesignInput(v.input);await getKey(user,input.provider);queueVoiceDesign(p,z.string().uuid().parse(v.batchId),input);break;
     }

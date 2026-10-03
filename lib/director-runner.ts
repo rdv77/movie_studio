@@ -1,5 +1,5 @@
 import {queueSlotIssue} from './queue-policy';
-import { loadProject, mutate, getKey } from './server';
+import { loadProject, mutate, getKey, imageData } from './server';
 import { model } from './models';
 import { generate } from './providers';
 import { now, assertBudget } from './domain';
@@ -34,8 +34,9 @@ export async function runDirectorStep(user:string,projectId:string,options:{disp
     let sent=false;
     try{
       const key=await getKey(user,model(job.model).provider);
+      const refs=await Promise.all(job.refs.map(ref=>imageData(user,ref,p)));
       sent=true;
-      const result=await generate(job,key,[],p.format);
+      const result=await generate(job,key,refs,p.format);
       await mutate(user,projectId,current=>{
         const j=current.jobs.find(j=>j.id===jobId)!;
         j.requestId=result.requestId;j.usage=result.usage;j.actual=result.actual??null;

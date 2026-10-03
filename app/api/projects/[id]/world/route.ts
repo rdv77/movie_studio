@@ -59,6 +59,8 @@ export const POST=api(async(req,ctx)=>{
       await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовой проработки расход определяется по токенам. Снимите лимит и сверяйте журнал.');
       if(d.runs.some(r=>r.characterInput?.itemId===item.id&&directorRunActive(r)))throw Error('Этот герой уже прорабатывается.');
       const actorProfile=actorProfileSchema.parse(v.actorProfile),instruction=z.string().max(3000).parse(v.instruction);
+      if(item.character!.refs.length&&m.provider==='minimax')throw Error('Для проработки героя по фотографии выберите GPT или Grok. MiniMax здесь доступен для текстового исходника.');
+      for(const ref of item.character!.refs){const a=await asset(user,ref,p);if(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)throw Error('Прообраз героя: PNG, JPEG или WebP до 10 МБ.');if(m.provider==='xai'&&a.mime==='image/webp')throw Error('Для анализа фотографии в Grok загрузите PNG или JPEG либо выберите GPT.');}
       const input={itemId:item.id,prompt:actorDraftPrompt(p,item,instruction,actorProfile),character:structuredClone(item.character!),actorProfile,versionInfo:captureVersionInfo(p,item,{}, {actorProfile},'Агент героя')};
       const run:DirectorRun={id:id(),created:now(),model:m.id,mode:'character',basis:signature(input),characterInput:input,sceneIds:[],tasks:[{id:id(),role:'actor-profile',requires:[]}]};
       d.runs.push(run);break;

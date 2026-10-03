@@ -38,7 +38,7 @@ export const STAGES = [
   'Финальная сборка',
 ];
 export type Kind = 'text' | 'image' | 'audio' | 'video';
-export type CharacterBrief = { actorProfile?:ActorProfile; name: string; appearance: string; description: string; instructions: string; refs: string[] };
+export type CharacterBrief = { locked?:string; actorProfile?:ActorProfile; name: string; appearance: string; description: string; instructions: string; refs: string[] };
 export type LipsyncBasis = { audioVariantId: string; audioItemId: string } & (
   { inputType?: 'video'; videoVariantId: string } |
   { inputType: 'image'; imageVariantId: string; imageItemId: string; speaker: { x: number; y: number }; prompt: string }

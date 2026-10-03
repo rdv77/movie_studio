@@ -830,8 +830,8 @@ function Workspace() {
                   )}
                 </div>}
               </div>
+              {[6,11].includes(step)&&<VoiceStudioShell p={p} busy={busy} soundStage={step===11} onOpenCatalog={()=>{setStep(6);setVoiceView('casting');setItemId('');}} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
-              {[1,6].includes(step)&&<VoiceStudioShell p={p} busy={busy} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} connections={cq.data} onPrepare={()=>worldAction('prepareLocations',{})} onGenerate={async data=>{const epoch=projectEpoch.current;let next:Project|undefined;await perform(async()=>{next=await request('/api/projects/'+p.id+'/generate-locations','POST',data);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время запуска.');}replace(next!);});if(!next)throw Error('Серия не сохранена. Проверьте сообщение об ошибке.');return next;}} onSaveScene={(sceneId,data)=>worldAction('saveSceneLocation',{sceneId,...data})} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
@@ -1581,11 +1581,13 @@ function Workspace() {
       {p && dialog === 'lipsync' && <LipsyncDialog p={p} connections={cq.data} busy={busy} perform={perform} upload={upload}
         openStage={(stage:number,target?:string)=>{setDialog(null);setStep(stage);setItemId(target??'');setPanel('stage');}}
         close={closeDialog} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-lipsync`, 'POST', data))} />}
-      {p&&dialog==='character'&&<CharacterEditor key={`${p.id}:${characterTarget??'new'}`} item={p.items.find(i=>i.id===characterTarget)} assets={assets} upload={upload} busy={busy} perform={perform}
-        canGenerate={stageReady(p,1)} close={closeDialog} save={async(profile:CharacterBrief,imageId:string|undefined,generate:boolean)=>{
+      {p&&dialog==='character'&&<CharacterEditor key={`${p.id}:${characterTarget??'new'}`} item={p.items.find(i=>i.id===characterTarget)} assets={assets} upload={upload} busy={busy} perform={perform} connections={cq.data}
+        canGenerate={stageReady(p,1)} close={closeDialog} save={async(profile:CharacterBrief,imageId:string|undefined,generate:boolean,actorModel?:string)=>{
           const next=await action('saveCharacter',{profile,imageId},characterTarget??'');
           const saved=characterTarget?next.items.find(i=>i.id===characterTarget):next.items.find(i=>i.character&&!p.items.some(old=>old.id===i.id&&old.character));
-          if(saved)setItemId(saved.id);setStep(1);setDialog(generate?'generate':null);
+          if(saved){setItemId(saved.id);setCharacterTarget(saved.id);}setStep(1);
+          if(actorModel&&saved){replace(await request(`/api/projects/${next.id}/world`,'POST',{revision:next.revision,action:'generateActor',data:{itemId:saved.id,model:actorModel,instruction:'Доработай героя по фотографии, исходному описанию, запретам на изменения и утверждённой основе фильма. Не создавай голос.',actorProfile:profile.actorProfile??{identity:profile.appearance,role:'',motivation:'',contradiction:'',mannerisms:'',traits:[]}}}));setDialog(null);}
+          else setDialog(generate?'generate':null);
         }}/>}
       <Dialog
         open={dialog === 'item' || dialog === 'rename'}
@@ -1650,16 +1652,19 @@ function Workspace() {
     </SidebarProvider>
   );
 }
-function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save}:any) {
+function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save,connections}:any) {
   const [profile,setProfile]=useState<CharacterBrief>(()=>item?.character??{name:'',appearance:'',description:'',instructions:'',refs:[]});
   const set=(key:keyof CharacterBrief,value:string|string[])=>setProfile(c=>({...c,[key]:value}));
   const valid=!!profile.name.trim()&&!!(profile.description.trim()||profile.appearance.trim()||profile.refs.length);
-  const submit=(generate=false,imageId?:string)=>perform(()=>save(profile,imageId,generate));
+  const actorModels=MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)&&(!profile.refs.length||m.provider!=='minimax')&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured));
+  const [actorModel,setActorModel]=useState('');const selectedActor=actorModels.find(m=>m.id===actorModel)??actorModels[0];
+  const submit=(generate=false,imageId?:string,develop=false)=>perform(()=>save(profile,imageId,generate,develop?selectedActor?.id:undefined));
   return <Dialog open onOpenChange={v=>!v&&!busy&&close()}><DialogContent className="sm:max-w-3xl modal-scroll">
-    <DialogHeader><DialogTitle>{item?'Карточка героя':'Новый герой'}</DialogTitle><DialogDescription>Начните с текста или изображения и объясните, что сохранить и изменить. После создания образов утвердите один вариант.</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>{item?'Карточка героя':'Новый герой'}</DialogTitle><DialogDescription>Добавьте фотографии, общее описание и запреты на изменения. ИИ предложит характер и внешний образ по утверждённому сценарию, стилю и локациям. Затем выберите описание и создайте изображения. Голос выбирается отдельно в «Звуках».</DialogDescription></DialogHeader>
     <Field label="Имя героя"><Input aria-label="Имя героя" value={profile.name} maxLength={100} onChange={e=>set('name',e.target.value)} placeholder="Катя"/></Field>
     <Field label="Неизменные черты" hint="Короткое описание внешности и одежды для каждого видеоплана, до 160 символов."><Input aria-label="Неизменные черты героя" value={profile.appearance} maxLength={160} onChange={e=>set('appearance',e.target.value)} placeholder="Рыжие косы, веснушки, зелёные глаза, белая рубашка и красный галстук"/></Field>
     <Field label="Описание и характер"><Textarea aria-label="Описание и характер героя" value={profile.description} maxLength={4000} onChange={e=>set('description',e.target.value)} placeholder="Возраст, роль в истории, внешность, привычки и характер…"/></Field>
+    <Field label="Что нельзя менять"><Textarea aria-label="Что нельзя менять у героя" value={profile.locked??''} maxLength={4000} onChange={e=>set('locked',e.target.value)} placeholder="Например: сохранить лицо, возраст, цвет глаз и волос; не добавлять корону…"/></Field>
     <Field label="Что сделать с образом"><Textarea aria-label="Что сделать с образом героя" value={profile.instructions} maxLength={4000} onChange={e=>set('instructions',e.target.value)} placeholder="Например: сохранить черты лица с фотографии, превратить в рисованного героя, заменить одежду на пионерскую форму…"/></Field>
     <Field label="Исходные изображения · необязательно" hint="PNG, JPEG или WebP до 10 МБ. Можно выбрать сразу до пяти фотографий одного героя или добавлять их по очереди.">
       <div className="reference-grid">{profile.refs.map((ref,n)=><div className="reference active" key={ref}>
@@ -1678,7 +1683,9 @@ function CharacterEditor({item,assets,upload,busy,perform,canGenerate,close,save
     </Field>
     <p className="muted">Исходная карточка сохраняется отдельно. Следующие этапы используют описание и изображение утверждённого варианта. Утверждения героев, стиля и локаций сохраняются при правках сценария. Замена образа потребует проверки подробного сценария, раскадровки, озвучки и видео.</p>
     {!canGenerate&&<p>Карточку можно заполнить сейчас. Для генерации и утверждения образа сначала утвердите общий сценарий.</p>}
-    <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button><Button variant="outline" disabled={busy||!valid} onClick={()=>submit()}>Сохранить карточку</Button><Button disabled={busy||!valid||!canGenerate} onClick={()=>submit(true)}><Sparkles/>Сохранить и создать образы с ИИ</Button></DialogFooter>
+    <Field label="Модель для доработки героя"><select className="w-full rounded border p-2 bg-background" disabled={busy} value={selectedActor?.id??''} onChange={e=>setActorModel(e.target.value)}><option value="">Выберите подключённую модель</option>{actorModels.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
+    <p className="muted">Доработка описания — отдельный платный запрос. Фотографии передаются GPT или Grok; MiniMax доступен для текстового исходника. Результат появится в «Актёрском образе» для сравнения и выбора. Изображения и голос этим запросом не создаются.</p>
+    <DialogFooter><Button variant="outline" disabled={busy} onClick={close}>Закрыть</Button><Button variant="outline" disabled={busy||!valid} onClick={()=>submit()}>Сохранить карточку</Button><Button variant="outline" disabled={busy||!valid||!canGenerate} onClick={()=>submit(true)}>Создать изображения по моему описанию</Button><Button disabled={busy||!valid||!canGenerate||!selectedActor} onClick={()=>submit(false,undefined,true)}><Sparkles/>Сохранить и доработать героя с ИИ</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
 function CharacterReferences({p,item,mode='image',selectedIds,onChange,disabled=false}:{p:Project;item?:Item;mode?:'image'|'video'|'sync';selectedIds?:string[];onChange?:(ids:string[])=>void;disabled?:boolean}) {
