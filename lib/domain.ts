@@ -171,6 +171,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  characterBindings?:Record<string,string>;
   audioQc?:AudioQcReport[];
   soundscape?:SoundscapeState;
   animaticSettings?:{sound:'silent'|'voices';music:boolean;motion:boolean};

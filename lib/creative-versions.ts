@@ -1,4 +1,5 @@
 import {keyframeFoundationBasis} from './keyframes';
+import {shotBindsCharacter} from './character-bindings';
 import { effectiveCreativeBrief } from './creative-brief';
 import type { CharacterBrief, Item, Job, Project, Variant } from './domain';
 import type { DirectingState, Scene } from './directing';
@@ -49,7 +50,7 @@ export function versionShot(p:Project,item:Item):any {
 export function relevantHeroItems(p:Project,shot:any,selected?:string[]):Item[] {
   if(!shot)return [];
   return p.items.filter(i=>i.stage===1&&active(i)&&(!selected||selected.includes(i.id))&&(
-    shot.characterIds?.includes(i.id)||shot.cast?.some((name:string)=>name===i.id||normalizedName(name)===normalizedName(approved(i)?.character?.name??i.character?.name??i.title))
+    shot.characterIds?.includes(i.id)||shotBindsCharacter(p,shot,i.id)||shot.cast?.some((name:string)=>name===i.id||normalizedName(name)===normalizedName(approved(i)?.character?.name??i.character?.name??i.title))
   ));
 }
 export function relevantLocationItems(p:Project,scene?:Scene,shot?:any):Item[] {

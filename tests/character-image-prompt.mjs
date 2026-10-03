@@ -19,7 +19,7 @@ const preview=C.compilePrompt(p,hero,models[0],{kind:'image',prompt:J.mediaVaria
 assert(preview.prompt.length<5000);assert(!preview.compression.shortened);
 for(const text of ['Лена','Рыжие волосы','Добрая','Сохрани лицо первого','УТВЕРЖДЁННЫЙ_СТИЛЬ',task,'ЛОКАЦИЯ','рты всех персонажей закрыты'])assert(preview.prompt.includes(text),text);
 for(const absent of ['СЦЕНАРИЙ_НЕ_ОТПРАВЛЯТЬ','СЛУЖЕБНАЯ_ИСТОРИЯ','ЧУЖОЙ_ГЕРОЙ',hero.approvedId,...refs,'"deps"'])assert(!preview.prompt.includes(absent),absent);
-const original=structuredClone(p),long=structuredClone(p);long.items.find(i=>i.id===hero.id).character.appearance+=' Детали одежды. '.repeat(3000);
+const original=structuredClone(p),long=structuredClone(p);long.items.find(i=>i.id===hero.id).character.appearance+=Array.from({length:3000},(_,n)=>` Деталь одежды ${n}.`).join('');
 assert.throws(()=>C.compilePrompt(long,long.items.find(i=>i.id===hero.id),models[0],{kind:'image',prompt:task,references:refs}),e=>e.code==='critical_too_long','Physical identity is mandatory, never silently truncated');
 assert.deepEqual(p,original,'Prompt construction never changes descriptions, refs or approvals');
 const payload={revision:p.revision,batchId:D.id(),itemId:hero.id,models:[...models,models[0]],count:2,prompt:task,refs:[],dialogue:'',voiceId:'',estimates:{}};

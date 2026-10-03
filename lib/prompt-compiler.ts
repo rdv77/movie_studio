@@ -13,6 +13,7 @@ import { planFields, storyboardPrompt } from './storyboard';
 import { supportsEndFrame } from './video-end-frame';
 import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
 import {compactPromptText,preparedPromptBody} from './prompt-text';
+import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -171,6 +172,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   });
   const heroes = item.stage === 1 ? profiles.filter(h => h.item.id === item.id) : profiles.filter(h => {
     if (!plan) return false;
+    if (shotBindsCharacter(p,plan,h.item.id)) return true;
     if (plan.characterIds !== undefined) return plan.characterIds.includes(h.item.id);
     if (plan.cast !== undefined) return plan.cast.some(name => name === h.item.id || normalized(name) === normalized(h.profile.name));
     return mentions(sourcePlan?.description ?? sourcePlan?.story ?? '', h.profile.name) || speech.speechType === 'character' && normalized(speech.speaker) === normalized(h.profile.name);
@@ -181,7 +183,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (draft) heroes.push({ item, variant: approved(item) ?? item.variants.find(v => v.id === item.selectedId)!, profile: draft as ActorCharacter });
   }
   if (plan?.characterIds?.some(id => !heroes.some(h => h.item.id === id))) throw new PromptCompilationError('missing_hero', 'В плане указан удалённый или неутверждённый герой. Исправьте ссылки на героев текущего проекта.');
-  if (plan?.characterIds !== undefined && plan.cast?.some(name => profiles.some(h => (name === h.item.id || normalized(name) === normalized(h.profile.name)) && !plan.characterIds!.includes(h.item.id))))
+  if(plan?.cast?.some(name=>{const id=boundCharacterId(p,name);return id&&!heroes.some(h=>h.item.id===id);}))throw new PromptCompilationError('missing_hero','Связанный образ героя удалён или не утверждён. Исправьте связь персонажей в раскадровке.');
+  if (plan?.characterIds !== undefined && plan.cast?.some(name => profiles.some(h => (name === h.item.id || normalized(name) === normalized(h.profile.name)) && !plan.characterIds!.includes(h.item.id)&&!shotBindsCharacter(p,plan,h.item.id))))
     throw new PromptCompilationError('cast_conflict', 'Имена участников и ссылки на героев в плане противоречат друг другу. Проверьте состав текущего плана.');
   const ids = plan?.locationIds ?? scene?.locationIds;
   const locations = p.items.filter(i => i.stage === 3 && active(i) && (item.stage === 3 ? i.id === item.id : approved(i) && plan && (ids !== undefined ? ids.includes(i.id)
@@ -195,12 +198,16 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   add('instruction', 'Обязательная задача режиссёра', input.instruction, true);
   add('keyframe-instruction', 'Назначение ключевого кадра', input.keyframeInstruction, true);
   add('card-notes', 'Сохранённые правки к карточке плана', reviewedNotes, true);
+  if ([5,7].includes(item.stage) && heroes.length) add('face-identity', 'Узнаваемость лица — обязательное условие',
+    `${heroes.map(h=>h.profile.name).join(', ')}: это те же конкретные персонажи из утверждённых образов. Сохраняй форму лица, посадку и расстояние между глазами, брови, нос, губы, линию челюсти, возраст, цвет глаз, волос и кожи, причёску и отличительные признаки по их образцам. Не заменяй лица типовыми, не омолаживай и не приукрашивай. Стиль, свет, эмоция и ракурс не меняют идентичность. Не смешивай лица разных героев. Меняй только позу, выражение и ракурс по постановке; не превращай общий план в портрет ради детализации лица.`, true);
   if (reviewedAction && reviewedAction !== (sourcePlan?.description ?? sourcePlan?.story)?.trim())
     add('card-action', 'Уточнение действия в выбранной карточке — учитывать при выборе единственного момента', reviewedAction, true);
   if (plan) {
     add('plan', 'Текущий план', plan.title, true);
     const visible = heroes.map(h => h.profile.name);
-    const cast = (plan.cast ?? (visible.length ? visible : speech.speechType === 'character' ? [speech.speaker] : [])).map(name => heroes.find(h => h.item.id === name)?.profile.name ?? name);
+    const cast = (plan.cast ?? (visible.length ? visible : speech.speechType === 'character' ? [speech.speaker] : [])).map(name => heroes.find(h => h.item.id === name||boundCharacterId(p,name)===h.item.id)?.profile.name ?? name);
+    const bindings=(plan.cast??[]).flatMap(name=>{const hero=heroes.find(h=>boundCharacterId(p,name)===h.item.id);return hero&&normalized(name)!==normalized(hero.profile.name)?[`${name} — это ${hero.profile.name} из утверждённого образа; один персонаж, не два.`]:[];});
+    add('hero-bindings','Соответствие имён сценарию',bindings.join(' '),true);
     add('cast', 'Участники в кадре', cast.length ? `${cast.join(', ')}. Показывай только этих участников; упоминания соседних планов не добавляют героев в кадр.`
       : plan.cast !== undefined || plan.characterIds !== undefined ? 'Персонажей нет. Не добавляй людей или героев.'
       : 'Состав не выделен в старом плане. Показывай только персонажей, непосредственно названных в его описании; не добавляй героев из соседних планов или референсов.', true);
@@ -374,7 +381,14 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     seen.add(referenceKey); references.push({ assetId: id, role, itemId: hero?.item.id ?? location?.id ?? owner?.id, label: hero?.profile.name ?? location?.title ?? candidate.label ?? owner?.title });
   }
   const roleOrder: Record<ReferenceRole, number> = { 'first-frame': 0, 'last-frame': 1, character: 2, location: 3, style: 4, reference: 5 };
-  references.sort((a, b) => roleOrder[a.role] - roleOrder[b.role]);
+  const canonicalFace=(ref:CompiledReference)=>[5,7].includes(item.stage)&&ref.role==='character'&&heroAssets.get(ref.assetId)?.variant?.assetId===ref.assetId;
+  references.sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || Number(canonicalFace(b))-Number(canonicalFace(a)));
+  if (input.kind==='image' && item.stage===5) for(const hero of heroes) {
+    if (hero.item.selectedId!==hero.item.approvedId && hero.item.variants.some(v=>v.id===hero.item.selectedId&&v.kind==='image'&&v.assetId))
+      warnings.push(`У героя «${hero.profile.name}» выбран другой, ещё не утверждённый вариант. Для раскадровки используется утверждённый образ. Утвердите новый вариант в «Героях», если хотите заменить внешность.`);
+    if (!references.some(ref=>ref.role==='character'&&ref.assetId===hero.variant?.assetId))
+      warnings.push(`Не прикреплён утверждённый образ героя «${hero.profile.name}». По тексту или исходному фото лицо может отличаться от выбранного варианта. Отметьте изображение утверждённого героя в референсах этого плана.`);
+  }
   if (input.kind === 'video' && !references.some(ref => ref.role === 'first-frame'))
     throw new PromptCompilationError('first_frame', 'Выберите первый кадр именно текущего плана. Он скрыт, удалён или относится к другой карточке.');
   if (input.kind === 'video' && endFrame && capability.adapter.lastFrame && !references.some(ref => ref.role === 'last-frame'))
@@ -384,7 +398,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   if (references.length > capability.adapter.maxImageReferences || input.kind === 'video' && references.filter(ref => ref.role !== 'first-frame' && ref.role !== 'last-frame').length > capability.adapter.maxAdditionalReferences)
     throw new PromptCompilationError('reference_count', `Выбрано ${references.length} подходящих изображений, но адаптер допускает ${capability.adapter.maxImageReferences}. Снимите лишние референсы или выберите другую модель; обязательные образы не исключаются автоматически.`);
   for (const [n, ref] of references.entries()) add(`ref-role.${n}`, `Изображение ${n + 1}`, ref.role === 'first-frame' ? 'Начальная композиция текущего плана; сохраняй лица и окружение.'
-    : ref.role === 'last-frame' ? 'Конечная композиция текущего плана.' : ref.role === 'character' ? `Только постоянная внешность героя ${ref.label}; не копируй позу или фон.`
+    : ref.role === 'last-frame' ? 'Конечная композиция текущего плана.' : ref.role === 'character' ? canonicalFace(ref)
+      ? `Утверждённый образ героя ${ref.label} — основной образец его лица и внешности. Воспроизведи узнаваемые черты этого конкретного героя, а не похожий типаж. Он важнее исходных прообразов и стилизации. Не копируй позу или фон; костюм и текущее состояние задаёт постановка.`
+      : `Исходный прообраз героя ${ref.label}, вспомогательный референс. Если приложен утверждённый образ этого героя, его лицо и внешность имеют приоритет. Не смешивай лица, не копируй позу или фон.`
     : ref.role === 'location' ? `Локация ${ref.label}; не переноси посторонних персонажей.` : ref.role === 'style' ? 'Только техника изображения, свет и цвет; не переносить чужих героев или композицию.' : 'Выбранный режиссёром прообраз только для текущего плана.', true);
   if (input.kind === 'video' && references.some(ref => ref.role === 'last-frame') && duration !== undefined && duration !== capability.duration!.requestedSeconds)
     warnings.push(`Модель запрашивается на ${capability.duration!.requestedSeconds} сек, а план рассчитан на ${duration} сек. Конечный кадр закреплён в конце полного клипа. Обрезка конца может убрать выбранную композицию; проверьте фактическое время перед монтажом.`);

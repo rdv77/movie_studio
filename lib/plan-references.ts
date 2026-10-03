@@ -3,6 +3,7 @@ import { parseShots } from './shots';
 import { selectedReferences } from './reference-selection';
 import {relevantWorldRefs} from './world-assets';
 import {projectAssetIds} from './project-assets';
+import {shotBindsCharacter} from './character-bindings';
 
 // Only the current shot supplies cast. Neighbouring shots, dialogue and
 // continuity history can mention people who are not visible in this frame.
@@ -23,9 +24,9 @@ export function planCharacterIds(p:Project,item:Item,selected?:string[]) {
   return p.items.filter(i=>i.stage===1&&isApproved(p,i)&&(!selected||selected.includes(i.id))).flatMap(i=>{
     const v=i.variants.find(v=>v.id===i.approvedId),c=v?.character;
     if(!c||!v?.assetId)return [];
-    const present=shot.characterIds!==undefined?shot.characterIds.includes(i.id):shot.cast!==undefined?shot.cast.some(name=>normalized(name)===normalized(c.name)||name===i.id)
+    const present=shotBindsCharacter(p,shot,i.id)||(shot.characterIds!==undefined?shot.characterIds.includes(i.id):shot.cast!==undefined?shot.cast.some(name=>normalized(name)===normalized(c.name)||name===i.id)
       :!/(?:персонажей|людей|героев)\s+нет|без\s+(?:персонажей|людей|героев)/iu.test(shot.description)
-        &&(mentions(shot.description,c.name)||(shot.speechType==='character'&&normalized(shot.speaker??'')===normalized(c.name)));
+        &&(mentions(shot.description,c.name)||(shot.speechType==='character'&&normalized(shot.speaker??'')===normalized(c.name))));
     return present?[i.id]:[];
   });
 }

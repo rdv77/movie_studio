@@ -66,3 +66,19 @@ for(const [index,expected] of [[0,[hero]],[1,[otherAsset]],[2,[]]]){
  state=structuredClone(scoped);await G.POST(req({...single,revision:state.revision,batchId:D.id(),itemId:frames[index].id,refs:[hero,otherAsset]}),ctx);assert.deepEqual(state.jobs[0].refs,expected);
 }
 console.log('PASS per-plan cast isolation: single and batch requests, empty cast, voiceover, neighbouring continuity, scoped prompts, per-plan deselection.');
+
+// A project-local explicit binding repairs a different script name without
+// attaching every hero or modifying any historical receipt.
+state=structuredClone(scoped);
+const boundSource=state.items.find(i=>i.stage===4),boundData=JSON.parse(D.chosen(boundSource).text);
+boundData.shots[0].cast=['Юный герой'];boundData.shots[0].characterIds=[];
+D.chosen(boundSource).text=JSON.stringify(boundData);
+const boundHero=state.items.find(i=>i.stage===1&&i.variants.some(v=>v.assetId===hero)),beforeBindingJobs=structuredClone(state.jobs);
+await A.PATCH(req({revision:state.revision,action:'bindPlanCharacter',data:{name:'Юный герой',characterId:boundHero.id}}),ctx);
+assert.deepEqual(state.jobs,beforeBindingJobs);
+await G.POST(req({...single,revision:state.revision,batchId:D.id(),itemId:frames[0].id,refs:[],referenceMode:'auto'}),ctx);
+assert.deepEqual(state.jobs.at(-1).refs,[hero]);assert(state.jobs.at(-1).prompt.includes('Юный герой — это Герой'));
+assert(state.jobs.at(-1).prompt.includes('Утверждённый образ героя Герой — основной образец его лица'));
+const beforeForeign=structuredClone(state);
+await assert.rejects(()=>A.PATCH(req({revision:state.revision,action:'bindPlanCharacter',data:{name:'Юный герой',characterId:D.id()}}),ctx));assert.deepEqual(state,beforeForeign);
+console.log('PASS explicit hero binding: real PATCH and generation admission, project ownership, no guesses, receipts preserved, primary face reference sent. No paid provider calls.');

@@ -1,4 +1,5 @@
 'use client';
+import {StoryboardCharacterBindings} from './storyboard-character-bindings';
 import {AudioQcEditor} from './audio-qc-editor';
 import {BatchScopeSelector} from './batch-scope-selector';
 import {pairedItem} from '@/lib/review-center';
@@ -960,6 +961,7 @@ function Workspace() {
                     onClick={() => setDialog('storyboard-batch')}><Sparkles />Создать кадры всех планов</Button>
                 </div>
               )}
+              {step===5&&<StoryboardCharacterBindings project={p} disabled={busy||!ready||active.length>0} onBind={(name,characterId)=>perform(()=>action('bindPlanCharacter',{name,characterId}))}/>}
               {step===5&&item&&group.length>1&&<section className="editor-surface p-4 mb-5" aria-label="Порядок планов раскадровки">
                 <strong>Порядок планов · {item.title}</strong>
                 <div className="flex flex-wrap items-center gap-3 mt-3">

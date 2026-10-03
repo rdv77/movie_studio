@@ -1,4 +1,5 @@
 import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
+import {setCharacterBinding} from '@/lib/character-bindings';
 import {applyMontageProposal} from '../../../../lib/montage-review';
 import {animaticManifestSchema,manifestAssets} from '../../../../lib/animatic-manifest';
 import { approveReview } from '@/lib/review-center';
@@ -93,6 +94,10 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive&&body.action!=='restorePlan')throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'bindPlanCharacter': {
+      const binding=z.object({name:z.string().trim().min(1).max(100),characterId:z.string().uuid().nullable()}).parse(d);
+      setCharacterBinding(p,binding.name,binding.characterId);break;
+    }
     case 'saveMediaDurations': {
       const {durations}=z.object({durations:z.record(z.string().uuid(),z.number().positive().max(3600))}).parse(d);
       for(const assetId of Object.keys(durations)){const a=await asset(user,assetId,p);if(!a.mime.startsWith('audio/')&&!a.mime.startsWith('video/'))throw Error('Нужен аудио- или видеофайл.');}

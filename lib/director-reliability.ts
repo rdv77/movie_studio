@@ -4,6 +4,7 @@ import type {DirectorRole,DirectorRun,DirectorTask} from './directing';
 import {model} from './models';
 import {id} from './domain';
 import {compactPromptText} from './prompt-text';
+import {shotBindsCharacter} from './character-bindings';
 export const directorExecutionSchema=z.object({parallelModels:z.array(z.string()).max(3).optional(),fallbackModel:z.string().optional()});
 export type DirectorExecution=z.infer<typeof directorExecutionSchema>;
 export function validateDirectorExecution(input:unknown):DirectorExecution{const value=directorExecutionSchema.parse(input);for(const key of [...(value.parallelModels??[]),...(value.fallbackModel?[value.fallbackModel]:[])]){const m=model(key);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Для команды и резерва выберите текстовую модель GPT, Grok или MiniMax.');}return value;}
@@ -36,7 +37,7 @@ export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!
   const stripped=(s:any)=>{const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...content}=s;return content;};
   // Scene specialists own only these target rows; adjacent rows are lightweight
   // context. Hero locks and relevant world information remain intact.
-  const result={...base,approved:base.approved.filter((v:any)=>v.stage===2||v.stage===1&&(t.role==='shot-planner'||selected.some(s=>s.cast.includes(v.character?.name??v.title)||s.characterIds?.includes(v.id)))),outline:base.outline.map(summary),previous:summary(p.directing!.scenes[index-1]),next:summary(p.directing!.scenes[index+1]),scene:{...scene,shots:selected.map(stripped)},requestedShotIds:ids,contextOnlyNeighbours:[...edge].sort((a,b)=>a-b).map(n=>neighbour(scene.shots[n])),sceneBoundaryNeighbours:[p.directing!.scenes[index-1]?.shots.at(-1),p.directing!.scenes[index+1]?.shots[0]].filter(Boolean).map(neighbour)};
+  const result={...base,approved:base.approved.filter((v:any)=>v.stage===2||v.stage===1&&(t.role==='shot-planner'||selected.some(s=>s.cast.includes(v.character?.name??v.title)||s.characterIds?.includes(v.id)||shotBindsCharacter(p,s,v.id)))),outline:base.outline.map(summary),previous:summary(p.directing!.scenes[index-1]),next:summary(p.directing!.scenes[index+1]),scene:{...scene,shots:selected.map(stripped)},requestedShotIds:ids,contextOnlyNeighbours:[...edge].sort((a,b)=>a-b).map(n=>neighbour(scene.shots[n])),sceneBoundaryNeighbours:[p.directing!.scenes[index-1]?.shots.at(-1),p.directing!.scenes[index+1]?.shots[0]].filter(Boolean).map(neighbour)};
   if(t.role==='compress'){
     // The approved target shots contain the story. Sending the entire film again,
     // plus the same hero JSON in text and profile form, adds no visual information.

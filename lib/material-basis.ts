@@ -1,4 +1,5 @@
 import type { Project,Item,Variant } from './domain';
+import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import type { VersionSource } from './creative-versions';
 // Semantic dependencies are used only for newly created production materials.
 // Existing snapshots keep their original approval behaviour until reviewed.
@@ -11,7 +12,7 @@ export function materialBasis(p:Project,item:Item,variant?:Partial<Variant>){
   if(!shot)return '';
   const speech={text:shot.dialogue??'',type:shot.speechType??(shot.dialogue?'voiceover':'none'),speaker:shot.speaker??''};
   if(item.stage===6)return stable({speech});
-  const heroes=p.items.filter(i=>i.stage===1&&!i.removedAt&&!i.planArchive).flatMap(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return v&&(!v.character||!shot.cast?.length||shot.cast.includes(v.character.name))?[{text:v.text,character:v.character,asset:v.assetId}]:[];});
+  const heroes=p.items.filter(i=>i.stage===1&&!i.removedAt&&!i.planArchive).flatMap(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return v&&(!v.character||!shot.cast?.length||shot.cast.includes(v.character.name)||shotBindsCharacter(p,shot,i.id))?[{text:v.text,character:v.character,asset:v.assetId}]:[];});
   const world=p.items.filter(i=>[2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {text:v?.text,asset:v?.assetId};});
   const frame=p.items.find(i=>i.stage===5&&!i.planArchive&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.title===item.sourceShot?.title));
   return stable({format:p.format,cast:shot.cast,story:shot.description,camera:shot.camera,design:shot.productionDesign,continuity:shot.continuity,heroes,world,
@@ -55,7 +56,7 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
   if(item.stage===6)return 'v2:'+stable({speech:{...speech,text:shot.dialogue??'',delivery:shot.dialogueDelivery??''}});
   const scene=p.directing?.scenes.find(s=>s.id===shot.sceneId);
   const castItems=p.items.filter(i=>i.stage===1&&active(i)&&(!variant.characterIds||variant.characterIds.includes(i.id))&&(
-    shot.characterIds?.includes(i.id)||shot.cast?.some((name:string)=>name===i.id||normalize(name)===normalize(approved(i)?.character?.name??i.character?.name??i.title))));
+    shot.characterIds?.includes(i.id)||shotBindsCharacter(p,shot,i.id)||shot.cast?.some((name:string)=>name===i.id||normalize(name)===normalize(approved(i)?.character?.name??i.character?.name??i.title))));
   const castIds=castItems.map(i=>i.id).sort();
   const used=variant.versionInfo?.sources??[];
   const sources=(role:VersionSource['role'],fallback:Item[])=>{
@@ -80,7 +81,8 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
   const frameSources=used.filter(s=>s.role==='frame');
   const frame=frameSources.length?frameSources.map(s=>sourceValue(p,s)):
     (variant.refs??[]).map(asset=>({asset}));
-  return 'v2:'+stable({format:p.format,brief,cast:castIds.length?castIds:shot.characterIds??shot.cast,
+  const bindings=(shot.cast??[]).flatMap((name:string)=>{const id=boundCharacterId(p,name);return id?[{name,id}]:[];});
+  return 'v2:'+stable({format:p.format,brief,cast:castIds.length?castIds:shot.characterIds??shot.cast,...(bindings.length?{characterBindings:bindings}:{}),
     story:shot.description,camera:shot.camera,design:shot.productionDesign,stateIn:shot.stateIn,
     ...(shot.direction?{direction:shot.direction}:{}),
     continuity:shot.stateIn===undefined?shot.continuity:undefined,sceneContinuity:continuity,priorChanges,

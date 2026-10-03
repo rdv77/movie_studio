@@ -19,6 +19,7 @@ import {assertPlanSets,plannerInstruction,planningPolicy,planningInputBasis,save
 import {compactSpecialistContext,taskModel,type DirectorExecution} from './director-reliability';
 import {PREPARED_PROMPT_LIMIT,PROMPT_EDITOR_RESPONSE_LIMIT} from './prompt-limits';
 import {compactPromptText,uniquePromptFacts} from './prompt-text';
+import {boundCharacterId} from './character-bindings';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -264,7 +265,7 @@ export function directorExport(p:Project){
     description:shot.story,duration:shot.duration,camera:shot.cinematography,productionDesign:shot.productionDesign,...(shot.direction?{direction:shot.direction}:{}),
     ...(shot.promptBasis===shotPromptBasis(p,s,shot)?{imagePrompt:shot.imagePrompt,videoPrompt:shot.videoPrompt}:{}),
     locationState:s.locationState,stateIn:shot.stateIn,stateOut:shot.stateOut,continuityChanges:shot.continuityChanges,dialogueDelivery:shot.dialogue.delivery,
-    characterIds:shot.characterIds??relevantHeroItems(p,shot).map(i=>i.id),locationIds:shot.locationIds??s.locationIds??relevantLocationItems(p,s,shot).map(i=>i.id),
+    characterIds:shot.characterIds!==undefined?[...new Set([...shot.characterIds,...shot.cast.flatMap(name=>{const hero=boundCharacterId(p,name);return hero?[hero]:[];})])]:relevantHeroItems(p,shot).map(i=>i.id),locationIds:shot.locationIds??s.locationIds??relevantLocationItems(p,s,shot).map(i=>i.id),
     speakerId:shot.dialogue.speechType==='character'?relevantHeroItems(p,shot).find(i=>i.id===shot.dialogue.speaker||normalizedName(i.variants.find(v=>v.id===i.approvedId)?.character?.name??i.character?.name??i.title)===normalizedName(shot.dialogue.speaker))?.id:undefined,
     sceneContinuity:relevantContinuity(s,shot),previousChanges:relevantPrecedingChanges(s,shot),
     continuity:`Сцена: ${s.title}. Исходная одежда и реквизит в начале сцены: ${s.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`).join('; ')}. Уже произошедшие изменения, которые сохраняются: ${precedingChanges(s,shot).map(v=>v.changes).join('; ')||'нет'}. Начало этого плана: ${shot.stateIn}. Конец: ${shot.stateOut}. Новые изменения: ${shot.continuityChanges||'нет'}.`,

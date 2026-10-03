@@ -2,13 +2,13 @@ import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 await mkdir('work/tests', { recursive: true });
-await build({ stdin: { resolveDir: process.cwd(), contents: `export * as C from './lib/prompt-compiler';export * as D from './lib/domain';export * as J from './lib/prompt-jobs';export * as A from './lib/prompt-assets';export {MODELS} from './lib/models';` },
+await build({ stdin: { resolveDir: process.cwd(), contents: `export * as C from './lib/prompt-compiler';export * as D from './lib/domain';export * as J from './lib/prompt-jobs';export * as A from './lib/prompt-assets';export * as B from './lib/character-bindings';export * as P from './lib/plan-references';export {MODELS} from './lib/models';` },
   bundle: true, platform: 'node', format: 'esm', outfile: 'work/tests/prompt-compiler.mjs', external: ['@ffmpeg/ffmpeg'] });
 let providerCalls = 0;
 const previousFetch = globalThis.fetch;
 globalThis.fetch = () => { providerCalls++; throw Error('Compiler tests must never call providers'); };
 try {
-  const { C, D, J, A, MODELS } = await import('../work/tests/prompt-compiler.mjs');
+  const { C, D, J, A, B, P, MODELS } = await import('../work/tests/prompt-compiler.mjs');
   const p = D.newProject('Компилятор только текущего плана');
   const card = (stage, title, id = D.id()) => { const item = { id, stage, title, variants: [] }; p.items.push(item); return item; };
   const approve = (item, data) => { const v = D.makeVariant(p, item, data); item.variants.push(v); item.selectedId = item.approvedId = v.id; return v; };
@@ -54,6 +54,47 @@ try {
   assert(result.compression.omitted.some(r => r.assetId === ids.long && r.reason === 'irrelevant'));
   assert(result.criticalText.includes('Синий плащ') && result.criticalText.includes('Красная сумка в левой руке'));
   assert(result.criticalText.includes('Постоянная идентичность Анна') && result.criticalText.includes('Фонарь уже зажжён'));
+  assert(result.criticalText.includes('Узнаваемость лица — обязательное условие'));
+  assert(result.criticalText.includes('посадку и расстояние между глазами'));
+  assert(result.criticalText.includes('Утверждённый образ героя Анна — основной образец его лица'));
+  assert(!result.warnings.some(w=>w.includes('Не прикреплён утверждённый образ')));
+  const sourcePhoto=anna.character.refs[0];
+  const faceOrder=C.compilePrompt(p,frame,'gpt-image-2.5-sunburst',{...base,references:[sourcePhoto,ids.yard,ids.anna]});
+  assert.deepEqual(faceOrder.references.map(r=>r.assetId),[ids.anna,sourcePhoto,ids.yard]);
+  assert(faceOrder.criticalText.includes('Изображение 1: Утверждённый образ героя Анна'));
+  assert(faceOrder.criticalText.includes('Изображение 2: Исходный прообраз героя Анна'));
+  const noFace=C.compilePrompt(p,frame,'gpt-image-2.5-sunburst',{...base,references:[sourcePhoto,ids.yard]});
+  assert(noFace.warnings.some(w=>w.includes('Не прикреплён утверждённый образ героя «Анна»')));
+  assert(!noFace.references.some(r=>r.assetId===ids.anna),'An explicitly unchecked face reference is not reattached');
+  {
+    const aliasFilm=structuredClone(p),aliasSource=aliasFilm.items.find(i=>i.id===source.id),aliasData=JSON.parse(aliasSource.variants.find(v=>v.id===aliasSource.approvedId).text);
+    aliasData.shots.forEach(shot=>{shot.continuity??='';});
+    aliasData.shots.find(shot=>shot.id===current.id).cast=['Младшая Анна'];aliasData.shots.find(shot=>shot.id===current.id).characterIds=[];
+    aliasSource.variants.find(v=>v.id===aliasSource.approvedId).text=JSON.stringify(aliasData);
+    for(const item of aliasFilm.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){
+      if(!item.approvedId){const v=D.makeVariant(aliasFilm,item,{text:'Основа'});item.variants.push(v);item.selectedId=item.approvedId=v.id;}
+      item.variants.find(v=>v.id===item.approvedId).deps=D.dependencies(aliasFilm,item.stage);
+    }
+    const aliasFrame=aliasFilm.items.find(i=>i.id===frame.id);
+    assert.deepEqual(P.planCharacterIds(aliasFilm,aliasFrame),[],'Similar names are never guessed');
+    B.setCharacterBinding(aliasFilm,'Младшая Анна',anna.id);
+    assert.deepEqual(P.planCharacterIds(aliasFilm,aliasFrame),[anna.id]);
+    const aliasPrompt=C.compilePrompt(aliasFilm,aliasFrame,'gpt-image-2.5-sunburst',{...base,references:P.planReferenceIds(aliasFilm,aliasFrame)});
+    assert(aliasPrompt.criticalText.includes('Младшая Анна — это Анна'));
+    assert(aliasPrompt.references.some(ref=>ref.assetId===ids.anna&&ref.role==='character'));
+    assert(!aliasPrompt.references.some(ref=>ref.assetId===ids.boris));
+    assert.throws(()=>B.setCharacterBinding(aliasFilm,'Несуществующее имя',anna.id));
+    assert.throws(()=>B.setCharacterBinding(aliasFilm,'Младшая Анна',D.id()));
+    assert.throws(()=>B.setCharacterBinding(aliasFilm,'Борис',anna.id),'Nonempty explicit cast IDs cannot be overridden');
+    assert.equal(D.newProject('Другой фильм').characterBindings,undefined);
+    B.setCharacterBinding(aliasFilm,'Младшая Анна',null);assert.deepEqual(P.planCharacterIds(aliasFilm,aliasFrame),[]);
+  }
+  {
+    const changed=structuredClone(p),changedHero=changed.items.find(i=>i.id===anna.id),pending=D.makeVariant(changed,changedHero,{kind:'image',assetId:D.id(),text:'Новый образ',character:changedHero.character});changedHero.variants.push(pending);changedHero.selectedId=pending.id;
+    const pendingFace=C.compilePrompt(changed,changed.items.find(i=>i.id===frame.id),'gpt-image-2.5-sunburst',base);
+    assert(pendingFace.warnings.some(w=>w.includes('ещё не утверждённый вариант')));
+    assert(pendingFace.references.some(r=>r.assetId===ids.anna),'Selection does not replace an approved identity');
+  }
   assert(!result.criticalText.includes('Алый плащ') && !result.criticalText.includes('Серебряный меч'));
   assert(result.prompt.includes('рты всех персонажей закрыты'));
   assert(result.prompt.includes('Только для стыковки — выход предыдущего плана'));
