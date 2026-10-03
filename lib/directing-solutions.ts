@@ -1,3 +1,4 @@
+import {syncPlanSetAfterMontage} from './shot-planning';
 import {z} from 'zod';
 import {id,type Project} from './domain';
 import {recordCreativeVersion} from './creative-versions';
@@ -111,5 +112,6 @@ export function applyEditorSolutions(p:Project,patchIds:string[],operationIds:st
   // exact before values are still true. Changed/removed targets keep the old basis.
   for(const op of d.montageOperations??[]){const scene=d.scenes.find(s=>s.id===op.sceneId),before=original.scenes.find(s=>s.id===op.sceneId);if(!op.applied&&scene&&before&&op.basis===scenePlanBasis(before)&&operationStillCurrent(scene,op))op.basis=scenePlanBasis(scene);}
   d.editorBasis=undefined;d.patchesBasis=editorBasis(copy);d.acceptedRuntime=undefined;if(operations.some(op=>op.type!=='duration'))d.planOrderChanged=true;
+  syncPlanSetAfterMontage(copy,[...new Set(operations.map(op=>op.sceneId))]);
   recordCreativeVersion(copy,'Применены решения редактора');p.directing=d;p.creativeHistory=copy.creativeHistory;p.creativeVersionId=copy.creativeVersionId;
 }

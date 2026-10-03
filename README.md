@@ -108,3 +108,6 @@ npm run test:integration
 ## fal.ai
 
 [Подключение Qwen Image Edit 2511, референсы, стоимость и API](docs/fal.md).
+
+
+[Планы сцен, три режима монтажа, параллельные GPT/Grok и резервная модель](docs/shot-planning-and-reserve.md).

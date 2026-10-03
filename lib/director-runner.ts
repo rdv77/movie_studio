@@ -4,6 +4,7 @@ import { model } from './models';
 import { generate } from './providers';
 import { now, assertBudget } from './domain';
 import { directorBasis, directorRunBasis, directorJob, taskReady, parseDirectorJSON, applyDirectorResult,publishDirectorScript } from './directing';
+import {normalizeDirectorAnswer,scheduleDirectorFallback} from './director-reliability';
 
 // All admission and task dependencies are decided on the server. CAS claims
 // prevent two tabs/workers from sending the same paid request twice.
@@ -46,13 +47,13 @@ export async function runDirectorStep(user:string,projectId:string,options:{disp
         if(!run||!task){j.status='failed';j.error='Задание удалено; ответ сохранён.';return;}
         try{
           if(result.error)throw Error(result.error);
-          const data=parseDirectorJSON(result.text??'');
+          const data=normalizeDirectorAnswer(current,task.role,task.sceneId,parseDirectorJSON(result.text??''));
           const proposal=structuredClone(current),proposedRun=proposal.directing!.runs.find(r=>r.id===run.id)!,proposedTask=proposedRun.tasks.find(t=>t.id===task.id)!;
           applyDirectorResult(proposal,proposedRun,proposedTask,data);
           const completed=proposal.jobs.find(j=>j.id===jobId)!;completed.status='done';completed.error=proposedTask.error;
           if(proposedRun.mode==='compress'&&!proposedRun.stopped&&!proposedRun.published&&proposedRun.tasks.every(t=>t.applied)){publishDirectorScript(proposal);proposedRun.published=true;}
           Object.assign(current,proposal);
-        }catch(e){task.error=e instanceof Error?e.message:String(e);j.status='failed';j.error='Ответ получен, но требует правки: '+task.error;}
+        }catch(e){task.error=e instanceof Error?e.message:String(e);j.status='failed';j.error='Ответ получен, но требует правки: '+task.error;scheduleDirectorFallback(current,run,task,j,true);}
       });
     }catch(e){
       await mutate(user,projectId,current=>{
@@ -62,7 +63,7 @@ export async function runDirectorStep(user:string,projectId:string,options:{disp
         const definite=notSent||(e as {definite?:boolean}).definite;
         j.status=definite?'failed':'unknown';j.error=e instanceof Error?e.message:String(e);
         if(notSent){j.actual='0';j.actualSource='Запрос не отправлен';}
-        const t=current.directing?.runs.flatMap(r=>r.tasks).find(t=>t.jobId===jobId);if(t)t.error=j.error;
+        const run=current.directing?.runs.find(r=>r.id===j.batchId),t=run?.tasks.find(t=>t.jobId===jobId);if(t&&run){t.error=j.error;scheduleDirectorFallback(current,run,t,j);}
       });
     }
   }));

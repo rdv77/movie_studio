@@ -4,7 +4,7 @@ const server=`
 import {encodeProjectState,decodeProjectState} from './project-state';
 const files={put:async()=>{throw Error('Mock projects must stay inline');}};
 export const loadProject=async()=>decodeProjectState(files,'owner',globalThis.scriptRunnerState.id,JSON.stringify(globalThis.scriptRunnerState),globalThis.scriptRunnerState.revision);
-export const getKey=async()=> 'local-mock-key';
+export const imageData=async()=>{throw Error('Unexpected image request in text-only test')};export const getKey=async()=> 'local-mock-key';
 export async function mutate(user,id,fn){
  for(let n=0;n<10;n++){
   const revision=globalThis.scriptRunnerState.revision,p=await loadProject();fn(p);p.revision++;

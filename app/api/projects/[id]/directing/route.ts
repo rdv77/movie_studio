@@ -16,6 +16,9 @@ import {assertSceneLocations} from '@/lib/world-assets';
 import {prepareSceneLocations} from '@/lib/scene-locations';
 import {directorScopeSchema,assertDirectingShotReady} from '@/lib/directing-workflow';
 import {allowNewSeries} from '@/lib/job-wait';
+import {planPolicySchema,planSketchSchema,setPlanPolicy,choosePlanningProposal,approvePlanSets,replacePlanCards,planningScene,restorePlanningCard} from '@/lib/shot-planning';
+import {directorExecutionSchema,validateDirectorExecution,normalizeDirectorAnswer} from '@/lib/director-reliability';
+import {parseDirectorJSON,applyDirectorResult,directorRunBasis} from '@/lib/directing';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -25,9 +28,22 @@ export const POST=api(async(req,ctx)=>{
   const d=ensureDirecting(p),v=body.data??{};
   const running=d.runs.some(directorRunActive);
   if(running&&!['stop','retry','importScriptCandidate'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
-  const tracksHistory=['brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
+  const tracksHistory=['planPolicy','choosePlanSet','savePlanCards','restorePlanCard','approvePlanSets','brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
+    case 'planPolicy':setPlanPolicy(p,planPolicySchema.parse(v.policy),z.string().optional().parse(v.sceneId));break;
+    case 'choosePlanSet':choosePlanningProposal(p,z.string().uuid().parse(v.proposalId));break;
+    case 'savePlanCards':replacePlanCards(p,z.string().parse(v.sceneId),z.array(planSketchSchema).min(1).max(40).parse(v.cards));break;
+    case 'restorePlanCard':restorePlanningCard(p,z.string().parse(v.sceneId),z.string().parse(v.shotId));break;
+    case 'approvePlanSets':approvePlanSets(p,z.array(z.string()).min(1).max(24).parse(v.sceneIds));break;
+    case 'repairSavedAnswer':{
+      const run=d.runs.find(r=>r.id===v.runId),task=run?.tasks.find(t=>t.id===v.taskId),job=p.jobs.find(j=>j.id===task?.jobId);
+      if(!run||!task?.error||!job?.output?.text||job.status!=='failed'||run.stopped||run.basis!==directorRunBasis(p,run))throw Error('Нет сохранённого ответа для исправления формата текущего задания.');
+      const proposal=structuredClone(p),r=proposal.directing!.runs.find(r=>r.id===run.id)!,t=r.tasks.find(t=>t.id===task.id)!;
+      applyDirectorResult(proposal,r,t,normalizeDirectorAnswer(proposal,t.role,t.sceneId,parseDirectorJSON(job.output.text)));
+      if(!t.applied)throw Error(t.error??'Ответ не прошёл проверку.');const receipt=proposal.jobs.find(j=>j.id===job.id)!;receipt.status='done';receipt.error=undefined;
+      Object.assign(p,proposal);break;
+    }
     case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;
     case 'restoreSceneVersion':restoreSceneVersion(p,z.string().uuid().parse(v.versionId),z.string().uuid().parse(v.sceneId));break;
     case 'scriptRun':{
@@ -65,13 +81,14 @@ export const POST=api(async(req,ctx)=>{
     }
     case 'brief':d.brief=creativeBriefSchema.parse(v.brief);if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
     case 'run':{
-      const s=z.object({model:z.string(),mode:z.enum(['critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
+      const s=z.object({model:z.string(),execution:directorExecutionSchema.optional(),mode:z.enum(['plan-shots','critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
       const scoped=s.scope!==undefined||s.sceneIds!==undefined||s.shotIds!==undefined?{scope:s.scope,sceneIds:s.sceneIds,shotIds:s.shotIds}:undefined;
       if(model(s.model).kind!=='text'||!['openai','xai','minimax'].includes(model(s.model).provider))throw Error('Выберите текстовую модель OpenAI, Grok или MiniMax.');
       await getKey(user,model(s.model).provider);
+      const execution=s.execution&&validateDirectorExecution(s.execution);for(const key of new Set([...(execution?.parallelModels??[]),...(execution?.fallbackModel?[execution.fallbackModel]:[])]))await getKey(user,model(key).provider);
       if(p.limit!==null)throw Error('Для текстовых агентов стоимость определяется по токенам. Снимите денежный лимит на время проработки и сверяйте расход в журнале.');
       if(s.mode==='scenes'&&d.scenes.length&&!v.replaceScenes&&(!scoped||s.scope==='all'&&s.sceneIds===undefined))throw Error('Структура уже существует. Для замены используйте явное повторное разбиение.');
-      newDirectorRun(p,s.model,s.mode,s.sceneId,s.role as DirectorRole,s.shotId,scoped);break;
+      const run=newDirectorRun(p,s.model,s.mode,s.sceneId,s.role as DirectorRole,s.shotId,scoped);if(execution)run.execution=execution;break;
     }
     case 'stop':{const r=d.runs.find(r=>r.id===v.runId);if(!r)throw Error('Запуск не найден.');r.stopped=true;for(const t of r.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'){j.status='unknown';j.error='Ожидание остановлено. Запрос мог быть оплачен; поздний ответ будет сохранён.';}if(!t.result&&!t.error)t.error='Проработка остановлена.';}break;}
     case 'retry':{

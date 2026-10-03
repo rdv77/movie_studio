@@ -5,7 +5,7 @@ export class HttpError extends Error{constructor(message,status=400){super(messa
 export const loadProject=async()=>structuredClone(globalThis.state);
 export async function saveProject(_,p,rev){await Promise.resolve();if(state.revision!==rev)throw new HttpError('CAS',409);p.revision=rev+1;globalThis.state=structuredClone(p);return p;}
 export async function mutate(u,id,fn){for(let n=0;n<10;n++){const p=await loadProject(),rev=p.revision;fn(p);try{return await saveProject(u,p,rev);}catch(e){if(e.status!==409||n===9)throw e;}}}
-export const getKey=async()=> 'mock-key';export const storeAsset=async(_,id)=>id;
+export const imageData=async()=>{throw Error('Unexpected image request in text-only test')};export const getKey=async()=> 'mock-key';export const storeAsset=async(_,id)=>id;
 export const runtime={FILES:{put:async(_,bytes)=>{globalThis.savedBytes=bytes;},get:async()=>({arrayBuffer:async()=>new Uint8Array([1,2]).buffer})}};
 `;
 const provider=`export async function generate(j){directorCalls.push(j.id);await new Promise(resolve=>directorRelease=resolve);return {text:JSON.stringify({review:'Готово',alternatives:[]}),requestId:'critic-receipt',actual:'100'};}`;
