@@ -2,17 +2,24 @@ import {z} from 'zod';
 import {api,owner,loadProject,saveProject,asset,getKey} from '@/lib/server';
 import {id,now,makeVariant,chosen} from '@/lib/domain';
 import {model} from '@/lib/models';
-import {ensureDirecting,signature,directorRunActive,scenesBasis,type DirectorRun} from '@/lib/directing';
+import {ensureDirecting,characterRunInputBasis,resumeUnsentCharacterRun,directorRunActive,scenesBasis,type DirectorRun} from '@/lib/directing';
 import {prepareSceneLocations} from '@/lib/scene-locations';
 import {captureVersionInfo,recordCreativeVersion,recordCharacterVersion} from '@/lib/creative-versions';
 import {locationProfileSchema,locationStateSchema,actorProfileSchema,assertLocationAssets,assertSceneLocations,locationProfileText,actorDraftPrompt,chooseActorDraft} from '@/lib/world-assets';
 
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),p=await loadProject(user,(await ctx.params).id);
-  const b=z.object({revision:z.number().int(),action:z.enum(['prepareLocations','saveLocation','removeLocation','restoreLocation','saveSceneLocation','saveActorProfile','generateActor','chooseActorDraft']),data:z.any()}).parse(await req.json());
+  const b=z.object({revision:z.number().int(),action:z.enum(['prepareLocations','saveLocation','removeLocation','restoreLocation','saveSceneLocation','saveActorProfile','generateActor','resumeActorRun','chooseActorDraft']),data:z.any()}).parse(await req.json());
   if(b.revision!==p.revision)throw Object.assign(Error('Проект изменился. Обновите данные перед сохранением.'),{status:409});
   const v=b.data;
   const hero=()=>{const i=p.items.find(i=>i.id===v.itemId&&i.stage===1&&!i.removedAt);if(!i?.character)throw Error('Герой текущего проекта не найден.');return i;};
+  const checkActorInput=async(character:NonNullable<DirectorRun['characterInput']>['character'],modelId:string)=>{
+    const m=model(modelId);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Выберите текстовую модель.');
+    await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовой проработки расход определяется по токенам. Снимите лимит и сверяйте журнал.');
+    if(character.refs.length&&m.provider==='minimax')throw Error('Для проработки героя по фотографии выберите GPT или Grok. MiniMax здесь доступен для текстового исходника.');
+    for(const ref of character.refs){const a=await asset(user,ref,p);if(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)throw Error('Прообраз героя: PNG, JPEG или WebP до 10 МБ.');if(m.provider==='xai'&&a.mime==='image/webp')throw Error('Для анализа фотографии в Grok загрузите PNG или JPEG либо выберите GPT.');}
+    return m;
+  };
   switch(b.action){
     case 'prepareLocations':{
       const d=ensureDirecting(p);if(d.runs.some(directorRunActive))throw Error('Дождитесь завершения проработки сцен.');
@@ -55,15 +62,17 @@ export const POST=api(async(req,ctx)=>{
       recordCharacterVersion(item,'Выбрано актёрское описание');break;
     }
     case 'generateActor':{
-      const item=hero(),d=ensureDirecting(p),m=model(z.string().parse(v.model));if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Выберите текстовую модель.');
-      await getKey(user,m.provider);if(p.limit!==null)throw Error('Для текстовой проработки расход определяется по токенам. Снимите лимит и сверяйте журнал.');
+      const item=hero(),d=ensureDirecting(p);
       if(d.runs.some(r=>r.characterInput?.itemId===item.id&&directorRunActive(r)))throw Error('Этот герой уже прорабатывается.');
       const actorProfile=actorProfileSchema.parse(v.actorProfile),instruction=z.string().max(3000).parse(v.instruction);
-      if(item.character!.refs.length&&m.provider==='minimax')throw Error('Для проработки героя по фотографии выберите GPT или Grok. MiniMax здесь доступен для текстового исходника.');
-      for(const ref of item.character!.refs){const a=await asset(user,ref,p);if(!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)throw Error('Прообраз героя: PNG, JPEG или WebP до 10 МБ.');if(m.provider==='xai'&&a.mime==='image/webp')throw Error('Для анализа фотографии в Grok загрузите PNG или JPEG либо выберите GPT.');}
+      const m=await checkActorInput(item.character!,z.string().parse(v.model));
       const input={itemId:item.id,prompt:actorDraftPrompt(p,item,instruction,actorProfile),character:structuredClone(item.character!),actorProfile,versionInfo:captureVersionInfo(p,item,{}, {actorProfile},'Агент героя')};
-      const run:DirectorRun={id:id(),created:now(),model:m.id,mode:'character',basis:signature(input),characterInput:input,sceneIds:[],tasks:[{id:id(),role:'actor-profile',requires:[]}]};
+      const run:DirectorRun={id:id(),created:now(),model:m.id,mode:'character',basis:characterRunInputBasis(input),characterInput:input,sceneIds:[],tasks:[{id:id(),role:'actor-profile',requires:[]}]};
       d.runs.push(run);break;
+    }
+    case 'resumeActorRun':{
+      const item=hero(),run=resumeUnsentCharacterRun(p,z.string().uuid().parse(v.runId),item.id);
+      await checkActorInput(run.characterInput.character,run.model);break;
     }
   }
   return Response.json(await saveProject(user,p,p.revision));

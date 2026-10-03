@@ -20,7 +20,7 @@ export async function runDirectorStep(user:string,projectId:string,options:{disp
       for(const t of run.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000){j.status='unknown';j.error='Прервалось ожидание ответа. Проверьте расход; автоматического повтора нет.';t.error=j.error;}}
       if(options.dispatch===false)continue; // Hosted watchdog cannot claim a synchronous paid task.
       if(run.stopped)continue;
-      if(run.basis!==directorRunBasis(p,run)){run.stopped=true;continue;}
+      if(run.basis!==directorRunBasis(p,run)){run.stopped=true;run.queueIssue='Основа задания изменилась; дальнейшая проработка остановлена.';continue;}
       const waiting=run as typeof run&{queueIssue?:string};waiting.queueIssue=undefined;
       for(const t of run.tasks.filter(t=>taskReady(run,t))){
         const j=directorJob(p,run,t),issue=queueSlotIssue(p,j,new Set(),t);

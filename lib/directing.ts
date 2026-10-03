@@ -89,10 +89,37 @@ export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return sig
 export function foundation(p:Project){return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId};});}
 export function directorBasis(p:Project){return signature({brief:p.directing?.brief,foundation:foundation(p)});}
 export function editorBasis(p:Project){return signature([directorBasis(p),p.directing?.scenes.map(s=>[sceneOutline(s),s.shots.map(shot=>shotApproval(s,shot))])]);}
-export function directorRunBasis(p:Project,run:DirectorRun){return isScriptWorkflowRun(run)?scriptWorkflowBasis(run.scriptInput,run.basis):run.characterInput?signature(run.characterInput):directorBasis(p);}
+// Hash the persisted shape: JSON storage removes optional undefined fields.
+// Keep the general signature unchanged so existing material approvals remain valid.
+export function characterRunInputBasis(input:NonNullable<DirectorRun['characterInput']>){return signature(JSON.parse(JSON.stringify(input)));}
+function legacyCharacterRunInputBasis(input:NonNullable<DirectorRun['characterInput']>){
+  const info=input.versionInfo;if(!info)return undefined;
+  // captureVersionInfo used these exact optional keys before the JSON round trip.
+  return signature({...input,versionInfo:{...info,parentVariantId:info.parentVariantId,sources:info.sources.map(source=>({...source,assetId:source.assetId}))}});
+}
+export function directorRunBasis(p:Project,run:DirectorRun){return isScriptWorkflowRun(run)?scriptWorkflowBasis(run.scriptInput,run.basis):run.characterInput?characterRunInputBasis(run.characterInput):directorBasis(p);}
 export function directorRunActive(run:DirectorRun){
   const viable=(t:DirectorTask,seen=new Set<string>()):boolean=>{if(t.error||seen.has(t.id))return false;if(t.applied||t.result)return true;seen.add(t.id);return t.requires.every(id=>{const parent=run.tasks.find(v=>v.id===id);return !!parent&&viable(parent,new Set(seen));});};
   return !run.stopped&&run.tasks.some(t=>!t.applied&&!t.result&&!t.error&&viable(t));
+}
+export function isRecoverableUnsentCharacterRun(p:Project,run:DirectorRun|undefined):run is DirectorRun&{characterInput:NonNullable<DirectorRun['characterInput']>}{
+  if(!run||run.mode!=='character'||run.stopped!==true||!run.characterInput||!p.directing?.runs.includes(run))return false;
+  try{
+    if(!z.string().uuid().safeParse(run.id).success||!z.string().datetime().safeParse(run.created).success||run.sceneIds.length||run.tasks.length!==1)return false;
+    const task=run.tasks[0],input=run.characterInput;
+    if(task.role!=='actor-profile'||task.requires.length||!z.string().uuid().safeParse(task.id).success||!input.prompt.trim())return false;
+    if([task.jobId,task.result,task.error,task.applied,task.importedVariantId,task.lateResult].some(value=>value!==undefined)||p.jobs.some(job=>job.batchId===run.id))return false;
+    const basis=characterRunInputBasis(input);
+    if(run.basis===basis||run.basis!==legacyCharacterRunInputBasis(input))return false;
+    const item=p.items.find(item=>item.id===input.itemId&&item.stage===1&&!item.removedAt&&!item.planArchive);
+    if(!item?.character||signature(JSON.parse(JSON.stringify(item.character)))!==signature(JSON.parse(JSON.stringify(input.character))))return false;
+    return !p.directing.runs.some(other=>other.id!==run.id&&other.characterInput?.itemId===input.itemId&&directorRunActive(other));
+  }catch{return false;}
+}
+export function resumeUnsentCharacterRun(p:Project,runId:string,itemId:string){
+  const run=p.directing?.runs.find(run=>run.id===runId);
+  if(!isRecoverableUnsentCharacterRun(p,run)||run.characterInput.itemId!==itemId)throw Error('Продолжение недоступно: запрос уже отправлялся, остановлен вручную или исходные данные героя изменились.');
+  run.basis=characterRunInputBasis(run.characterInput);run.stopped=false;run.queueIssue=undefined;return run;
 }
 export function newDirectorRun(p:Project,model:string,mode:DirectorRun['mode'],sceneId?:string,role?:DirectorRole,shotId?:string,selection?:DirectorScopeRequest){
   const d=ensureDirecting(p);

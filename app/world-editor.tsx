@@ -5,7 +5,7 @@ import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import type {Item,Project} from '@/lib/domain';
 import {money} from '@/lib/domain';
-import type {Scene} from '@/lib/directing';
+import {directorRunActive,isRecoverableUnsentCharacterRun,type Scene} from '@/lib/directing';
 import {MODELS} from '@/lib/models';
 import {availableForDirecting} from '@/lib/model-capabilities';
 import {createLocationImageJobs,locationImageItems,hasLocationImage} from '@/lib/scene-locations';
@@ -111,14 +111,16 @@ export function SceneLocationEditor({p,scene,busy,onSave}:SceneLocationEditorPro
   </fieldset>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}{notice&&<p role="status" className="text-sm">{notice}</p>}</section>;
 }
 
-export type ActorProfileEditorProps={p:Project;item:Item;busy:boolean;onSave:(itemId:string,profile:ActorProfile)=>Promise<unknown>;onGenerate:(itemId:string,data:{model:string;instruction:string;actorProfile:ActorProfile})=>Promise<unknown>;onChooseDraft?:(itemId:string,variantId:string)=>Promise<unknown>};
-export function ActorProfileEditor({p,item,busy,onSave,onGenerate,onChooseDraft}:ActorProfileEditorProps){
+export type ActorProfileEditorProps={p:Project;item:Item;busy:boolean;onSave:(itemId:string,profile:ActorProfile)=>Promise<unknown>;onGenerate:(itemId:string,data:{model:string;instruction:string;actorProfile:ActorProfile})=>Promise<unknown>;onChooseDraft?:(itemId:string,variantId:string)=>Promise<unknown>;onResume?:(itemId:string,runId:string)=>Promise<unknown>};
+export function ActorProfileEditor({p,item,busy,onSave,onGenerate,onChooseDraft,onResume}:ActorProfileEditorProps){
   const [draft,setDraft]=useState<ActorProfile>(()=>structuredClone(actorForItem(item)??emptyActorProfile()));
   const [instruction,setInstruction]=useState('Уточни образ героя в контексте фильма: мотивацию, внутреннее противоречие, манеру поведения и наблюдаемое выражение заданных особенностей. Сохрани исходную внешность.');
   const textModels=MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)&&(!item.character?.refs.length||m.provider!=='minimax'));const [modelChoice,setModel]=useState(textModels[0]?.id??'');const model=textModels.find(m=>m.id===modelChoice)?.id??textModels[0]?.id??'';
   const [working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');const disabled=busy||working;
   let preview='';try{preview=actorDraftPrompt(p,item,instruction,draft);}catch(err){preview=message(err);}
   const candidates=item.variants.filter(v=>v.characterDraft&&!!(v.character as (typeof v.character&{actorProfile?:ActorProfile}))?.actorProfile);
+  const runs=(p.directing?.runs??[]).filter(run=>run.mode==='character'&&run.characterInput?.itemId===item.id).slice().reverse();
+  const active=runs.some(directorRunActive);
   async function act(callback:()=>Promise<unknown>,success:string){setWorking(true);setError('');try{await callback();setNotice(success);}catch(err){setError(message(err));}finally{setWorking(false);}}
   return <section className="border rounded p-4 space-y-4" aria-label={`Актёрский образ ${item.title}`}><h4>Актёрский образ: {item.character?.name??item.title}</h4><p className="text-sm text-muted-foreground">Постоянная внешность хранится отдельно от костюма и эмоций сцены. ИИ получает фотографии героя, исходное описание, запреты на изменения, утверждённый сценарий, стиль и локации. Голос выбирается отдельно на этапе «Звуки».</p><fieldset disabled={disabled} className="space-y-4">
     {(['identity','role','motivation','contradiction','mannerisms'] as const).map((key,n)=><Field key={key} label={['Неизменная физическая идентичность','Роль в картине','Чего добивается герой','Внутреннее противоречие','Привычки, жесты и манера поведения'][n]}><Textarea rows={2} value={draft[key]} maxLength={2000} onChange={e=>{setDraft(d=>({...d,[key]:e.target.value}));setNotice('');}}/></Field>)}
@@ -129,8 +131,9 @@ export function ActorProfileEditor({p,item,busy,onSave,onGenerate,onChooseDraft}
     <Field label="Задача агенту героя"><Textarea rows={3} value={instruction} maxLength={3000} onChange={e=>setInstruction(e.target.value)}/></Field>
     <details><summary>Фактический промпт агента · предпросмотр следующего запроса</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{preview}</pre></details>
     <p className="text-sm text-muted-foreground">Это отдельный запрос к модели. Его расход сохранится в журнале. Результат добавится вариантом описания; текущий образ автоматически не заменяется.</p>
-    <Button type="button" disabled={!model||!item.character} onClick={()=>void act(()=>onGenerate(item.id,{model,instruction,actorProfile:actorProfileSchema.parse(draft)}),'Проработка запущена. Результат появится среди вариантов описания.')}>Предложить описание агентом героя</Button>
+    <Button type="button" disabled={!model||!item.character||active} onClick={()=>void act(()=>onGenerate(item.id,{model,instruction,actorProfile:actorProfileSchema.parse(draft)}),'Проработка запущена. Результат появится среди вариантов описания.')}>Предложить описание агентом героя</Button>
   </fieldset>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}{notice&&<p role="status" className="text-sm">{notice}</p>}
+    {runs.slice(0,3).map(run=>{const recoverable=isRecoverableUnsentCharacterRun(p,run),task=run.tasks[0],job=p.jobs.find(job=>job.id===task?.jobId);return <article key={run.id} className="border rounded p-3 space-y-2" aria-label="Запуск агента героя"><p className="text-sm">{new Date(run.created).toLocaleString('ru')} · {MODELS.find(model=>model.id===run.model)?.name??run.model}</p><p role="status">{recoverable?'Запрос не отправлен: сохранение задания ошибочно изменило проверку его основы. Фото и задание сохранены.':task?.error?task.error:task?.applied?'Описание готово. Сравните варианты ниже и выберите подходящий.':run.stopped?run.queueIssue??'Проработка остановлена.':job?'Агент прорабатывает описание героя.':'Задание ожидает отправки к модели.'}</p>{!run.stopped&&run.queueIssue&&<p>{run.queueIssue}</p>}{recoverable&&onResume&&<Button type="button" variant="outline" disabled={disabled||active} onClick={()=>void act(()=>onResume(item.id,run.id),'Сохранённое задание продолжено. Результат появится среди вариантов описания.')}>Продолжить неотправленную проработку</Button>}<details><summary>Сохранённое задание этого запуска</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{run.characterInput?.prompt}</pre></details></article>;})}
     {!!candidates.length&&<VersionComparison title="Сравнение описаний героя" disabled={disabled} versions={[
       {id:'current:'+item.id,label:'Текущее описание',text:[item.character?.description,actorProfileText(actorForItem(item)??emptyActorProfile())].filter(Boolean).join('\n\n'),selectable:false},
       ...candidates.map(v=>({id:v.id,label:v.title,text:[v.character!.description,actorProfileText((v.character as typeof v.character&{actorProfile:ActorProfile}).actorProfile)].join('\n\n'),metadata:{created:v.created,model:v.model,origin:v.versionInfo?.reason??'Актёрская проработка',actualCost:v.jobId?money(p.jobs.find(j=>j.id===v.jobId)?.actual):'Без генерации'}})),

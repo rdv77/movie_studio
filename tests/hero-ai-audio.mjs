@@ -2,8 +2,8 @@ import {build} from 'esbuild';
 import assert from 'node:assert/strict';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-await build({stdin:{resolveDir:process.cwd(),contents:"export {generate} from './lib/providers';export * as D from './lib/domain';export * as V from './lib/voice-direction';export * as S from './lib/soundscape';export {VoiceStudioShell} from './app/voice-studio-shell';"},bundle:true,platform:'node',format:'esm',outfile:'work/tests/hero-ai-audio.mjs',external:['react','react-dom']});
-const {generate,D,V,S,VoiceStudioShell}=await import('../work/tests/hero-ai-audio.mjs');
+await build({stdin:{resolveDir:process.cwd(),contents:"export {generate} from './lib/providers';export * as D from './lib/domain';export * as R from './lib/directing';export * as C from './lib/creative-versions';export * as W from './lib/world-assets';export * as V from './lib/voice-direction';export * as S from './lib/soundscape';export {VoiceStudioShell} from './app/voice-studio-shell';export {ActorProfileEditor} from './app/world-editor';"},bundle:true,platform:'node',format:'esm',outfile:'work/tests/hero-ai-audio.mjs',external:['react','react-dom','@ffmpeg/ffmpeg']});
+const {generate,D,R,C,W,V,S,VoiceStudioShell,ActorProfileEditor}=await import('../work/tests/hero-ai-audio.mjs');
 const originalFetch=globalThis.fetch,calls=[];
 globalThis.fetch=async(url,options)=>{const body=JSON.parse(options.body);calls.push({url,body});return Response.json(String(url).includes('openai.com')?{id:'test',status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'описание'}]}],usage:{input_tokens:10}}:{id:'test',choices:[{message:{content:'описание'}}],usage:{input_tokens:10}});};
 try{
@@ -20,4 +20,14 @@ assert(render(true).includes('Пропустить создание голосо
 assert.equal(JSON.stringify(p),before,'Opening the optional sound stage does not mutate the project');
 V.voiceStudio(p).characterAudioMode='design';assert(render(true).includes('Создать варианты голоса'));assert(!render(false).includes('Создать варианты голоса'),'Speech stage uses saved voices; design exists only in Sounds');
 assert(S.soundLayerSchema.safeParse({name:'Лягушка',kind:'vocal',scope:{type:'film'},settings:{},promptNotes:'Короткое кваканье, без слов'}).success);
+const heroProject=D.newProject('Новое кино'),hero=heroProject.items.find(item=>item.stage===1),script=heroProject.items.find(item=>item.stage===0);
+hero.character={name:'Исследователь',appearance:'Короткие тёмные волосы',description:'Ищет выход',instructions:'',locked:'Сохранить лицо',refs:[]};const screenplay=D.makeVariant(heroProject,script,{kind:'text',text:'Исследователь находит выход.'});script.variants.push(screenplay);script.approvedId=screenplay.id;
+const actorInput={itemId:hero.id,prompt:W.actorDraftPrompt(heroProject,hero,'Проработай героя',W.emptyActorProfile()),character:hero.character,actorProfile:W.emptyActorProfile(),versionInfo:C.captureVersionInfo(heroProject,hero,{}, {actorProfile:W.emptyActorProfile()},'Агент героя')};
+R.ensureDirecting(heroProject).runs.push({id:D.id(),created:D.now(),model:'gpt-6-astra',mode:'character',basis:R.signature(actorInput),characterInput:actorInput,sceneIds:[],tasks:[{id:D.id(),role:'actor-profile',requires:[]}],stopped:true});
+const stored=JSON.parse(JSON.stringify(heroProject)),storedHero=stored.items.find(item=>item.id===hero.id),storedRun=stored.directing.runs[0];
+const view=()=>renderToStaticMarkup(React.createElement(ActorProfileEditor,{p:stored,item:storedHero,busy:false,onSave:async()=>{},onGenerate:async()=>{},onResume:async()=>{}}));
+assert(view().includes('Продолжить неотправленную проработку'));assert(view().includes('Запрос не отправлен'));assert(!stored.jobs.length,'Unsent runs are visible even without a provider job');
+storedRun.tasks[0].error='Проработка остановлена.';assert(view().includes('Проработка остановлена.'));assert(!view().includes('Продолжить неотправленную проработку'));delete storedRun.tasks[0].error;
+R.resumeUnsentCharacterRun(stored,storedRun.id,hero.id);assert(view().includes('Задание ожидает отправки к модели.'));assert(!view().includes('Продолжить неотправленную проработку'));
+console.log('PASS actor profile UI: invisible unsent run now shows status and recovery; manual stop cannot resume; queued run shows waiting.');
 console.log('PASS hero photo transport: two actual provider payloads, text-only compatibility, unsupported model rejects before HTTP. Optional sound modes render without generation; voice design only in Sounds; nonverbal character layer accepted. All HTTP mocked, no paid calls.');
