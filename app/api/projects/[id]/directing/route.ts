@@ -18,7 +18,7 @@ import {directorScopeSchema,assertDirectingShotReady} from '@/lib/directing-work
 import {allowNewSeries} from '@/lib/job-wait';
 import {planPolicySchema,planSketchSchema,setPlanPolicy,choosePlanningProposal,approvePlanSets,replacePlanCards,planningScene,restorePlanningCard} from '@/lib/shot-planning';
 import {directorExecutionSchema,validateDirectorExecution,normalizeDirectorAnswer,prepareDirectorRetry} from '@/lib/director-reliability';
-import {parseDirectorJSON,applyDirectorResult,directorRunBasis} from '@/lib/directing';
+import {parseDirectorJSON,applyDirectorResult,directorRunBasis,publishDirectorScript} from '@/lib/directing';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
   const body=z.object({action:z.string(),revision:z.number().optional(),data:z.any().optional()}).parse(await req.json());
@@ -42,6 +42,7 @@ export const POST=api(async(req,ctx)=>{
       const proposal=structuredClone(p),r=proposal.directing!.runs.find(r=>r.id===run.id)!,t=r.tasks.find(t=>t.id===task.id)!;
       applyDirectorResult(proposal,r,t,normalizeDirectorAnswer(proposal,t.role,t.sceneId,parseDirectorJSON(job.output.text)));
       if(!t.applied)throw Error(t.error??'Ответ не прошёл проверку.');const receipt=proposal.jobs.find(j=>j.id===job.id)!;receipt.status='done';receipt.error=undefined;
+      if(r.mode==='compress'&&!r.published&&r.tasks.every(t=>t.applied)){publishDirectorScript(proposal);r.published=true;}
       Object.assign(p,proposal);break;
     }
     case 'restoreCreativeVersion':restoreCreativeVersion(p,z.string().uuid().parse(v.versionId));break;

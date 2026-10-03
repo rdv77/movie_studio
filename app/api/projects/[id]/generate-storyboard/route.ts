@@ -10,13 +10,14 @@ import { chosen, stageReady, dependencies, assertBudget, id, now, type Job } fro
 import { model } from '@/lib/models';
 import { planFields, storyboardBatchPlans } from '@/lib/storyboard';
 import { characterImageRefs } from '@/lib/characters';
+import { MEDIA_INPUT_LIMIT } from '@/lib/prompt-limits';
 
 const input = z.object({
   keyframe:z.enum(['start','middle','end']).default('start'),revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
   imageSettings: imageSettingsSchema.optional(),
-  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(20000), instruction:z.string().trim().max(20000).optional(), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
+  plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT), instruction:z.string().trim().max(MEDIA_INPUT_LIMIT).optional(), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);

@@ -24,6 +24,7 @@ import {voiceDeliverySchema} from '@/lib/voice-direction';
 import {queueAdmissionIssue} from '@/lib/queue-policy';
 import {freezeVoiceJob} from '@/lib/voice-tts';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
+import {MEDIA_INPUT_LIMIT} from '@/lib/prompt-limits';
 
 export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
@@ -31,7 +32,7 @@ export const POST = api(async (req, ctx) => {
   const s = z.object({
     revision: z.number().int(), batchId: z.string().uuid(), itemId: z.string().uuid(),
     models: z.array(z.string()).min(1).max(MODELS.length), count: z.number().int().min(1).max(4),
-    prompt: z.string().trim().min(1).max(20000), instruction: z.string().trim().max(20000).optional(),
+    prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT), instruction: z.string().trim().max(MEDIA_INPUT_LIMIT).optional(),
     keyframe:z.enum(['start','middle','end']).optional(), refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
     referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(),
     dialogue: z.string().max(9500), voiceId: z.string().max(150), speechSource: z.string().max(200).optional(),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import {sceneLocationContext,sceneWorldText,actorDirection,assertSceneLocations,actorDraftResultSchema,applyActorDraftResult,type ActorProfile } from './world-assets';
+import {sceneLocationContext,sceneWorldText,assertSceneLocations,actorDraftResultSchema,applyActorDraftResult,type ActorProfile } from './world-assets';
 import {locationStateSchema} from './world-schemas';
 import type {VersionInfo} from './creative-versions';
 import type {CharacterBrief} from './domain';
@@ -17,6 +17,8 @@ import {REVIEW_SECTIONS,prepareDirectorReview,storeSceneReview,storeWholeReview,
 import {resolveDirectingScope,type DirectorScopeRequest} from './directing-workflow';
 import {assertPlanSets,plannerInstruction,planningPolicy,planningInputBasis,savePlanningProposal,type ShotPlanningState,type PlanPolicy} from './shot-planning';
 import {compactSpecialistContext,taskModel,type DirectorExecution} from './director-reliability';
+import {PREPARED_PROMPT_LIMIT,PROMPT_EDITOR_RESPONSE_LIMIT} from './prompt-limits';
+import {compactPromptText,uniquePromptFacts} from './prompt-text';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -170,7 +172,7 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
     art:'Разработай художественное решение каждого плана: свет, цвет, пространство, костюм и реквизит. Обязательно сохраняй одежду/предметы из continuity сцены. Различай неизменное и меняющееся в действии. Не добавляй новых героев. Верни {"shots":[{"id":"существующий ID","productionDesign":"..."}]}.',
     dialogue:'Разработай реплики с подтекстом и индивидуальным словарём. Не добавляй слова, если достаточно действия. Один говорящий на план; не меняй IDs. Длительность должна оставлять время на паузы. Верни {"shots":[{"id":"существующий ID","dialogue":{"speechType":"voiceover|character|none","speaker":"имя или пусто","text":"только произносимые слова","delivery":"эмоция и паузы"}}]}.',
     editor:'Проверь весь фильм: сюжет, стиль, монтаж, длительность действий/речи, ясность. Проверь одежду, предметы, руки, положения и изменения соседних планов. Для КАЖДОГО замечания сразу предложи конкретное решение и готовые патчи всех затронутых разделов/планов. Например, при повторной остановке героя замени story на обнаружение стрелы и опускание на колено, согласуй stateIn/stateOut. Изменения реквизита записывай в continuityChanges. Не меняй утверждённый сюжет. Если решение требует творческого выбора или недостающих данных, объясни это в solution и не выдумывай патч. Каждому issue дай уникальный id, свяжи патчи через issueId. Один окончательный патч на пару shotId+section; объединяй пересекающиеся замечания. Верни {"issues":[{"id":"issue-1","sceneId":"ID","shotId":"ID","severity":"note|conflict","message":"проблема","solution":"как исправить"}],"patches":[{"issueId":"issue-1","shotId":"ID","section":"story|cinematography|productionDesign|dialogue|stateIn|stateOut|continuityChanges","after":"ПОЛНЫЙ новый текст поля; для dialogue строка JSON объекта speechType,speaker,text,delivery","reason":"почему"}]}. Обязательную неисправность отметь conflict. Патчи являются предложениями, применяет их пользователь. Пустые массивы если ошибок нет.',
-    compress:'Подготовь промпты для всех планов текущей сцены по утверждённым четырём разделам. Для картинки — только начальное состояние, для видео — движение и монтажный стык. Учти утверждённые стиль, локацию, внешность героев. Сожми по смыслу, не обрывай предложения. Камера и свет должны остаться точными. Каждый промпт до 3000 символов. Имена, костюм, реквизит и правило закрытого рта будут добавлены программой отдельно. Верни {"shots":[{"id":"существующий ID","imagePrompt":"...","videoPrompt":"..."}]}.',
+    compress:'Подготовь модель-независимые промпты только запрошенных планов по утверждённым четырём разделам. Для картинки — только начальное состояние, для видео — движение и монтажный стык. Учти утверждённые стиль, локацию, внешность героев. Сожми по смыслу, не обрывай предложения. Камера и свет должны остаться точными. Ориентир — 2000–4000 символов на промпт; для сложной постановки допустимо до '+PROMPT_EDITOR_RESPONSE_LIMIT+' символов, но не заполняй бюджет повторениями. Лимит модели изображения/видео будет применён отдельно при создании запроса, не ограничивай этот этап общим лимитом 5000. Не копируй всю историю изменений, общий сценарий и актёрское досье: сохрани актуальное состояние, обязательные постоянные признаки, видимое действие, камеру, свет и стык. Имена, костюм, реквизит и правило закрытого рта добавляются программой отдельно. Верни {"shots":[{"id":"существующий ID","imagePrompt":"...","videoPrompt":"..."}]}.',
   };
   const timing=`Хронометраж: ${runtimeMode(p)==='free'?'СВОБОДНЫЙ. targetSeconds — пожелание, а не предел. Разница с суммой duration — только note, никогда conflict. Не сокращай действия/паузы автоматически ради ориентира.':'СТРОГИЙ. targetSeconds — верхний предел суммы duration всего фильма. Распределяй время между сценами, не выделяй весь бюджет каждой сцене. Превышение — conflict; предложи монтажное сокращение без ускорения/обрезки речи.'} Актуальный ориентир только brief.targetSeconds. Старые числа секунд в стиле, героях и других документах — устаревшие метаданные, только note; они не требуют изменения художественной основы. Нехватка времени для речи внутри конкретного видео — самостоятельный технический конфликт в обоих режимах. Каждому issues добавь category: runtime_target (только общая длина), runtime_metadata (устаревшее число секунд в документах), speech_fit (реплика не помещается), other (остальное). Не смешивай категории в одном замечании.\n`;
   Object.assign(schemas,SCENE_SPECIALIST_INSTRUCTIONS);
@@ -211,18 +213,18 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
   }else{
     const scene=d.scenes.find(s=>s.id===t.sceneId);if(!scene)throw Error('Сцена удалена.');
     if(t.role==='compress'){
-      const data=z.object({shots:z.array(z.object({id:z.string(),imagePrompt:z.string().min(1).max(3500),videoPrompt:z.string().min(1).max(3500)})).min(1).max(40)}).parse(result);
+      const data=z.object({shots:z.array(z.object({id:z.string(),imagePrompt:z.string().trim().min(1).max(PROMPT_EDITOR_RESPONSE_LIMIT),videoPrompt:z.string().trim().min(1).max(PROMPT_EDITOR_RESPONSE_LIMIT)})).min(1).max(40)}).parse(result);
       const expected=t.shotIds??(t.shotId?[t.shotId]:scene.shots.map(s=>s.id));
       if(data.shots.length!==expected.length||new Set(data.shots.map(s=>s.id)).size!==expected.length||expected.some(id=>!data.shots.some(v=>v.id===id)))throw Error('Редактор промптов пропустил или повторил план.');
       const prepared=data.shots.map(value=>{
         const shot=scene.shots.find(s=>s.id===value.id)!;
-        const locks=scene.continuity.filter(c=>shot.cast.includes(c.character)).map(c=>`${c.character}: одежда ${c.outfit}; предметы ${c.props}`).join('; ');
-        const identities=foundation(p).filter(c=>c.stage===1&&shot.cast.includes(c.character?.name??c.title)).map(c=>`${c.character?.name??c.title}: ${c.character?.appearance??c.text}${c.character?.actorProfile?'\n'+actorDirection(c.character.actorProfile):''}`).join('; ');
-        const changes=precedingChanges(scene,shot).map(v=>v.changes).join('; ');
+        const locks=relevantContinuity(scene,shot).map(c=>`${c.character}: одежда ${compactPromptText(c.outfit)}; предметы ${compactPromptText(c.props)}`).join('; ');
+        const identities=relevantHeroItems(p,shot).map(item=>{const v=item.variants.find(v=>v.id===item.approvedId)!,c=v.character;return `${c?.name??item.title}: ${uniquePromptFacts(c?[c.appearance,c.actorProfile?.identity??'',c.locked??'']: [v.text])}`;}).join('; ');
+        const changes=relevantPrecedingChanges(scene,shot).map(v=>v.changes.trim()).join('; ');
         const fixed=`\nАнимация ${p.format}. Только эти герои: ${shot.cast.join(', ')}. Постоянная внешность: ${identities}. Исходная одежда и реквизит в начале сцены: ${locks}. Уже произошедшие изменения (сохраняются в этом плане): ${changes||'нет'}. Начальное состояние этого плана: ${shot.stateIn}. Новые изменения в этом плане: ${shot.continuityChanges||'нет'}. Не возвращай изменённые одежду и предметы к исходному состоянию без действия.\n\nПравило речи для этого плана: ${speechDirection({speechType:shot.dialogue.speechType,speaker:shot.dialogue.speaker})}`;
-        const world=sceneWorldText(p,scene),worldFixed=world?'\n\nПостоянная локация и состояние сцены:\n'+world:'';
+        const world=compactPromptText(sceneWorldText(p,scene)),worldFixed=world?'\n\nПостоянная локация и состояние сцены:\n'+world:'';
         const imagePrompt=value.imagePrompt+'\nОдин цельный первый кадр, без надписей и коллажа.'+fixed+worldFixed,videoPrompt=value.videoPrompt+fixed+worldFixed;
-        if(imagePrompt.length>5000||videoPrompt.length>5000)throw Error(`«${shot.title}»: обязательные признаки и промпт не помещаются в 5000 символов. Сократите описание одежды/реквизита и повторите подготовку.`);
+        if(imagePrompt.length>PREPARED_PROMPT_LIMIT||videoPrompt.length>PREPARED_PROMPT_LIMIT)throw Error(`«${shot.title}»: подготовленные описания занимают ${imagePrompt.length} / ${videoPrompt.length} символов при внутреннем бюджете ${PREPARED_PROMPT_LIMIT}. Редактору нужно компактнее изложить состояние и обязательные признаки; лимит конкретной модели здесь не применяется.`);
         return {shot,imagePrompt,videoPrompt,promptBasis:shotPromptBasis(p,scene,shot)};
       });
       for(const {shot,...fields} of prepared)Object.assign(shot,fields);

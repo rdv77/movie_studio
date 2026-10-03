@@ -12,6 +12,7 @@ import { videoPrompt } from './video';
 import { planFields, storyboardPrompt } from './storyboard';
 import { supportsEndFrame } from './video-end-frame';
 import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
+import {compactPromptText,preparedPromptBody} from './prompt-text';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -158,7 +159,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
 
   const warnings: string[] = [], omitted: PromptExclusion[] = [], sections: Section[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
-    if (text?.trim()) sections.push({ key, label, text: text.trim(), required, priority });
+    if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority });
   };
   const optional = (key: string, label: string, text: string | undefined, priority: number) =>
     paragraphs(text ?? '').forEach((text, n) => add(`${key}.${n}`, label, text, false, priority));
@@ -241,6 +242,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   for (const c of continuity.filter(c => heroes.some(h => c.characterId ? c.characterId === h.item.id : normalized(c.character) === normalized(h.profile.name)) ||
     (plan?.cast ?? []).some(name => name === c.characterId || normalized(name) === normalized(c.character))))
     add(`continuity.${c.characterId ?? c.character}`, `Одежда и предметы ${c.character}`, `Одежда: ${c.outfit}. Предметы, состояние и владелец: ${c.props}. Не меняй их без описанного действия.`, true);
+  // History is ordered: take / hand over / take again are distinct transitions,
+  // even when two rows have identical text. Never deduplicate these changes.
   for (const change of plan?.previousChanges ?? []) add(`prior.${change.id}`, 'Уже произошедшее изменение — сохранять', change.changes, true);
   if (!continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
   for (const card of locations) {
@@ -307,7 +310,16 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   // are critical unless the caller supplies a separate, explicit director delta.
   const taskWithoutSeries = input.prompt.replace(/\n\nСоздай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/, '').trim();
   const generatedTask = input.kind === 'video' ? videoPrompt(p, item) : item.stage === 5 ? storyboardPrompt(p, item) : '';
-  if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) optional('task', 'Автоматическая задача текущего плана', input.prompt, 100);
+  if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) {
+    const saved=input.kind==='image'?(sourcePlan as PromptPlan&{imagePrompt?:string})?.imagePrompt:(sourcePlan as PromptPlan&{videoPrompt?:string})?.videoPrompt;
+    const preparedShot=p.directing?.scenes.flatMap(scene=>scene.shots).find(shot=>shot.id===sourcePlan?.id);
+    const prepared=!!preparedShot?.promptBasis&&saved?.trim()===taskWithoutSeries&&(input.kind==='image'?preparedShot.imagePrompt:preparedShot.videoPrompt)?.trim()===taskWithoutSeries;
+    const core=prepared?preparedPromptBody(taskWithoutSeries,p.format):taskWithoutSeries;
+    const series=input.prompt.match(/\n\nСоздай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/)?.[0]??'';
+    const body=prepared?core+series:input.prompt;
+    optional('task', 'Автоматическая задача текущего плана', body, 100);
+    if(core!==taskWithoutSeries&&prepared)omitted.push({key:'prepared-context',label:'Повтор утверждённых героев, состояния и локации из подготовленного промпта',reason:'duplicate',characters:taskWithoutSeries.length-core.length});
+  }
   else if (plan) add('task', 'Задача и правки режиссёра', input.prompt, true);
   else add('task', 'Задача', input.prompt, true);
 

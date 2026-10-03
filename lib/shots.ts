@@ -2,12 +2,13 @@ import {locationStateSchema} from './world-schemas';
 import {shotDirectionSchema,validateShotDirection,readableShotDirection} from './shot-direction';
 import { z } from 'zod';
 import { speechInfo, speechNames, assertSpeech } from './speech-mode';
+import {PREPARED_PROMPT_LIMIT} from './prompt-limits';
 export const shotSchema = z.object({
   schemaVersion:z.number().optional(),timingMode:z.enum(['actual']).optional(),
   shots: z
     .array(
       z.object({
-        id:z.string().optional(),sceneId:z.string().optional(),cast:z.array(z.string()).optional(),productionDesign:z.string().max(6000).optional(),imagePrompt:z.string().max(32000).optional(),videoPrompt:z.string().max(32000).optional(),
+        id:z.string().optional(),sceneId:z.string().optional(),cast:z.array(z.string()).optional(),productionDesign:z.string().max(6000).optional(),imagePrompt:z.string().max(PREPARED_PROMPT_LIMIT).optional(),videoPrompt:z.string().max(PREPARED_PROMPT_LIMIT).optional(),
         direction:shotDirectionSchema.optional(),
         characterIds:z.array(z.string().max(100)).max(20).optional(),locationIds:z.array(z.string().max(100)).max(20).optional(),speakerId:z.string().max(100).optional(),
         locationState:locationStateSchema.optional(),stateIn:z.string().max(6000).optional(),stateOut:z.string().max(6000).optional(),continuityChanges:z.string().max(2000).optional(),dialogueDelivery:z.string().max(1500).optional(),

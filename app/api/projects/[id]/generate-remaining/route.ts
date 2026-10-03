@@ -6,6 +6,7 @@ import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-asse
 import { enqueuePlanJobs, videoAdmissionIssue } from '@/lib/generation-queue';
 import { videoDurationIssue } from '@/lib/video-readiness';
 import { z } from 'zod';
+import {MEDIA_INPUT_LIMIT} from '@/lib/prompt-limits';
 import { api, owner, loadProject, saveProject, asset, getKey } from '@/lib/server';
 import { getItem, chosen, stageReady, dependencies, id, now, type Job } from '@/lib/domain';
 import { selectedVideoModel, remainingVideoPlans, videoShot, scriptVideo } from '@/lib/video';
@@ -21,8 +22,8 @@ const input = z.object({
   estimate: z.string().regex(/^\d+$/).nullable(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), ref: z.string().uuid(),
-    prompt: z.string().trim().min(1).max(32000),
-    instruction:z.string().trim().max(20000).optional(),
+    prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT),
+    instruction:z.string().trim().max(MEDIA_INPUT_LIMIT).optional(),
   })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
