@@ -17,7 +17,7 @@ import {prepareSceneLocations} from '@/lib/scene-locations';
 import {directorScopeSchema,assertDirectingShotReady} from '@/lib/directing-workflow';
 import {allowNewSeries} from '@/lib/job-wait';
 import {planPolicySchema,planSketchSchema,setPlanPolicy,choosePlanningProposal,approvePlanSets,replacePlanCards,planningScene,restorePlanningCard} from '@/lib/shot-planning';
-import {directorExecutionSchema,validateDirectorExecution,normalizeDirectorAnswer} from '@/lib/director-reliability';
+import {directorExecutionSchema,validateDirectorExecution,normalizeDirectorAnswer,prepareDirectorRetry} from '@/lib/director-reliability';
 import {parseDirectorJSON,applyDirectorResult,directorRunBasis} from '@/lib/directing';
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),projectId=(await ctx.params).id;
@@ -95,7 +95,7 @@ export const POST=api(async(req,ctx)=>{
       const r=d.runs.find(r=>r.id===v.runId),t=r?.tasks.find(t=>t.id===v.taskId);if(!r||!t?.error)throw Error('Выберите неудавшееся задание.');
       const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='unknown'&&!v.acknowledgeCost)throw Error('Исход неизвестен: подтвердите возможность повторного списания.');
       if(j?.status==='unknown')allowNewSeries(j);
-      t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;r.stopped=false;break;
+      prepareDirectorRetry(p,r,t);break;
     }
     case 'saveScene':{
       const scene=sceneSchema.parse(v.scene);assertSceneLocations(p,scene);const old=d.scenes.find(s=>s.id===scene.id);

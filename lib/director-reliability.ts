@@ -2,6 +2,7 @@ import {z} from 'zod';
 import type {Project,Job} from './domain';
 import type {DirectorRole,DirectorRun,DirectorTask} from './directing';
 import {model} from './models';
+import {id} from './domain';
 export const directorExecutionSchema=z.object({parallelModels:z.array(z.string()).max(3).optional(),fallbackModel:z.string().optional()});
 export type DirectorExecution=z.infer<typeof directorExecutionSchema>;
 export function validateDirectorExecution(input:unknown):DirectorExecution{const value=directorExecutionSchema.parse(input);for(const key of [...(value.parallelModels??[]),...(value.fallbackModel?[value.fallbackModel]:[])]){const m=model(key);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Для команды и резерва выберите текстовую модель GPT, Grok или MiniMax.');}return value;}
@@ -9,6 +10,15 @@ export function taskModel(run:DirectorRun,t:DirectorTask){if(t.fallbackFromJobId
 export function fallbackEligible(job:Job,validation=false){if(job.status!=='failed')return false;const error=job.error??'';if(/safety|public figure|sexual|content.?policy|moderation|запрещ|политик|баланс|HTTP (?:400|401|402|403|404|422)/i.test(error))return false;return validation||/HTTP 429/.test(error);}
 /** One reserve attempt, separate receipt/cost. Unknown paid outcomes never qualify. */
 export function scheduleDirectorFallback(p:Project,run:DirectorRun,t:DirectorTask,job:Job,validation=false){if(!run.execution?.fallbackModel||run.stopped||t.fallbackFromJobId||!fallbackEligible(job,validation))return false;t.previousJobIds=[...(t.previousJobIds??[]),job.id];t.fallbackFromJobId=job.id;t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;return true;}
+/** Repeating a legacy whole-scene task also uses the new small groups. The old
+ * paid receipt stays in jobs; downstream checks wait for every replacement. */
+export function prepareDirectorRetry(p:Project,run:DirectorRun,t:DirectorTask){const scene=p.directing?.scenes.find(s=>s.id===t.sceneId),ids=scene?.shots.filter(s=>t.shotIds?t.shotIds.includes(s.id):t.shotId?s.id===t.shotId:true).map(s=>s.id)??[];const prior=t.jobId;
+  if(ids.length>3&&['story','camera','art','dialogue','performance','compress'].includes(t.role)){
+    const replacements=Array.from({length:Math.ceil(ids.length/3)},(_,n)=>{const group=ids.slice(n*3,n*3+3);return {id:id(),role:t.role,sceneId:t.sceneId,requires:[...t.requires],...(group.length===1?{shotId:group[0]}:{shotIds:group}),...(n===0&&prior?{previousJobIds:[...(t.previousJobIds??[]),prior]}:{})} as DirectorTask;});
+    run.tasks.splice(run.tasks.indexOf(t),1,...replacements);for(const target of run.tasks)target.requires=target.requires.flatMap(key=>key===t.id?replacements.map(v=>v.id):[key]);
+  }else{t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;}
+  run.stopped=false;
+}
 const optionalDirectionKeys=new Set(['framingStart','framingEnd','angle','description','composition','attention','cameraMovement','from','to','actionBeats','timing','openingHold','endingHold','revealAt','positions','screenDirection','subjectId','performance','characterId','transition','toShotId','sound','ambience','effects','music','silence','startFrame','endFrame','id','emotionalChange']);
 function cleanDirection(value:any):any{if(Array.isArray(value))return value.map(cleanDirection);if(!value||typeof value!=='object')return value;const copy:any={};for(const [key,v] of Object.entries(value))if(v!==null||!optionalDirectionKeys.has(key))copy[key]=cleanDirection(v);if(typeof copy.screenDirection==='string'&&!['left-to-right','right-to-left','toward-camera','away-from-camera','static','custom'].includes(copy.screenDirection)){const raw=copy.screenDirection,normal=raw.toLowerCase().replace(/[.]/g,'').trim();const aliases:Record<string,string>={'слева направо':'left-to-right','справа налево':'right-to-left','к камере':'toward-camera','от камеры':'away-from-camera','неподвижно':'static','статично':'static'};copy.screenDirection=aliases[normal]??'custom';copy.end=(copy.end??'')+'; направление: '+raw;}return copy;}
 /** Only unambiguous syntax cleanup. Unknown IDs, duplicates, missing rows and timing conflicts stay errors. */
