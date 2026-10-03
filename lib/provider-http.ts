@@ -77,7 +77,15 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
   return r;
 }
 export async function json(r: Response) {
-  const d: any = await r.json();
+  let d: any;
+  try { d = await r.json(); }
+  catch {
+    // An accepted HTTP response without a usable receipt is ambiguous. Never
+    // classify it as a rejected/not-sent request or repeat a paid generation.
+    throw new ProviderError(`Провайдер вернул ответ в неверном формате (HTTP ${r.status}), возможно HTML-страницу вместо JSON. Исход запроса неизвестен; автоматического повтора не будет. Проверьте результат и расход в кабинете провайдера.`);
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d))
+    throw new ProviderError(`Провайдер вернул некорректные данные (HTTP ${r.status}). Исход запроса неизвестен; автоматического повтора не будет.`);
   if (d.base_resp?.status_code)
     throw new ProviderError(
       `MiniMax: ${d.base_resp.status_msg || d.base_resp.status_code}`,

@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { ProviderHarness } from './provider-harness.mjs';
+import { Miniflare } from 'miniflare';
 import { strict as assert } from 'node:assert';
 
 const bundled = await build({
@@ -18,7 +18,8 @@ const bundled = await build({
           const file = await retrieve(input.retrieve);
           return Response.json({ size: file.bytes.length, mime: file.mime });
         }
-        const result = await generate(input.job, input.key ?? 'test-key', ['data:image/png;base64,AA=='], '16:9');
+        const refs = input.job.model === 'MiniMax-M2.7' ? [] : ['data:image/png;base64,AA=='];
+        const result = await generate(input.job, input.key ?? 'test-key', refs, '16:9');
         return Response.json(result);
       } catch(e) { return Response.json({ error: e.message, definite: e.definite, notSent: e.notSent }); }
     }};
@@ -28,7 +29,7 @@ const bundled = await build({
 let mode = 'success';
 let calls = [];
 let destination = '', redirectStatus = 302;
-const mf = new ProviderHarness({
+const mf = new Miniflare({
   modules: true, compatibilityDate: '2026-05-15', script: bundled.outputFiles[0].text,
   outboundService: async req => {
     const u = new URL(req.url);

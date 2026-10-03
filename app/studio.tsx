@@ -1,4 +1,5 @@
 'use client';
+import {request} from '@/lib/client-request';
 import {StoryboardCharacterBindings} from './storyboard-character-bindings';
 import {AudioQcEditor} from './audio-qc-editor';
 import {BatchScopeSelector} from './batch-scope-selector';
@@ -180,26 +181,6 @@ import {MUSIC_MODELS,musicSettings} from '@/lib/music';
 import {waitLimitMs,unresolvedJobBlocks} from '@/lib/job-wait';
 type Asset = { id: string; name: string; mime: string; size: number };
 type Summary = { id: string; title: string; updated: string };
-async function request(
-  url: string,
-  method = 'GET',
-  body?: unknown,
-): Promise<any> {
-  const r = await fetch(url, {
-    method,
-    headers:
-      body instanceof FormData
-        ? undefined
-        : body
-          ? { 'content-type': 'application/json' }
-          : undefined,
-    body:
-      body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-  });
-  const d: any = await r.json();
-  if (!r.ok) throw new Error(d.error || 'Не удалось выполнить действие.');
-  return d;
-}
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -467,7 +448,7 @@ function Workspace() {
     const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
       if(!current)return;
-      if(directorFlights<2&&current.directing?.runs.some(directorRunActive)){directorFlights++;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);}).finally(()=>{directorFlights--;});}
+      if(directorFlights<2&&current.directing?.runs.some(directorRunActive)){directorFlights++;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);void qc.invalidateQueries({queryKey:['project',projectId]},{cancelRefetch:false});}).finally(()=>{directorFlights--;});}
       for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
         checkingWait.add(job.id);
         void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait'})
@@ -483,6 +464,10 @@ function Workspace() {
             qc.invalidateQueries({queryKey:['assets',projectId]});
           } catch(e) {
             if(activeProject.current===projectId)setError(e instanceof Error?e.message:'Не удалось проверить задачу.');
+            // A gateway may lose the HTTP response while the claimed job still
+            // completes. Read saved state; never create a replacement attempt.
+            void qc.invalidateQueries({queryKey:['project',projectId]},{cancelRefetch:false});
+            void qc.invalidateQueries({queryKey:['assets',projectId]},{cancelRefetch:false});
           } finally {flights.delete(job.id);}
         })();
       }

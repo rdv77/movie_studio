@@ -1,4 +1,5 @@
 // Large files cross the Worker boundary in bounded parts, without re-encoding.
+import { apiResponse } from './client-request';
 export const ASSET_PART_BYTES = 8 * 1024 * 1024;
 export const MAX_ASSET_BYTES = 1024 * 1024 * 1024;
 export const ASSET_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'audio/mpeg',
@@ -6,9 +7,7 @@ export const ASSET_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'audio/mpeg
 export type UploadedAsset = { id: string; name: string; mime: string; size: number };
 
 async function response<T>(r: Response): Promise<T> {
-  const data: any = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'Не удалось сохранить файл.');
-  return data;
+  return apiResponse<T>(r, '/api/assets', 'POST');
 }
 export async function uploadAsset(file: File, projectId: string, progress?: (text: string) => void, signal?: AbortSignal): Promise<UploadedAsset> {
   if (file.size > MAX_ASSET_BYTES) throw new Error('Загрузка в студию поддерживает файлы до 1 ГБ.');
