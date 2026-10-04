@@ -3179,6 +3179,7 @@ function Budget({ p, action, perform, replace }: any) {
                   )}
                   {['dispatching','pending','saving'].includes(j.status)&&<Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(()=>action('stopJobWait',{jobId:j.id}))}>Остановить ожидание</Button>}
                   {j.status==='unknown'&&j.waitStoppedAt&&j.resumeStatus&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'resume-wait'}));}finally{setRecovering('');}})}>Проверить готовый результат</Button><small>Без повторной генерации: загрузка сохранённой ссылки или проверка прежнего запроса.</small></>}
+                  {j.kind==='image'&&!j.purpose&&['unknown','dispatching','saving'].includes(j.status)&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'recover-image-file'}));}finally{setRecovering('');}})}>Восстановить сохранённую картинку</Button><small>Проверяет файл на сервере и возвращает его в карточку. Модель повторно не вызывается.</small></>}
                 </TableCell>
               </TableRow>
             ))}

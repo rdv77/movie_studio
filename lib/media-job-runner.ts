@@ -9,7 +9,7 @@ import {generateMediaReview} from '@/lib/media-review-provider';
 import { retrieveGoogle } from '@/lib/google-provider';
 import {waitExpired,stopJobWait,resumeJobWait} from '@/lib/job-wait';
 import {isMusicJob,musicBasis,parseMusicIdeas,DEFAULT_MUSIC} from '@/lib/music';
-import type {PromptCompilationSnapshot} from '@/lib/prompt-jobs';
+import {finishItemMediaJob} from '@/lib/item-media-result';
 import {
   loadProject,
   mutate,
@@ -23,7 +23,6 @@ import {queueSlotIssue} from '@/lib/queue-policy';
 import {
   dependencies,
   jobCurrent,
-  isStoryboardDraft,
   stageReady,
   getItem,
   makeVariant,
@@ -48,6 +47,19 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   let p = await loadProject(user, id);
   let j = p.jobs.find((j) => j.id === jobId);
   if (!j) throw new Error('Попытка не найдена.');
+  if(recoveryAction==='recover-image-file'){
+    if(j.kind!=='image'||j.purpose)throw new Error('Восстановление доступно для сохранённого изображения. Новая генерация не запускалась.');
+    if(j.status==='done')return p;
+    if(!['unknown','dispatching','saving'].includes(j.status))throw new Error('Эта попытка не ожидает восстановления файла.');
+    const saved=await asset(user,jobId,p).catch(()=>null),stored=saved?await runtime.FILES.head(jobId):null;
+    if(!saved||saved.project_id!==id||!['image/png','image/jpeg','image/webp'].includes(saved.mime)||!stored||stored.size!==saved.size)
+      throw new Error('Сохранённое изображение не найдено. Новая генерация не запускалась. Проверьте исход и списание в кабинете провайдера.');
+    return mutate(user,id,p=>{
+      const job=p.jobs.find(j=>j.id===jobId);
+      if(!job||job.kind!=='image'||job.purpose||!['unknown','dispatching','saving','done'].includes(job.status))throw new Error('Статус попытки изменился. Обновите данные.');
+      finishItemMediaJob(p,job,jobId);
+    });
+  }
   if(j.purpose==='directing')return p;
   if(j.waitStoppedAt&&j.status==='unknown'&&recoveryAction==='resume-wait'){
     p=await mutate(user,id,p=>resumeJobWait(p.jobs.find(x=>x.id===jobId)!));
@@ -145,7 +157,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         ? []
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
-    const endFrame=polling||saving||j.lipsync||!j.endFrameAssetId?undefined:await imageData(user,j.endFrameAssetId,p);
+    let endFrame=polling||saving||j.lipsync||!j.endFrameAssetId?undefined:await imageData(user,j.endFrameAssetId,p);
     const directed=polling||saving||j.kind!=='audio'?undefined:await generateDirectedSpeech(j,key,model(j.model).provider as 'minimax'|'elevenlabs');
     const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await poll(j, key) : saving
       ? j.output!
@@ -162,6 +174,8 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
           } catch { throw new ProviderError('Не удалось загрузить файлы синхронизации. Запрос не отправлен.', true, true); }
           return generateSync(j, key, video, audio);
         })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs,endFrame)));
+    // Do not keep large reference strings across project snapshot writes.
+    refs.length=0;characterRefs.length=0;endFrame=undefined;
     await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (result.actual != null) {
@@ -210,6 +224,8 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         bytes,
         id,
       );
+      // The private file is durable now. Final CAS writes need only metadata.
+      result.bytes=undefined;bytes=undefined;
     }
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
@@ -232,52 +248,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         if(!sample||!assetId)throw new Error('Не найдена проба голоса для сохранения результата.');
         sample.assetId=assetId;job.status='done';job.error=undefined;return;
       }
-      const item = getItem(p, job.itemId);
-      if (!item.variants.some((v) => v.jobId === jobId)) {
-        const compilation=(job as typeof job&{compilation?:PromptCompilationSnapshot}).compilation;
-        const v = makeVariant(p, item, {
-          ...(compilation?{compilation}:{}),keyframe:job.keyframe,pairId:job.pairId,sourceFrameVariantId:job.sourceFrameVariantId,keyframeSourceBasis:job.keyframeSourceBasis,keyframeReviewBasis:job.keyframeReviewBasis,endFrameAssetId:job.endFrameAssetId,
-          id: jobId,
-          reviewBasis:job.reviewBasis,
-          basisVersion:job.basisVersion,
-          versionInfo:job.versionInfo,
-          title: model(job.model).name + (job.lipsync?.inputType === 'image' ? ' · из кадра' : '') + ' · ' + (item.variants.length + 1),
-          text: result.text ?? job.brief,
-          kind: job.kind,
-          shotSource: job.shotSource,
-          assetId,
-          model: job.model,
-          imageSettings: job.imageSettings,
-          refs: job.refs,
-          character:job.character,
-          location:job.location,
-          characterRefs:job.characterRefs,
-          characterIds:job.characterIds,
-          dialogue: job.dialogue,
-          speechType:job.speechType,
-          speaker:job.speaker,
-          voiceId: job.voiceId,
-          voiceDelivery:job.voiceDelivery,voiceProfileId:job.voiceProfileId,ttsRequestText:job.ttsRequestText,
-          videoPreparationBasis:job.videoPreparationBasis,
-          duration: job.duration,
-          providerDuration:job.providerDuration,
-          camera: job.camera,
-          continuity: job.continuity,
-          offset: job.offset,
-          volume: job.volume,
-          deps: job.deps,
-          jobId,
-          lipsync: job.lipsync ? (job.lipsync.inputType === 'image'
-            ? {inputType:'image',imageVariantId:job.lipsync.imageVariantId,imageItemId:job.lipsync.imageItemId,speaker:job.lipsync.speaker,prompt:job.lipsync.prompt,audioVariantId:job.lipsync.audioVariantId,audioItemId:job.lipsync.audioItemId}
-            : { videoVariantId: job.lipsync.videoVariantId, audioVariantId: job.lipsync.audioVariantId, audioItemId: job.lipsync.audioItemId }) : undefined,
-        });
-        item.variants.push(v);
-        const previousSelection=item.variants.find(value=>value.id===item.selectedId);
-        if(item.stage===5&&job.keyframe){const field=job.keyframe==='start'?'startId':job.keyframe==='middle'?'middleId':'endId';if(!item.keyframeSelection?.[field])item.keyframeSelection={...item.keyframeSelection,[field]:v.id};}
-        if ((!job.keyframe||job.keyframe==='start')&&(!item.selectedId || (item.stage===5&&v.kind==='image'&&v.assetId&&previousSelection&&isStoryboardDraft(previousSelection)))) item.selectedId = v.id;
-      }
-      job.status = 'done';
-      job.error = undefined;
+      finishItemMediaJob(p,job,assetId,result.text);
     });
   } catch (e) {
     p = await mutate(user, id, (p) => {

@@ -1,0 +1,21 @@
+import {build} from 'esbuild';
+import {strict as assert} from 'node:assert';
+const server=`export class HttpError extends Error{};export const saveProject=async()=>{throw Error('Unexpected direct save')};export const api=f=>f;export const owner=async()=>{if(globalThis.denied)throw Error('Unauthorized');return 'owner'};
+export const loadProject=async()=>structuredClone(state);export const mutate=async(_,id,fn)=>{const p=structuredClone(state);fn(p);p.revision++;globalThis.state=p;return p};
+export const getKey=async()=>{throw Error('Must not load a provider key')};export const imageData=async()=>{throw Error('Must not load references')};export const storeAsset=async()=>{throw Error('Must not store new bytes')};
+export const asset=async(user,id,p)=>{if(!globalThis.saved)throw Error('Missing');assertOwner(user);return {id,mime:globalThis.mime??'image/png',size:100,project_id:globalThis.assetProject??p.id}};
+function assertOwner(user){if(user!=='owner')throw Error('Wrong owner')};export const runtime={FILES:{head:async()=>globalThis.saved?{size:globalThis.objectSize??100}:null}};`;
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export {POST} from './app/api/projects/[id]/jobs/[jobId]/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/image-file-recovery.mjs',plugins:[{name:'server',setup(b){b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
+const {D,POST}=await import('../work/tests/image-file-recovery.mjs');
+globalThis.fetch=async()=>{throw Error('Recovery must never contact a provider')};
+function fixture(){const p=D.newProject('Recovery'),item=p.items.find(i=>i.stage===1);p.jobs=[{id:D.id(),batchId:D.id(),itemId:item.id,kind:'image',model:'gpt-image-2.5-flare',status:'unknown',created:D.now(),started:new Date(Date.now()-30*60000).toISOString(),waitStoppedAt:D.now(),waitStopReason:'timeout',error:'Timeout',requestId:'paid-receipt',actual:'123',usage:{output_tokens:10},refs:[],brief:'Original image prompt',deps:'original basis',duration:5,keyframe:'end',pairId:'pair',sourceFrameVariantId:'original-start'}];return p;}
+const run=()=>POST(new Request('http://test',{method:'POST',body:JSON.stringify({action:'recover-image-file'})}),{params:Promise.resolve({id:state.id,jobId:state.jobs[0].id})});
+globalThis.state=fixture();globalThis.saved=true;const receipt=structuredClone(state.jobs[0]);await run();assert.equal(state.jobs[0].status,'done');assert(!state.jobs[0].waitStoppedAt);assert.equal(state.jobs[0].requestId,receipt.requestId);assert.equal(state.jobs[0].actual,receipt.actual);assert.deepEqual(state.jobs[0].usage,receipt.usage);
+const item=state.items.find(i=>i.id===receipt.itemId),v=item.variants.find(v=>v.jobId===receipt.id);assert.equal(v.assetId,receipt.id);assert.equal(v.model,receipt.model);assert.equal(v.deps,receipt.deps);assert.equal(v.keyframe,'end');assert.equal(v.sourceFrameVariantId,receipt.sourceFrameVariantId);assert.equal(v.text,receipt.brief);assert.notEqual(item.approvedId,v.id);const count=item.variants.length;await run();assert.equal(state.items.find(i=>i.id===item.id).variants.length,count);
+for(const options of [{saved:false},{saved:true,mime:'audio/mpeg'},{saved:true,assetProject:'another-project'},{saved:true,objectSize:99},{saved:true,denied:true}]){
+ state=fixture();Object.assign(globalThis,{saved:true,mime:undefined,assetProject:undefined,objectSize:undefined,denied:false},options);const before=structuredClone(state);await assert.rejects(run);assert.deepEqual(state,before);
+}
+Object.assign(globalThis,{saved:true,mime:undefined,assetProject:undefined,objectSize:undefined,denied:false});
+for(const status of ['failed','cancelled','queued']){state=fixture();state.jobs[0].status=status;await assert.rejects(run);assert.equal(state.jobs[0].status,status);}
+state=fixture();state.jobs[0].kind='audio';await assert.rejects(run);state=fixture();state.jobs[0].purpose='directing';await assert.rejects(run);
+console.log('PASS: authenticated stored-image recovery, exact project/file identity, size/type checks, immutable source/receipt/billing, idempotence, no automatic approval, no new binary upload, zero credentials/provider calls.');
