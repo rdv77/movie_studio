@@ -1,4 +1,5 @@
 import type { Job } from './domain';
+import {decodeMediaBase64} from './media-base64';
 import type { Result } from './providers';
 import { call, json, ProviderError } from './provider-http';
 import { GOOGLE_OMNI, isGoogleVideo, prepareGoogleJobs } from './google-models';
@@ -62,7 +63,7 @@ export async function pollGoogle(j:Job,key:string):Promise<Result> {
   if(!video)return {...receipt,error:'Google не вернул видео. Возможно, результат отклонён фильтром содержимого. Новая генерация не запускается.'};
   if(omni&&typeof video.data==='string') {
     if(video.data.length>Math.ceil(50*1024*1024/3)*4)throw new ProviderError('Google: видео больше лимита загрузки 50 МБ; задача сохранена.');
-    try{return {...receipt,bytes:Uint8Array.from(atob(video.data),c=>c.charCodeAt(0)),mime:'video/mp4'};}
+    try{return {...receipt,bytes:decodeMediaBase64(video.data),mime:'video/mp4'};}
     catch{throw new ProviderError('Google: не удалось прочитать видео; повторяется только получение результата.');}
   }
   const file=fileUrl(video.uri);

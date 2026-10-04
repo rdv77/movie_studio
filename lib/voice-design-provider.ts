@@ -1,4 +1,5 @@
 import {call,ProviderError} from './provider-http';
+import {decodeMediaBase64} from './media-base64';
 import {generate} from './providers';
 import type {Job} from './domain';
 import {voiceDesignPayload,voiceSavePayload,voiceDirectionResultSchema,type VoiceWorkflowJob} from './voice-design';
@@ -27,7 +28,7 @@ function decoded(value:unknown,encoding:'base64'|'hex'){
     return Uint8Array.from(value.match(/.{2}/g)!,v=>parseInt(v,16));
   }
   if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))throw new ProviderError('ElevenLabs вернул некорректный audio_base_64.',true);
-  try{return Uint8Array.from(atob(value),v=>v.charCodeAt(0));}catch{throw new ProviderError('Не удалось прочитать пробу ElevenLabs.',true);}
+  try{return decodeMediaBase64(value);}catch{throw new ProviderError('Не удалось прочитать пробу ElevenLabs.',true);}
 }
 function voiceId(value:unknown){if(typeof value!=='string'||!value.trim()||value.length>150)throw new ProviderError('Провайдер не вернул идентификатор голоса.',true);return value;}
 /** Exactly one remote operation. Caller must persist a claimed job before invoking. */

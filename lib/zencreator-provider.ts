@@ -1,4 +1,5 @@
 import type { Job } from './domain';
+import {decodeMediaBase64} from './media-base64';
 import type { Result } from './providers';
 import { call, json, ProviderError } from './provider-http';
 import { ZEN_MODELS, zenProfile, zenTool, prepareZenJobs, generationSeconds } from './zencreator-models';
@@ -69,7 +70,7 @@ export async function generateZen(j:Job,key:string,refs:string[],format:string):
   try {
     for(const file of files) {
       const form=new FormData();
-      form.append('file',new Blob([Uint8Array.from(atob(file.data),c=>c.charCodeAt(0))],{type:file.mime}),`reference.${file.mime.split('/')[1]}`);
+      form.append('file',new Blob([decodeMediaBase64(file.data)],{type:file.mime}),`reference.${file.mime.split('/')[1]}`);
       form.append('media_type',file.mime);
       const out=await json(await call(`${BASE}/assets`,auth(key),form));
       if(!UUID.test(out.asset_id??''))throw new Error('ZenCreator: не получен идентификатор загруженного референса.');

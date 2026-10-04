@@ -1,4 +1,5 @@
 import {videoPromptLimit} from './model-capabilities';
+import {decodeMediaBase64} from './media-base64';
 import { imageSettingsSchema, LEGACY_IMAGE_SETTINGS } from './image-quality';
 import { generateFal, pollFal } from './fal-provider';
 import { generateGoogle, pollGoogle } from './google-provider';
@@ -107,7 +108,7 @@ export async function generate(
         total+=size;
         if(total>OPENAI_IMAGE_REFS_BYTES)throw new ProviderError('GPT Image: суммарный размер референсов в студии — до 20 МБ.',true,true);
         let bytes:Uint8Array<ArrayBuffer>;
-        try {bytes=Uint8Array.from(atob(match[2]),c=>c.charCodeAt(0));}
+        try {bytes=decodeMediaBase64(match[2]);}
         catch {throw new ProviderError('Не удалось прочитать референс GPT Image. Запрос не отправлен.',true,true);}
         form.append('image[]',new Blob([bytes],{type:match[1]}),`reference-${index+1}.${match[1].split('/')[1]}`);
       }
@@ -118,7 +119,7 @@ export async function generate(
     const usage=d.usage,requestId=response.headers.get('x-request-id')??undefined;
     const encoded=d.data?.[0]?.b64_json;
     if(typeof encoded!=='string'||!encoded)return {requestId,usage,actual:null,error:'OpenAI не вернул изображение. Проверьте расход; повтор запускается вручную.'};
-    try {return {bytes:Uint8Array.from(atob(encoded),c=>c.charCodeAt(0)),mime:'image/png',requestId,usage,actual:null};}
+    try {return {bytes:decodeMediaBase64(encoded),mime:'image/png',requestId,usage,actual:null};}
     catch {return {requestId,usage,actual:null,error:'Не удалось прочитать изображение OpenAI. Проверьте расход; повтор не отправлен.'};}
   }
   if (j.kind === 'text' && m.provider === 'openai') {

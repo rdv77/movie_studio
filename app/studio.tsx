@@ -3127,7 +3127,7 @@ function Budget({ p, action, perform, replace }: any) {
           </TableHeader>
           <TableBody>
             {visible.map((j: any) => (
-              <TableRow key={j.id}>
+              <TableRow key={j.id} data-job-id={j.id}>
                 <TableCell>
                   <strong>
                     {[...MODELS, ...SYNC_MODELS,...MUSIC_MODELS].find((m) => m.id === j.model)?.name ?? j.model}
