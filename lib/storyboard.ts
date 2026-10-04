@@ -4,6 +4,7 @@ import { planSpeech } from './plan-speech';
 import { speechInfo, speechDirection } from './speech-mode';
 import { reconcilePlanStage, planKey } from './plan-sync';
 import { parseShots } from './shots';
+import {queueAdmissionIssue} from './queue-policy';
 
 export function preparePlanCards(p: Project) {
   const script = scriptVideo(p,true);
@@ -87,8 +88,6 @@ export function storyboardPrompt(p: Project, item: Item) {
 export function storyboardBatchPlans(p: Project) {
   return p.items.filter(i => i.stage === 5 && videoShot(p, i)).map(item => ({
     item, hasImage: item.variants.some(v => v.kind === 'image' && v.assetId && (v.keyframe??'start')==='start'),
-    blocked: p.jobs.some(j => j.itemId === item.id && ['queued', 'dispatching', 'pending', 'saving', 'unknown'].includes(j.status))
-      ? 'Дождитесь результата или проверьте попытку с неизвестным исходом.'
-      : '',
+    blocked: queueAdmissionIssue(p,item.id),
   }));
 }

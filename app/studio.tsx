@@ -23,6 +23,7 @@ import {KeyframeEditor} from './keyframe-editor';
 import {MediaReviewPanel} from './media-review-panel';
 import {KeyframeBatchEditor} from './keyframe-batch-editor';
 import {StoryboardProgress} from './storyboard-progress';
+import {missingStoryboardStartRetries} from '@/lib/storyboard-starts';
 import {keyframeRoleInstruction,selectedKeyframe,sourceImageSettings,prepareKeyframeGeneration,planKeyframeMode,type KeyframeRole} from '@/lib/keyframes';
 import {PromptPreview} from './prompt-preview';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
@@ -828,7 +829,7 @@ function Workspace() {
               {step===14&&<ShotPlanningEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} connections={cq.data} onPrepare={()=>worldAction('prepareLocations',{})} onGenerate={async data=>{const epoch=projectEpoch.current;let next:Project|undefined;await perform(async()=>{next=await request('/api/projects/'+p.id+'/generate-locations','POST',data);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время запуска.');}replace(next!);});if(!next)throw Error('Серия не сохранена. Проверьте сообщение об ошибке.');return next;}} onSaveScene={(sceneId,data)=>worldAction('saveSceneLocation',{sceneId,...data})} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
-              {step===5&&<StoryboardProgress key={p.id} p={p} busy={busy} open={id=>{setItemId(id);revealStoryboard();}} createEnds={()=>{setKeyframeBatchRequest(previous=>({projectId:p.id,serial:(previous?.serial??0)+1}));revealStoryboard('storyboard-keyframe-batch');}}/>}
+              {step===5&&<StoryboardProgress key={p.id} p={p} busy={busy} createStarts={()=>setDialog('storyboard-batch')} open={id=>{setItemId(id);revealStoryboard();}} createEnds={()=>{setKeyframeBatchRequest(previous=>({projectId:p.id,serial:(previous?.serial??0)+1}));revealStoryboard('storyboard-keyframe-batch');}}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);if(stage===5)revealStoryboard();}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>
@@ -1568,6 +1569,7 @@ function Workspace() {
       )}
       {p && dialog === 'storyboard-batch' && (
         <StoryboardBatchDialog p={p} assets={assets} connections={cq.data} busy={busy} perform={perform}
+          permitMissingStarts={(itemIds:string[])=>action('allowMissingStoryboardStarts',{itemIds},'')}
           referenceAction={(assetId:string,restore=false)=>action(restore?'restoreReference':'hideReference',{assetId})}
           close={closeDialog} submit={async (data: any) => replace(await request(`/api/projects/${p.id}/generate-storyboard`, 'POST', data))} />
       )}
@@ -2768,8 +2770,8 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
       <Mic />Создать {included.length} записей</Button></DialogFooter>
   </DialogContent></Dialog>;
 }
-function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, submit, referenceAction }: any) {
-  const [snapshot] = useState<Project>(p);
+function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, submit, referenceAction,permitMissingStarts }: any) {
+  const [snapshot,setSnapshot] = useState<Project>(p);
   const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter(m => m.kind === 'image' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
   const [modelId, setModelId] = useState(choices[0]?.id ?? '');
   const m = choices.find(x => x.id === modelId);
@@ -2780,11 +2782,12 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     prompt: storyboardPrompt(snapshot, item), refs:planReferenceIds(snapshot,item),
   })), [snapshot]);
   const [rows, setRows] = useState(() => initialRows);
+  const retries=missingStoryboardStartRetries(snapshot).filter(row=>initialRows.some(plan=>plan.itemId===row.itemId&&!plan.hasImage));
   const [override, setOverride] = useState<string | undefined>();
   const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
   const [openedPrompts, setOpenedPrompts] = useState<string[]>([]);
-  // This modal owns an immutable project snapshot. Do not rebuild all preceding
-  // approvals when a checkbox, model, quality setting or text field changes.
+  // Only explicit retry permission refreshes this source snapshot. Checkbox,
+  // model, quality and text edits do not rebuild the film's approvals.
   const referenceOptions = useMemo(() => new Map(initialRows.map(r => [r.itemId,r.refs])), [initialRows]);
   // Every selectable reference came from this plan's scoped options above.
   // Reuse that proof; the API revalidates current ownership and membership.
@@ -2827,6 +2830,10 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
       {!choices.length && <p role="alert">Добавьте ключ модели изображений в «Подключениях».</p>}
+      {!!retries.length&&<section className="note space-y-3" aria-label="Повтор недостающих первых кадров"><strong>Неизвестный исход блокирует {retries.length} пропущенных планов</strong><p>Проверьте прежние попытки в журнале или кабинете провайдера. Он мог выполнить запрос и списать оплату. Разрешение сохранит историю и расходы; новая серия оплачивается отдельно и запускается следующей кнопкой.</p><p>{retries.map(row=>row.title).join('; ')}</p><Button variant="outline" disabled={busy} onClick={()=>perform(async()=>{
+        const itemIds=retries.map(row=>row.itemId),next:Project=await permitMissingStarts(itemIds),updated=new Map(storyboardBatchPlans(next).map(row=>[row.item.id,row]));
+        setSnapshot(next);setRows(previous=>previous.map(row=>{const current=updated.get(row.itemId);return current?{...row,hasImage:current.hasImage,blocked:current.blocked,include:itemIds.includes(row.itemId)?!current.hasImage&&!current.blocked:row.include}:row;}));
+      })}>Разрешить повтор для {retries.length} пропущенных планов</Button></section>}
       {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>

@@ -6,6 +6,7 @@ import { approveReview } from '@/lib/review-center';
 import { recordCharacterVersion, restoreCharacterVersion, captureVersionInfo } from '@/lib/creative-versions';
 import { syncVideoPlans } from '@/lib/video';
 import {stopJobWait,allowNewSeries} from '@/lib/job-wait';
+import {allowMissingStoryboardStarts} from '@/lib/storyboard-starts';
 import { moveStoryboardPlan } from '@/lib/plan-order';
 import { setPlanExcluded } from '@/lib/plan-removal';
 import { approveBatch, approveSelectedSpeech } from '@/lib/bulk-approval';
@@ -443,6 +444,10 @@ export const PATCH = api(async (req, ctx) => {
       const {jobId}=z.object({jobId:z.string().uuid()}).parse(d);
       const j=p.jobs.find(j=>j.id===jobId);if(!j)throw Error('Попытка не найдена.');
       allowNewSeries(j);break;
+    }
+    case 'allowMissingStoryboardStarts': {
+      const {itemIds}=z.object({itemIds:z.array(z.string().uuid()).min(1).max(200)}).strict().parse(d);
+      allowMissingStoryboardStarts(p,itemIds);break;
     }
     case 'stopJobWait': {
       const {jobId}=z.object({jobId:z.string().uuid()}).parse(d);
