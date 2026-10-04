@@ -86,7 +86,7 @@ export function storyboardPrompt(p: Project, item: Item) {
 
 export function storyboardBatchPlans(p: Project) {
   return p.items.filter(i => i.stage === 5 && videoShot(p, i)).map(item => ({
-    item, hasImage: item.variants.some(v => v.kind === 'image' && v.assetId),
+    item, hasImage: item.variants.some(v => v.kind === 'image' && v.assetId && (v.keyframe??'start')==='start'),
     blocked: p.jobs.some(j => j.itemId === item.id && ['queued', 'dispatching', 'pending', 'saving', 'unknown'].includes(j.status))
       ? 'Дождитесь результата или проверьте попытку с неизвестным исходом.'
       : '',

@@ -12,18 +12,19 @@ import {storyboardPrompt} from '@/lib/storyboard';
 import {planKeyframeMode,requiredKeyframeRoles,selectedKeyframe,prepareKeyframeGeneration} from '@/lib/keyframes';
 import {compilePrompt} from '@/lib/prompt-compiler';
 import {grokImageEstimate,GROK_IMAGE_MODEL} from '@/lib/image-quality';
-export function KeyframeBatchEditor({p,busy,submit}:{p:Project;busy:boolean;submit:(data:unknown)=>Promise<unknown>}){
+export function KeyframeBatchEditor({p,busy,submit,initiallyOpen=false}:{p:Project;busy:boolean;submit:(data:unknown)=>Promise<unknown>;initiallyOpen?:boolean}){
   const [role,setRole]=useState<'end'|'middle'>('end');
-  const [opened,setOpened]=useState(false),[included,setIncluded]=useState<string[]>([]),[working,setWorking]=useState(false),[error,setError]=useState(''),[fallback,setFallback]=useState(GROK_IMAGE_MODEL);
+  const [opened,setOpened]=useState(initiallyOpen),[working,setWorking]=useState(false),[error,setError]=useState(''),[fallback,setFallback]=useState(GROK_IMAGE_MODEL);
   const rows=p.items.filter(i=>i.stage===5&&participates(p,i)&&requiredKeyframeRoles(planKeyframeMode(p,i)).includes(role)).map(item=>{
     const first=selectedKeyframe(item,'start');let reason=queueAdmissionIssue(p,item.id),estimate:string|null=null;
     try{const m=model(first?.jobId?first.model:fallback),prepared=prepareKeyframeGeneration(p,item.id,role,{model:m.id,refs:planReferenceIds(p,item)});const compiled=compilePrompt(p,item,m.id,{kind:'image',keyframe:role,prompt:storyboardPrompt(p,item),keyframeInstruction:prepared.roleInstruction,references:prepared.refs,allowLegacyModel:!p.directing});estimate=m.id===GROK_IMAGE_MODEL?grokImageEstimate(prepared.imageSettings,compiled.references.length):m.estimate;}
     catch(e){reason=(e as Error).message;}
     return {item,first,reason,estimate};
   });
+  const [included,setIncluded]=useState<string[]>(()=>initiallyOpen?rows.filter(r=>!r.reason&&!selectedKeyframe(r.item,role)).map(r=>r.item.id):[]);
   const selected=rows.filter(r=>included.includes(r.item.id)&&!r.reason),total=selected.every(r=>r.estimate!==null)?selected.reduce((n,r)=>n+BigInt(r.estimate!),0n).toString():null;
   if(!p.items.some(i=>i.stage===5&&participates(p,i)&&requiredKeyframeRoles(planKeyframeMode(p,i)).includes('end')))return null;
-  return <section className="editor-surface p-4 my-4 space-y-3"><Button variant="outline" disabled={busy} onClick={()=>{setOpened(!opened);setIncluded(rows.filter(r=>!r.reason&&!selectedKeyframe(r.item,role)).map(r=>r.item.id));}}>Ключевые кадры · массовая генерация</Button>{opened&&<>
+  return <section id="storyboard-keyframe-batch" tabIndex={-1} className="editor-surface p-4 my-4 space-y-3"><Button variant="outline" disabled={busy} onClick={()=>{setOpened(!opened);setIncluded(rows.filter(r=>!r.reason&&!selectedKeyframe(r.item,role)).map(r=>r.item.id));}}>Ключевые кадры · массовая генерация</Button>{opened&&<>
     <p>По одному выбранному ключевому кадру для отмеченных планов. Модель, качество и исходный файл берутся из выбранного первого кадра; результат появится в карточке плана для просмотра.</p>
     <label className="block">Если первый кадр загружен вручную <select className="caption-select" value={fallback} onChange={e=>setFallback(e.target.value)}>{MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
     <label className="block">Роль кадра <select aria-label="Роль ключевого кадра серии" value={role} onChange={e=>{setRole(e.target.value as 'end'|'middle');setIncluded([]);}}><option value="end">Конечный</option><option value="middle">Промежуточный · для тройного набора</option></select></label>

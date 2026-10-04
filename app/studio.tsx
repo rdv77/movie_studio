@@ -22,6 +22,7 @@ import {mediaVariantPrompt} from '@/lib/prompt-jobs';
 import {KeyframeEditor} from './keyframe-editor';
 import {MediaReviewPanel} from './media-review-panel';
 import {KeyframeBatchEditor} from './keyframe-batch-editor';
+import {StoryboardProgress} from './storyboard-progress';
 import {keyframeRoleInstruction,selectedKeyframe,sourceImageSettings,prepareKeyframeGeneration,planKeyframeMode,type KeyframeRole} from '@/lib/keyframes';
 import {PromptPreview} from './prompt-preview';
 import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImageEstimate, imageSettingsLabel, type ImageSettings } from '@/lib/image-quality';
@@ -307,6 +308,10 @@ function Workspace() {
     if (activeProject.current === projectId && dialogEpoch.current === openedDialogEpoch) setDialog(null);
   };
   const [frameRole,setFrameRole]=useState<KeyframeRole>('start');
+  const [keyframeBatchRequest,setKeyframeBatchRequest]=useState<{projectId:string;serial:number}>();
+  function revealStoryboard(target='storyboard-keyframe-editor') {
+    requestAnimationFrame(()=>{const element=document.getElementById(target);element?.focus({preventScroll:true});element?.scrollIntoView({behavior:'smooth',block:'start'});});
+  }
   const [voiceView,setVoiceView]=useState('plans');
   const [characterTarget,setCharacterTarget] = useState<string>();
   const [editing, setEditing] = useState<Variant | undefined>();
@@ -788,7 +793,7 @@ function Workspace() {
                       ? 'Проверьте ритм, соберите фильм и утвердите финальную версию.'
                       : step === 7
                         ? 'Создайте ролик для каждого плана. Сравните варианты и утвердите по одному на план.'
-                      : step === 5 ? 'Создайте изображения планов, сравните варианты и утвердите по одному кадру на план.'
+                      : step === 5 ? 'Создайте начальные изображения, затем окончания движущихся планов. Сравните варианты и утвердите выбранные комплекты.'
                       : step === 1 ? 'Создайте отдельный образ каждого героя. Утверждённые описания и изображения будут использоваться в следующих этапах.'
                       : 'Сравните варианты и утвердите направление фильма.'}
                   </p>
@@ -823,7 +828,8 @@ function Workspace() {
               {step===14&&<ShotPlanningEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} connections={cq.data} onPrepare={()=>worldAction('prepareLocations',{})} onGenerate={async data=>{const epoch=projectEpoch.current;let next:Project|undefined;await perform(async()=>{next=await request('/api/projects/'+p.id+'/generate-locations','POST',data);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время запуска.');}replace(next!);});if(!next)throw Error('Серия не сохранена. Проверьте сообщение об ошибке.');return next;}} onSaveScene={(sceneId,data)=>worldAction('saveSceneLocation',{sceneId,...data})} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
-              {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
+              {step===5&&<StoryboardProgress key={p.id} p={p} busy={busy} open={id=>{setItemId(id);revealStoryboard();}} createEnds={()=>{setKeyframeBatchRequest(previous=>({projectId:p.id,serial:(previous?.serial??0)+1}));revealStoryboard('storyboard-keyframe-batch');}}/>}
+              {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);if(stage===5)revealStoryboard();}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===6&&<>
                 <Tabs value={voiceView} onValueChange={setVoiceView} className="mb-5"><TabsList><TabsTrigger value="casting">Подбор голосов</TabsTrigger><TabsTrigger value="plans">Озвучка планов</TabsTrigger></TabsList></Tabs>
                 {voiceView==='casting'&&<VoiceComparisonPanel p={p} connections={cq.data} busy={busy} perform={perform} action={action} replace={replace} onContinue={()=>setVoiceView('plans')}/>}
@@ -937,7 +943,7 @@ function Workspace() {
                 <div className="info-banner">
                   <div>
                     <strong>Раскадровка по планам сценария · {group.length} карточек</strong>
-                    <p>{videoScript?.message || 'Откройте план и нажмите «Создать с ИИ». Для каждого плана создайте одно отдельное изображение, затем выберите и утвердите его.'}</p>
+                    <p>{videoScript?.message || 'Начальные изображения можно создать одной серией. Для плана с двумя ключевыми кадрами затем создайте и выберите окончание; для трёх — также промежуточный момент. Одно утверждение относится ко всему комплекту.'}</p>
                     <p>Карточки обновляются по планам утверждённого сценария. Готовые изображения сохраняются; вид речи, говорящий и описания из сценария подтягиваются заново. Лишние карточки доступны в истории и не требуют утверждения.</p>
                   </div>
                   <Button variant="outline" disabled={busy || !videoScript?.variant || active.length > 0}
@@ -985,8 +991,8 @@ function Workspace() {
                   </div>
                 </div>
               )}
-              {step===5&&item&&<KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/>}
-              {step===5&&<KeyframeBatchEditor p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
+              {step===5&&item&&<div id="storyboard-keyframe-editor" tabIndex={-1}><KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/></div>}
+              {step===5&&<KeyframeBatchEditor key={p.id+':'+(keyframeBatchRequest?.projectId===p.id?keyframeBatchRequest.serial:0)} initiallyOpen={keyframeBatchRequest?.projectId===p.id} p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
               {step===8&&item&&selected?.kind==='video'&&selected.assetId&&<AudioQcEditor p={p} itemId={item.id} variantId={selected.id} busy={busy} onSave={async report=>{await action('recordAudioQc',report);}}/>}
               {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
@@ -2786,7 +2792,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
     selectedReferences(snapshot,r.refs.filter(id => referenceOptions.get(r.itemId)?.includes(id)))
   ])), [snapshot,rows,referenceOptions]);
   const candidates = useMemo(() => initialRows.map(r => ({
-    ...mediaBatchCandidate(snapshot,itemsById.get(r.itemId)!,'image'),blocked:r.blocked,
+    ...mediaBatchCandidate(snapshot,itemsById.get(r.itemId)!,'image'),remaining:!r.hasImage,blocked:r.blocked,
   })), [snapshot,initialRows,itemsById]);
   const included = useMemo(() => rows.filter(r => r.include && !r.blocked), [rows]);
   const rowRefs=(r:(typeof rows)[number])=>referencesByPlan.get(r.itemId)??[];
@@ -2816,7 +2822,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
   return <Dialog open onOpenChange={v => !v && close()}>
     <DialogContent className="sm:max-w-3xl modal-scroll">
       <DialogHeader><DialogTitle>Создать кадры всех планов</DialogTitle>
-        <DialogDescription>Одна модель, одна картинка для каждого отмеченного плана. Задачи взяты из выбранных вариантов карточек; к запросам добавится утверждённая основа фильма. Новые картинки появятся в своих карточках без автоматического утверждения.</DialogDescription>
+        <DialogDescription>Одна модель, одно начальное изображение для каждого отмеченного плана. Задачи взяты из выбранных вариантов карточек; к запросам добавится утверждённая основа фильма. Конечные и промежуточные кадры создаются отдельной серией по выбранным первым изображениям.</DialogDescription>
       </DialogHeader>
       <Field label="Модель изображений"><Drop label="Модель изображений" value={modelId} onChange={value => { setModelId(value); setOverride(undefined); }}
         options={choices.map(x => ({ value: x.id, label: x.name }))} /></Field>
