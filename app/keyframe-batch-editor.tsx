@@ -1,4 +1,6 @@
 'use client';
+import {ImageRetrySettings} from './image-retry-settings';
+import type {ImageRetryOptions} from '@/lib/image-retries';
 import {useState} from 'react';
 import {BatchScopeSelector} from './batch-scope-selector';
 import {queueAdmissionIssue} from '@/lib/queue-policy';
@@ -12,7 +14,8 @@ import {storyboardPrompt} from '@/lib/storyboard';
 import {planKeyframeMode,requiredKeyframeRoles,selectedKeyframe,prepareKeyframeGeneration} from '@/lib/keyframes';
 import {compilePrompt} from '@/lib/prompt-compiler';
 import {grokImageEstimate,GROK_IMAGE_MODEL} from '@/lib/image-quality';
-export function KeyframeBatchEditor({p,busy,submit,initiallyOpen=false}:{p:Project;busy:boolean;submit:(data:unknown)=>Promise<unknown>;initiallyOpen?:boolean}){
+export function KeyframeBatchEditor({p,busy,submit,connections,initiallyOpen=false}:{p:Project;busy:boolean;submit:(data:unknown)=>Promise<unknown>;initiallyOpen?:boolean;connections?:{providers?:{id:string;configured:boolean}[]}}){
+  const [imageRetry,setImageRetry]=useState<ImageRetryOptions>({maxAttempts:3});
   const [role,setRole]=useState<'end'|'middle'>('end');
   const [opened,setOpened]=useState(initiallyOpen),[working,setWorking]=useState(false),[error,setError]=useState(''),[fallback,setFallback]=useState(GROK_IMAGE_MODEL);
   const rows=p.items.filter(i=>i.stage===5&&participates(p,i)&&requiredKeyframeRoles(planKeyframeMode(p,i)).includes(role)).map(item=>{
@@ -28,10 +31,11 @@ export function KeyframeBatchEditor({p,busy,submit,initiallyOpen=false}:{p:Proje
     <p>По одному выбранному ключевому кадру для отмеченных планов. Модель, качество и исходный файл берутся из выбранного первого кадра; результат появится в карточке плана для просмотра.</p>
     <label className="block">Если первый кадр загружен вручную <select className="caption-select" value={fallback} onChange={e=>setFallback(e.target.value)}>{MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
     <label className="block">Роль кадра <select aria-label="Роль ключевого кадра серии" value={role} onChange={e=>{setRole(e.target.value as 'end'|'middle');setIncluded([]);}}><option value="end">Конечный</option><option value="middle">Промежуточный · для тройного набора</option></select></label>
+    <ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some(c=>c.id===m.provider&&c.configured))} initialEstimate={total} count={selected.filter(r=>(r.first?.model??fallback)!==imageRetry.fallbackModel).length} referenceCount={5}/>
     <BatchScopeSelector rows={rows.map(r=>{const frame=selectedKeyframe(r.item,role);return {id:r.item.id,remaining:!frame,needsAttention:!frame||!variantCurrent(p,r.item,frame),blocked:r.reason};})} selected={included} disabled={busy||working} onChange={setIncluded}/>
     {!rows.length&&<p>Нет планов с этой ролью кадра. Промежуточный кадр нужен только для тройного набора.</p>}
     {rows.map(r=><label className="flex gap-3 border rounded p-3" key={r.item.id}><input type="checkbox" disabled={busy||working||!!r.reason} checked={included.includes(r.item.id)&&!r.reason} onChange={e=>setIncluded(ids=>e.target.checked?[...ids,r.item.id]:ids.filter(id=>id!==r.item.id))}/><span>{r.item.title} · {r.first?.model??'Сначала выберите первый кадр'}<small className="block">{r.reason||money(r.estimate)}</small></span></label>)}
     <p>Оценка серии: {money(total)}. Каждая попытка сохранится в журнале; автоматического утверждения нет.</p>
-    <Button disabled={busy||working||!selected.length||p.limit!==null&&total===null} onClick={async()=>{setWorking(true);setError('');try{await submit({revision:p.revision,batchId:crypto.randomUUID(),keyframe:role,model:fallback,refs:[],referenceMode:'selected',estimate:null,plans:selected.map(r=>({itemId:r.item.id,prompt:storyboardPrompt(p,r.item),refs:planReferenceIds(p,r.item)}))});setOpened(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Создать ключевые кадры · {selected.length}</Button>{error&&<p role="alert">{error}</p>}
+    <Button disabled={busy||working||!selected.length||p.limit!==null&&total===null} onClick={async()=>{setWorking(true);setError('');try{await submit({revision:p.revision,batchId:crypto.randomUUID(),keyframe:role,model:fallback,imageRetry,refs:[],referenceMode:'selected',estimate:null,plans:selected.map(r=>({itemId:r.item.id,prompt:storyboardPrompt(p,r.item),refs:planReferenceIds(p,r.item)}))});setOpened(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Создать ключевые кадры · {selected.length}</Button>{error&&<p role="alert">{error}</p>}
   </>}</section>;
 }

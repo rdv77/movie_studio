@@ -1,3 +1,4 @@
+import {imageRetrySchema,prepareImageRetries,imageRetryValidationJobs} from '@/lib/image-retries';
 import {scenarioVariantInstruction} from '@/lib/scenario-generation';
 import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import {prepareKeyframeGeneration,keyframeRoleInstruction,type KeyframeRole} from '@/lib/keyframes';
@@ -34,7 +35,7 @@ export const POST = api(async (req, ctx) => {
     models: z.array(z.string()).min(1).max(MODELS.length), count: z.number().int().min(1).max(4),
     prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT), instruction: z.string().trim().max(MEDIA_INPUT_LIMIT).optional(),
     keyframe:z.enum(['start','middle','end']).optional(), refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
-    referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(),
+    referenceMode: z.enum(['auto', 'selected']).default('auto'), imageSettings: imageSettingsSchema.optional(), imageRetry:imageRetrySchema.optional(),
     dialogue: z.string().max(9500), voiceId: z.string().max(150), speechSource: z.string().max(200).optional(),
     profileId:z.string().uuid().optional(),voiceDelivery:voiceDeliverySchema.optional(),
     speechType: z.enum(['voiceover', 'character', 'none']).optional(), speaker: z.string().trim().max(100).optional(),
@@ -102,16 +103,17 @@ export const POST = api(async (req, ctx) => {
       deps: dependencies(p, item.stage), created: now(), status: 'queued', transportVersion: 2,
       estimate: s.estimates[m.id] ?? null, actual: null,
     };
-    return kind === 'image' || kind === 'video' ? compileMediaJob(p, job, { keyframe:keyframeRole,keyframeInstruction:prepared?.roleInstruction,instruction:s.instruction, variantIndex: n + 1, variantCount: s.count }) : kind==='audio'?freezeVoiceJob(p,job,{profileId:s.profileId,delivery:s.voiceDelivery}):job;
+    const input={keyframe:keyframeRole,keyframeInstruction:prepared?.roleInstruction,instruction:s.instruction,variantIndex:n+1,variantCount:s.count};
+    return kind==='image'?prepareImageRetries(p,compileMediaJob(p,job,input),s.imageRetry,input):kind==='video'?compileMediaJob(p,job,input):kind==='audio'?freezeVoiceJob(p,job,{profileId:s.profileId,delivery:s.voiceDelivery}):job;
   }));
   // Compile every model first. A critical conflict must stop the batch before storage reads or reservation.
   const loaded = new Map<string, Promise<PromptAsset>>();
   const load = (ref: string) => { let value = loaded.get(ref); if (!value) { value = asset(user, ref, p); loaded.set(ref, value); } return value; };
-  for (const job of jobs) {
+  for (const job of imageRetryValidationJobs(jobs)) {
     if (job.kind === 'image' || job.kind === 'video') await validateCompiledMediaAssets(job, load);
     else for (const ref of job.refs) if (!(await load(ref)).mime.startsWith('image/')) throw Error('Референс должен быть изображением.');
   }
-  for (const m of ms) await getKey(user, m.provider);
+  for (const provider of new Set(imageRetryValidationJobs(jobs).map(j=>model(j.model).provider))) await getKey(user,provider);
   if (parallelConcept || parallelStoryboard || parallelVideo) return Response.json(await enqueuePlanJobs(p, jobs, () => loadProject(user, p.id), (next, revision) => saveProject(user, next, revision)));
   assertBudget(p, jobs); stampGenerationVersions(p, jobs); p.jobs.push(...jobs);
   return Response.json(await saveProject(user, p, p.revision));

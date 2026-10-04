@@ -176,6 +176,6 @@ export function keyframeQueueIssue(p:Project,job:KeyframeJob):string{
   const start=selectedKeyframe(item,'start');
   if(!start||job.sourceFrameVariantId!==start.id||job.keyframeSourceBasis!==keyframeSourceBasis(start))return 'Выбранный первый кадр изменился или отсутствует. Запрос конечного кадра не отправлен.';
   if(!job.refs.includes(start.assetId!))return 'В запросе нет выбранного первого кадра. Запрос не отправлен.';
-  if(start.jobId&&(job.model!==start.model||versionStable(job.imageSettings)!==versionStable(sourceImageSettings(start))))return 'Модель или качество первого кадра изменились. Запрос не отправлен.';
+  if(start.jobId&&!(job as Job).imageRetry?.fallbackAttempt&&(job.model!==start.model||versionStable(job.imageSettings)!==versionStable(sourceImageSettings(start))))return 'Модель или качество первого кадра изменились. Запрос не отправлен.';
   return '';
 }

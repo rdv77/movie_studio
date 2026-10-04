@@ -1,3 +1,4 @@
+import {enqueueImageRetry} from '@/lib/image-retries';
 import {runSoundscapeStep} from '@/lib/soundscape-runner';
 import {isSoundJob} from '@/lib/soundscape';
 import {runVoiceWorkflowStep} from '@/lib/voice-design-runner';
@@ -197,7 +198,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         if(job.waitStoppedAt)job.resumeStatus='pending';else job.status = 'pending';
       }
     });
-    if (result.error) throw new ProviderError(result.error, true);
+    if (result.error) throw new ProviderError(result.error, true, false, j.kind==='image' && !/(content|moderation|recognis|public figure|safety|blocked|filter|nsfw|отклон|запрещ|содержим|баланс|ключ)/i.test(result.error));
     if (result.pending) return await loadProject(user, id);
     let assetId: string | undefined;
     if (j.kind !== 'text') {
@@ -266,11 +267,12 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         if(job.saveFailures>=3)stopJobWait(job,'saving');
         return;
       }
-      if (polling && !(e instanceof ProviderError && e.definite)) {
+      if (polling && (!(e instanceof ProviderError && e.definite)||e.httpStatus===429)) {
         job.status = 'pending';
       } else
         job.status =
           e instanceof ProviderError && e.definite ? 'failed' : 'unknown';
+      enqueueImageRetry(p,job,e instanceof ProviderError&&e.retryable&&!e.notSent);
     });
   }
   return p;

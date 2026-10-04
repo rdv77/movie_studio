@@ -64,7 +64,7 @@ export async function pollFal(j:Job,key:string):Promise<Result> {
   if (d.has_nsfw_concepts?.[0]) return {error:'fal.ai: изображение отклонено проверкой содержимого.',actual:null};
   const video=isFalVideo(j.model),img=video?d.video:d.images?.[0];
   let url:URL;
-  try {url=new URL(img?.url);} catch {throw new ProviderError('fal.ai: результат не содержит '+(video?'видео.':'изображения.'),true);}
+  try {url=new URL(img?.url);} catch {throw new ProviderError('fal.ai: результат не содержит '+(video?'видео.':'изображения.'),true,false,!video);}
   if (url.protocol!=='https:' || url.username || url.password)
     throw new ProviderError('fal.ai: небезопасный адрес файла.',true);
   return {url:url.href,mime:video?'video/mp4':'image/png',requestId:id,actual:null,

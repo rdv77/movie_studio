@@ -46,6 +46,7 @@ export function queueAdmissionIssue(p:Project,itemId:string,batchId?:string):str
 /** Call inside the existing CAS mutation immediately before a queued claim. */
 export function queueSlotIssue(p:QueueProject,job:Job,locallyClaimed:ReadonlySet<string>=new Set(),directorTask?:DirectorQueueTask):string{
   if(job.status!=='queued')return '';
+  if(job.imageRetry?.notBefore&&Date.parse(job.imageRetry.notBefore)>Date.now())return 'Пауза перед автоматическим повтором.';
   if(job.purpose==='directing'){
     const same=p.jobs.filter(j=>j.id!==job.id&&j.purpose==='directing'&&directorQueueScopesOverlap(p,job,j,directorTask));
     if(same.some(unresolvedJobBlocks))return 'У этой роли агента для сцены/плана есть запрос с неизвестным исходом. Проверьте журнал и явно разрешите новую серию; другие сцены и роли можно прорабатывать.';

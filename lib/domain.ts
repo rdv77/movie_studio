@@ -105,6 +105,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  imageRetry?: import('./image-retries').ImageRetryState;
   soundInput?:{layerId:string;generation:SoundGeneration;late?:boolean};
   providerDuration?:number;
   videoPreparationBasis?:string;

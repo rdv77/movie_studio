@@ -3,6 +3,8 @@ export class ProviderError extends Error {
     message: string,
     public definite = false,
     public notSent = false,
+    public retryable = false,
+    public httpStatus?: number,
   ) {
     super(message);
   }
@@ -67,11 +69,12 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
         : 'Доступ запрещён провайдером без пояснения. Проверьте разрешения ключа и модели в его кабинете.'
       : r.status === 401 ? 'Проверьте API-ключ и доступ к модели.'
       : r.status === 402 ? 'Проверьте баланс провайдера.'
-      : r.status === 429 ? 'Достигнут лимит провайдера. Повторите позднее вручную.'
+      : r.status === 429 ? 'Достигнут лимит провайдера. Повтор возможен после паузы.'
       : 'Проверьте запрос в кабинете провайдера.';
     throw new ProviderError(
       `Провайдер вернул HTTP ${r.status}. ${detail ? detail + ' ' : ''}${advice}`,
       r.status < 500,
+      false, r.status===429, r.status,
     );
   }
   return r;

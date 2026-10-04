@@ -1,4 +1,6 @@
 'use client';
+import {ImageRetrySettings} from './image-retry-settings';
+import type {ImageRetryOptions} from '@/lib/image-retries';
 import {useEffect,useState, type ReactNode} from 'react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
@@ -39,7 +41,7 @@ function ImagePicker({p,value,onChange,disabled,onUpload}:{p:Project;value:strin
   }}/></label>}{error&&<p role="alert">{error}</p>}</div>;
 }
 
-export type LocationLibraryEditorProps={p:Project;busy:boolean;onSave:(itemId:string|undefined,profile:LocationProfile)=>Promise<unknown>;onRemove?:(itemId:string)=>Promise<unknown>;onRestore?:(itemId:string)=>Promise<unknown>;onUpload?:(file:File)=>Promise<string>;onPrepare?:()=>Promise<unknown>;onGenerate?:(data:{revision:number;batchId:string;model:string;itemIds:string[];count:number;estimate:string|null})=>Promise<unknown>;onSaveScene?:SceneLocationEditorProps['onSave'];connections?:{providers?:{id:string;configured:boolean}[]}};
+export type LocationLibraryEditorProps={p:Project;busy:boolean;onSave:(itemId:string|undefined,profile:LocationProfile)=>Promise<unknown>;onRemove?:(itemId:string)=>Promise<unknown>;onRestore?:(itemId:string)=>Promise<unknown>;onUpload?:(file:File)=>Promise<string>;onPrepare?:()=>Promise<unknown>;onGenerate?:(data:{revision:number;batchId:string;model:string;itemIds:string[];count:number;estimate:string|null;imageRetry?:ImageRetryOptions})=>Promise<unknown>;onSaveScene?:SceneLocationEditorProps['onSave'];connections?:{providers?:{id:string;configured:boolean}[]}};
 export function LocationLibraryEditor(props:LocationLibraryEditorProps){
   const [id,setId]=useState(locationItems(props.p)[0]?.id??'new');const item=props.p.items.find(i=>i.id===id&&!i.removedAt&&!i.planArchive);
   const [newForm,setNewForm]=useState(0),[pending,setPending]=useState<{profile:LocationProfile;previousIds:string[]}>();
@@ -76,6 +78,7 @@ function LocationForm({p,item,busy,onSave,onRemove,onUpload,onDirty}:LocationLib
 
 function LocationGenerationEditor({p,busy,connections,onGenerate}:LocationLibraryEditorProps&{onGenerate:NonNullable<LocationLibraryEditorProps['onGenerate']>}){
   const models=MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some(c=>c.id===m.provider&&c.configured));
+  const [imageRetry,setImageRetry]=useState<ImageRetryOptions>({maxAttempts:3});
   const [modelId,setModelId]=useState(models[0]?.id??''),[count,setCount]=useState(1),[scope,setScope]=useState<'remaining'|'all'>('remaining');
   useEffect(()=>{if(!modelId&&models.length)setModelId(models[0].id);},[modelId,models[0]?.id]);
   const [working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[batchId,setBatchId]=useState(()=>crypto.randomUUID());
@@ -89,10 +92,11 @@ function LocationGenerationEditor({p,busy,connections,onGenerate}:LocationLibrar
       {!models.length&&<p>Добавьте API-ключ модели изображений в «Подключениях».</p>}
       <Field label="Набор локаций"><select className="w-full rounded border p-2 bg-background" value={scope} onChange={e=>{setScope(e.target.value as typeof scope);setBatchId(crypto.randomUUID());}}><option value="remaining">Только без изображений</option><option value="all">Все локации сцен — новые варианты</option></select></Field>
       <Field label="Вариантов для каждой локации"><Input type="number" min={1} max={4} value={count} onChange={e=>{setCount(Number(e.target.value));setBatchId(crypto.randomUUID());}}/></Field>
+      <ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={models} initialEstimate={total} count={modelId===imageRetry.fallbackModel?0:rows.length*count} referenceCount={5}/>
       <p>Локаций: {rows.length} · Изображений: {rows.length*count} · Оценка серии: {money(total)}. Повторная генерация оплачивается отдельно. Результаты сохраняются без автоматического утверждения.</p>
       {!!preview.length&&<details><summary>Проверить промпты и смету</summary>{preview.map((job,n)=><article key={job.id} className="space-y-2 py-3"><strong>{p.items.find(i=>i.id===job.itemId)?.title} · вариант {n%count+1} · {money(job.estimate)}</strong><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-sm">{job.prompt}</pre></article>)}</details>}
       {issue&&<p role="status">{issue}</p>}
-      <Button disabled={!m||!rows.length||!!issue} onClick={async()=>{setWorking(true);setError('');setNotice('');try{await onGenerate({revision:p.revision,batchId,model:modelId,count,itemIds:rows.map(i=>i.id),estimate:m!.estimate});setBatchId(crypto.randomUUID());setNotice('Изображения добавлены в общую параллельную очередь. Выберите и утвердите результаты в карточках локаций ниже.');}catch(err){setError(message(err));}finally{setWorking(false);}}}>Создать изображения {rows.length} локаций</Button>
+      <Button disabled={!m||!rows.length||!!issue} onClick={async()=>{setWorking(true);setError('');setNotice('');try{await onGenerate({revision:p.revision,batchId,model:modelId,count,imageRetry,itemIds:rows.map(i=>i.id),estimate:m!.estimate});setBatchId(crypto.randomUUID());setNotice('Изображения добавлены в общую параллельную очередь. Выберите и утвердите результаты в карточках локаций ниже.');}catch(err){setError(message(err));}finally{setWorking(false);}}}>Создать изображения {rows.length} локаций</Button>
     </fieldset>{error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
   </section>;
 }

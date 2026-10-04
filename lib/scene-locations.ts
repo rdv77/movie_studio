@@ -1,3 +1,4 @@
+import {prepareImageRetries,type ImageRetryOptions} from './image-retries';
 import {id,makeVariant,type Project,type Item,type Job,dependencies,now} from './domain';
 import {emptyLocation,locationDraftForItem,locationItems,locationProfileText} from './world-assets';
 import {model} from './models';
@@ -42,7 +43,7 @@ export function locationImagePrompt(p:Project,item:Item){
     locationProfileText(profile),`Используется в сценах: ${scenes.map(s=>s.title).join('; ')}. Описание выше — сохранённая редакция локации; не заменяй его прежними описаниями места из сценария.`,
     ...(scenes.length===1&&scenes[0].locationState?[`Состояние места для этой сцены: ${JSON.stringify(scenes[0].locationState)}`]:[])].join('\n\n');
 }
-export function createLocationImageJobs(p:Project,input:{batchId:string;model:string;itemIds:string[];count:number;estimate:string|null}){
+export function createLocationImageJobs(p:Project,input:{batchId:string;model:string;itemIds:string[];count:number;estimate:string|null;imageRetry?:ImageRetryOptions}){
   const m=model(input.model);if(m.kind!=='image'||p.directing&&!availableForDirecting(m.id))throw Error('Выберите доступную модель изображений.');
   if(!Number.isInteger(input.count)||input.count<1||input.count>4)throw Error('Выберите от одного до четырёх вариантов.');
   const available=locationImageItems(p),ids=new Set(input.itemIds);
@@ -55,7 +56,7 @@ export function createLocationImageJobs(p:Project,input:{batchId:string;model:st
       const job:Job={id:id(),batchId:input.batchId,itemId,model:m.id,kind:'image',brief:locationImagePrompt(p,item),prompt:'',location:profile,
         refs:profile.refs.filter(ref=>!p.hiddenReferenceIds?.includes(ref)),duration:5,camera:'Статичная камера',continuity:'',offset:0,volume:1,dialogue:'',voiceId:'',
         ...(m.id===GROK_IMAGE_MODEL?{imageSettings:FINAL_IMAGE_SETTINGS}:{}),deps:dependencies(p,3),created:now(),status:'queued',transportVersion:2,estimate:input.estimate,actual:null};
-      return compileMediaJob(p,job,{variantIndex:n+1,variantCount:input.count});
+      const task={variantIndex:n+1,variantCount:input.count};return prepareImageRetries(p,compileMediaJob(p,job,task),input.imageRetry,task);
     });
   });
 }

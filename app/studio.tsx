@@ -1,4 +1,6 @@
 'use client';
+import {ImageRetrySettings} from './image-retry-settings';
+import type {ImageRetryOptions} from '@/lib/image-retries';
 import {request} from '@/lib/client-request';
 import {StoryboardCharacterBindings} from './storyboard-character-bindings';
 import {AudioQcEditor} from './audio-qc-editor';
@@ -993,7 +995,7 @@ function Workspace() {
                 </div>
               )}
               {step===5&&item&&<div id="storyboard-keyframe-editor" tabIndex={-1}><KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/></div>}
-              {step===5&&<KeyframeBatchEditor key={p.id+':'+(keyframeBatchRequest?.projectId===p.id?keyframeBatchRequest.serial:0)} initiallyOpen={keyframeBatchRequest?.projectId===p.id} p={p} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
+              {step===5&&<KeyframeBatchEditor key={p.id+':'+(keyframeBatchRequest?.projectId===p.id?keyframeBatchRequest.serial:0)} initiallyOpen={keyframeBatchRequest?.projectId===p.id} p={p} connections={cq.data} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
               {step===8&&item&&selected?.kind==='video'&&selected.assetId&&<AudioQcEditor p={p} itemId={item.id} variantId={selected.id} busy={busy} onSave={async report=>{await action('recordAudioQc',report);}}/>}
               {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
@@ -1964,6 +1966,7 @@ function GenerateDialog({
   const [voice, setVoice] = useState('');
   const [estimates, setEstimates] = useState<Record<string, string>>({});
   const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
+  const [imageRetry,setImageRetry]=useState<ImageRetryOptions>({maxAttempts:3});
   const [batch, setBatch] = useState('');
   const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):queueAdmissionIssue(p,item.id);
   const unresolved=p.jobs.filter((j:Job)=>j.itemId===item.id&&unresolvedJobBlocks(j));
@@ -1986,6 +1989,7 @@ function GenerateDialog({
             ? 'video'
             : 'text';
       setKind(k);
+      setImageRetry({maxAttempts:3});
       setModelSearch('');
       const preferred=k==='audio'&&MODELS.some(m=>m.id===p.preferredVoice?.model&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))?p.preferredVoice:undefined;
       const first=frameRole&&frameRole!=='start'?selectedKeyframe(item,'start'):undefined;
@@ -2169,6 +2173,7 @@ function GenerateDialog({
         </div>
         {kind==='text'&&item.stage===0&&<div className="note"><p><b>Творческое задание:</b> {p.directing?.brief.genre??'Сначала сохраните задание'} · {p.directing?.brief.director}</p><details><summary>Полный промпт творческой адаптации · первый вариант</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{promptFor(p,item,scenarioVariantInstruction(prompt.trim(),1,count),source)}</pre></details></div>}
         {models.includes(GROK_IMAGE_MODEL) && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
+        {kind==='image'&&<ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))} initialEstimate={total} count={count*models.filter(id=>id!==imageRetry.fallbackModel).length} referenceCount={effectiveRefs.length}/>}
         {kind === 'text' && source?.text && (
           <Field
             label={item.stage === 0 ? 'Исходный текст для творческой адаптации' : 'Материал для доработки'}
@@ -2381,6 +2386,7 @@ function GenerateDialog({
                   voiceId: voice,
                   ...(kind === 'audio' && speechSource !== 'current' ? { speechSource } : {}),
                   estimates: es,
+                  ...(kind==='image'?{imageRetry}:{}),
                   ...(models.includes(GROK_IMAGE_MODEL) ? {imageSettings} : {}),
                 });
                 close();
@@ -2772,6 +2778,7 @@ function SpeechBatchDialog({ p, connections, busy, perform, close, submit }: any
 }
 function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, submit, referenceAction,permitMissingStarts }: any) {
   const [snapshot,setSnapshot] = useState<Project>(p);
+  const [imageRetry,setImageRetry]=useState<ImageRetryOptions>({maxAttempts:3});
   const choices = MODELS.filter(m=>availableForDirecting(m.id)).filter(m => m.kind === 'image' && connections?.providers?.some((c: any) => c.id === m.provider && c.configured));
   const [modelId, setModelId] = useState(choices[0]?.id ?? '');
   const m = choices.find(x => x.id === modelId);
@@ -2835,6 +2842,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
         setSnapshot(next);setRows(previous=>previous.map(row=>{const current=updated.get(row.itemId);return current?{...row,hasImage:current.hasImage,blocked:current.blocked,include:itemIds.includes(row.itemId)?!current.hasImage&&!current.blocked:row.include}:row;}));
       })}>Разрешить повтор для {retries.length} пропущенных планов</Button></section>}
       {isGrok && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
+      <ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={choices} initialEstimate={total} count={modelId===imageRetry.fallbackModel?0:included.length} referenceCount={effectiveRefs.length}/>
       {miniRefError&&<p role="alert">{miniRefError}</p>}
       <p><strong>По 1 картинке на план.</strong> Планы с готовыми изображениями изначально не отмечены. Можно включить их, чтобы получить новый вариант с сохранением прежних.</p>
       <BatchScopeSelector rows={candidates} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
@@ -2866,7 +2874,7 @@ function StoryboardBatchDialog({ p, assets, connections, busy, perform, close, s
       <p className="muted">Кадры обрабатываются параллельно. На самостоятельном сервере очередь работает и после закрытия вкладки; на сайте для непрерывной обработки нужен фоновый вызов сервера или открытая вкладка. Все попытки учитываются в расходах.</p>
       <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
         <Button disabled={busy || !m || !included.length || !!costError || !!miniRefError || effectiveRefs.length > refLimit || included.some(r => !r.prompt.trim() || r.prompt.trim().length > 20000 || !!promptErrors.get(r.itemId))} onClick={() => perform(async () => {
-          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, refs:[], referenceMode:'selected', estimate, ...(isGrok?{imageSettings}:{}),
+          await submit({ revision: snapshot.revision, batchId: batch, model: modelId, imageRetry, refs:[], referenceMode:'selected', estimate, ...(isGrok?{imageSettings}:{}),
             plans: included.map(r => ({ itemId:r.itemId, prompt:r.prompt,refs:rowRefs(r) })) }); close();
         })}><Sparkles />Сгенерировать {included.length} картинок</Button></DialogFooter>
     </DialogContent>
@@ -3135,6 +3143,8 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.purpose==='voice-test'&&<small>Проба голоса · {j.voiceName||j.voiceId}</small>}
                   {(j.purpose==='music'||j.purpose==='music-ideas')&&<small>{j.purpose==='music'?'Музыкальное сопровождение':'Музыкальные направления по сценарию'}</small>}
                   <small>{new Date(j.created).toLocaleString('ru-RU')}</small>
+                  {j.imageRetry&&<small>{j.imageRetry.fallbackAttempt?'Резервная модель · 1/1':`Попытка ${j.imageRetry.attempt}/${j.imageRetry.maxAttempts}`} · цепочка {j.imageRetry.rootId.slice(0,8)}{j.imageRetry.nextJobId?' · следующий запрос поставлен в очередь':''}</small>}
+                  {j.imageRetry?.haltReason&&<small>{j.imageRetry.haltReason}</small>}
                   {j.model===GROK_IMAGE_MODEL&&<small>{imageSettingsLabel(j.imageSettings??LEGACY_IMAGE_SETTINGS)}</small>}
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
                 </TableCell>
@@ -3142,7 +3152,7 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
                   {['dispatching','pending','saving'].includes(j.status)&&<small>Начало: {new Date(j.waitStartedAt??j.started??j.created).toLocaleTimeString('ru-RU')} · автоостановка через {waitLimitMs(j)/60000} мин ожидания</small>}
                   {j.waitStoppedAt&&<small>Очередь освобождена. Остановка ожидания не отменяет запрос и возможное списание у провайдера.</small>}
-                  {j.newSeriesAllowedAt&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
+                  {j.status==='unknown'&&j.newSeriesAllowedAt&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
                   {j.error && <small className="warning-text">{j.error}</small>}
                 </TableCell>
                 <TableCell>{money(j.estimate)}{j.zenCreditsEstimate!==undefined&&<small>≈ {j.zenCreditsEstimate} кредитов ZenCreator</small>}</TableCell>

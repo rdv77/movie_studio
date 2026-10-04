@@ -1,3 +1,4 @@
+import {imageRetrySchema,prepareImageRetries,imageRetryValidationJobs} from '@/lib/image-retries';
 import {prepareKeyframeGeneration,selectedKeyframe} from '@/lib/keyframes';
 import { compileMediaJob } from '@/lib/prompt-jobs';
 import { validateCompiledMediaAssets, type PromptAsset } from '@/lib/prompt-assets';
@@ -16,7 +17,7 @@ const input = z.object({
   keyframe:z.enum(['start','middle','end']).default('start'),revision: z.number().int(), batchId: z.string().uuid(), model: z.string(),
   refs: z.array(z.string().uuid()).max(960), estimate: z.string().regex(/^\d+$/).nullable(),
   referenceMode: z.enum(['auto','selected']).default('auto'),
-  imageSettings: imageSettingsSchema.optional(),
+  imageSettings: imageSettingsSchema.optional(), imageRetry:imageRetrySchema.optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT), instruction:z.string().trim().max(MEDIA_INPUT_LIMIT).optional(), refs:z.array(z.string().uuid()).max(8).optional() })).min(1).max(120),
 });
 export const POST = api(async (req, ctx) => {
@@ -45,12 +46,13 @@ export const POST = api(async (req, ctx) => {
       ...(frameModel.id === GROK_IMAGE_MODEL ? { imageSettings: prepared.imageSettings??s.imageSettings ?? FINAL_IMAGE_SETTINGS } : {}),
       ...fields, offset: 0, volume: 1, voiceId: '', deps: dependencies(p, 5), created: now(),
       status: 'queued', transportVersion: 2, estimate:s.keyframe==='start'?s.estimate:frameModel.estimate, actual: null };
-    jobs.push(compileMediaJob(p,job,{keyframe:s.keyframe,keyframeInstruction:prepared.roleInstruction,instruction:row.instruction}));
+    const input={keyframe:s.keyframe,keyframeInstruction:prepared.roleInstruction,instruction:row.instruction};
+    jobs.push(prepareImageRetries(p,compileMediaJob(p,job,input),s.imageRetry,input));
   }
   const loaded=new Map<string,Promise<PromptAsset>>();
   const load=(ref:string)=>{let value=loaded.get(ref);if(!value){value=asset(user,ref,p);loaded.set(ref,value);}return value;};
-  for(const job of jobs)await validateCompiledMediaAssets(job,load);
-  for(const provider of new Set(jobs.map(j=>model(j.model).provider)))await getKey(user,provider);
+  for(const job of imageRetryValidationJobs(jobs))await validateCompiledMediaAssets(job,load);
+  for(const provider of new Set(imageRetryValidationJobs(jobs).map(j=>model(j.model).provider)))await getKey(user,provider);
   assertBudget(p, jobs);
   stampGenerationVersions(p,jobs);
   p.jobs.push(...jobs);

@@ -351,7 +351,7 @@ export async function poll(j: Job, key: string): Promise<Result> {
         d.status,
       )
     )
-      throw new ProviderError('FLUX не завершил генерацию: ' + d.status, true);
+      throw new ProviderError('FLUX не завершил генерацию: ' + d.status, true, false, ['Error','Failed'].includes(d.status));
     return {
       pending: d.status !== 'Ready',
       url: d.result?.sample,
