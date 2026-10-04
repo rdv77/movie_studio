@@ -1,3 +1,4 @@
+import {allowMissingAdditionalFrames} from '@/lib/keyframe-batch';
 import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
 import {setCharacterBinding} from '@/lib/character-bindings';
 import {applyMontageProposal} from '../../../../lib/montage-review';
@@ -444,6 +445,10 @@ export const PATCH = api(async (req, ctx) => {
       const {jobId}=z.object({jobId:z.string().uuid()}).parse(d);
       const j=p.jobs.find(j=>j.id===jobId);if(!j)throw Error('Попытка не найдена.');
       allowNewSeries(j);break;
+    }
+    case 'allowMissingAdditionalFrames': {
+      const {role,itemIds}=z.object({role:z.enum(['end','middle']),itemIds:z.array(z.string().uuid()).min(1).max(200)}).strict().parse(d);
+      allowMissingAdditionalFrames(p,role,itemIds);break;
     }
     case 'allowMissingStoryboardStarts': {
       const {itemIds}=z.object({itemIds:z.array(z.string().uuid()).min(1).max(200)}).strict().parse(d);
