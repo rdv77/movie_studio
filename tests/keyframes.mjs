@@ -1,7 +1,7 @@
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
-await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export {ensureDirecting} from './lib/directing';export * as K from './lib/keyframes';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/keyframes.mjs'});
-const {D,K,ensureDirecting}=await import('../work/tests/keyframes.mjs');
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export {ensureDirecting} from './lib/directing';export * as K from './lib/keyframes';export {variantChoice} from './lib/variant-choice';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/keyframes.mjs'});
+const {D,K,ensureDirecting,variantChoice}=await import('../work/tests/keyframes.mjs');
 let checks=0;const test=(name,fn)=>{fn();checks++;console.log('PASS keyframes:',name);};
 const fixture=(direction)=>{
  const p=D.newProject('Ключевые кадры');ensureDirecting(p);
@@ -13,6 +13,22 @@ const fixture=(direction)=>{
 const start=(p,item,asset='first-file',extra={})=>{const v=D.makeVariant(p,item,{kind:'image',assetId:asset,title:'Первый кадр',model:'grok-imagine-image-2.0',jobId:'first-job',imageSettings:{quality:'medium',resolution:'2k'},...extra});item.variants.push(v);item.selectedId=v.id;return v;};
 const endpoint=(p,item,role='end')=>{const first=K.selectedKeyframe(item,'start'),data=K.prepareKeyframeGeneration(p,item.id,role,{model:first.model,refs:['hero-ref',first.assetId],imageSettings:first.imageSettings});const v=D.makeVariant(p,item,{...data,kind:'image',title:role==='end'?'Последний кадр':'Промежуточный кадр',assetId:role+'-file',jobId:role+'-job'});item.variants.push(v);K.chooseKeyframe(p,item.id,role,v.id);return v;};
 const updateShot=(p,change)=>{const script=p.items.find(i=>i.stage===4),v=script.variants.find(v=>v.id===script.approvedId),data=JSON.parse(v.text);change(data.shots[0],data);v.text=JSON.stringify(data);};
+
+test('gallery shows independent start/end choices and only approves the complete current set',()=>{
+ const {p,item}=fixture();K.setKeyframeMode(p,item.id,'pair');const first=start(p,item),old=endpoint(p,item);
+ K.approveKeyframes(p,item.id);
+ assert.deepEqual(variantChoice(p,item,first),{role:'start',selected:true,approved:true});
+ assert.deepEqual(variantChoice(p,item,old),{role:'end',selected:true,approved:true});
+ const next=endpoint(p,item);assert.equal(item.selectedId,first.id);
+ assert.deepEqual(variantChoice(p,item,old),{role:'end',selected:false,approved:false});
+ assert.deepEqual(variantChoice(p,item,next),{role:'end',selected:true,approved:false});
+ assert.equal(variantChoice(p,item,first).approved,false,'An unapproved replacement invalidates the whole set');
+ K.approveKeyframes(p,item.id);assert.equal(variantChoice(p,item,next).approved,true);
+ const saved=structuredClone(p);variantChoice(p,item,next);assert.deepEqual(p,saved,'Reading gallery status never mutates approvals');
+ K.setKeyframeMode(p,item.id,'single');assert.equal(variantChoice(p,item,next).selected,false,'Unused end is not the selected frame of a single-frame plan');
+ const legacy=fixture(),legacyImage=start(legacy.p,legacy.item);D.approve(legacy.p,legacy.item.id);
+ assert.deepEqual(variantChoice(legacy.p,legacy.item,legacyImage),{role:undefined,selected:true,approved:true});
+});
 
 test('legacy single image approval and text fallback are unchanged',()=>{
  const {p,item}=fixture();const v=start(p,item);D.approve(p,item.id);const saved=structuredClone(item);

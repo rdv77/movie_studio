@@ -29,6 +29,7 @@ export function KeyframeEditor({p,item:raw,busy,saveConfig,select,approve,runFra
       <option value="single">Один кадр · статичный план</option><option value="pair">Два кадра · начало и окончание</option><option value="triple">Три кадра · начало, середина и окончание</option>
     </select></label>
     <p className="text-xs text-muted-foreground">Первый кадр задаёт образ плана. Остальные создаются по выбранному первому изображению с сохранением модели и качества. Выбор картинки и утверждение комплекта — отдельные действия.</p>
+    {operation&&<p role="status" className="text-sm">Сохраняем изменения… Отметка обновится после ответа сервера.</p>}
     <div className={`grid gap-4 ${roles.length>1?'md:grid-cols-2':''}`}>
       {roles.map(role=>{const options=keyframeOptions(item,role),current=selectedKeyframe(item,role);return <article key={role} className="space-y-3 rounded border border-border p-3">
         <h4 className="text-sm font-medium">{KEYFRAME_ROLE_NAMES[role]}</h4>

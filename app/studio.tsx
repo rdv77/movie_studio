@@ -21,6 +21,8 @@ import {AnimaticTimeline} from './animatic-timeline';
 import {compilePrompt,type CompiledPrompt,type PromptInput} from '@/lib/prompt-compiler';
 import {mediaVariantPrompt} from '@/lib/prompt-jobs';
 import {KeyframeEditor} from './keyframe-editor';
+import {variantChoice} from '@/lib/variant-choice';
+import {hasKeyframeConfig,KEYFRAME_ROLE_NAMES,requiredKeyframeRoles,keyframeIssues} from '@/lib/keyframes';
 import {MediaReviewPanel} from './media-review-panel';
 import {KeyframeBatchEditor} from './keyframe-batch-editor';
 import {StoryboardProgress} from './storyboard-progress';
@@ -319,6 +321,7 @@ function Workspace() {
   const [editing, setEditing] = useState<Variant | undefined>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selectingVariantId,setSelectingVariantId]=useState('');
   const [draft, setDraft] = useState('');
   const [renderStatus, setRenderStatus] = useState('');
   const renderAbort = useRef<AbortController | null>(null);
@@ -352,6 +355,7 @@ function Workspace() {
   const group = p?.items.filter((i) => i.stage === step&&!i.removedAt&&!i.planArchive&&(step!==6||participates(p,i))).map(i=>step===6?{...i,variants:i.variants.filter(v=>v.kind!=='video')}:i) ?? [];
   const item = group.find((i) => i.id === itemId) ?? group[0];
   const selected = item && chosen(item);
+  const keyframeSet=!!(p&&item&&step===5&&hasKeyframeConfig(p,item));
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
   const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
@@ -1170,15 +1174,14 @@ function Workspace() {
                         ) : (
                           <div className="variant-grid">
                             {visibleVariants(item).map((v, index) => {
-                              const approved =
-                                isApproved(p, item) && item.approvedId === v.id;
+                              const {selected:variantSelected,approved,role}=variantChoice(p,item,v);
                               const stale = !variantCurrent(p, item, v);
                               const job = p.jobs.find((j) => j.id === v.jobId);
                               return (
                                 <article
                                   className={
                                     'variant-card ' +
-                                    (v.id === selected?.id ? 'selected' : '')
+                                    (variantSelected ? 'selected' : '')
                                   }
                                   key={v.id}
                                 >
@@ -1198,7 +1201,7 @@ function Workspace() {
                                       </span>
                                     ) : (
                                       <span className="muted">
-                                        {v.id === selected?.id
+                                        {variantSelected
                                           ? 'Выбран'
                                           : 'На рассмотрении'}
                                       </span>
@@ -1206,6 +1209,7 @@ function Workspace() {
                                   </div>
                                   <Media v={v} />
                                   <div className="variant-body">
+                                    {role&&<p className="muted">{KEYFRAME_ROLE_NAMES[role]}</p>}
                                     <h2>{step===0?scriptVariantLabel(p,v):v.title}</h2>
                                     {v.versionInfo&&<details><summary>Происхождение варианта</summary><p>{v.versionInfo.reason}</p><p className="muted">Родитель: {item.variants.find(x=>x.id===v.versionInfo?.parentVariantId)?.title??'Исходный материал'} · использовано источников: {v.versionInfo.sources.length}</p></details>}
                                     {v.kind==='image'&&v.model===GROK_IMAGE_MODEL&&<p className="muted">{imageSettingsLabel(v.imageSettings??LEGACY_IMAGE_SETTINGS)}</p>}
@@ -1244,26 +1248,28 @@ function Workspace() {
                                     <div className="card-actions">
                                       <Button
                                         variant={
-                                          selected?.id === v.id
+                                          variantSelected
                                             ? 'secondary'
                                             : 'outline'
                                         }
                                         size="sm"
-                                        disabled={busy}
+                                        disabled={busy||variantSelected}
+                                        aria-pressed={variantSelected}
+                                        aria-busy={selectingVariantId===v.id}
                                         onClick={() =>
-                                          perform(() =>
-                                            action('select', {
-                                              variantId: v.id,
-                                            }),
-                                          )
+                                          perform(async () => {
+                                            setSelectingVariantId(v.id);
+                                            try {await action('select',{variantId:v.id});}
+                                            finally {setSelectingVariantId('');}
+                                          })
                                         }
                                       >
-                                        {selected?.id === v.id ? (
+                                        {variantSelected ? (
                                           <Check />
                                         ) : (
                                           <span />
                                         )}
-                                        Выбрать
+                                        {selectingVariantId===v.id?'Сохраняем выбор…':variantSelected?'Выбран':'Выбрать'}
                                       </Button>
                                       <Button
                                         variant="ghost"
@@ -1312,12 +1318,12 @@ function Workspace() {
                       <aside className="notes-panel">
                         <div className="eyebrow">РЕЖИССЕРСКОЕ РЕШЕНИЕ</div>
                         <h2>
-                          {selected
+                          {keyframeSet?'Подходит весь комплект кадров?':selected
                             ? 'Этот вариант подходит?'
                             : 'Сначала — вариант'}
                         </h2>
                         <p>
-                          {selected
+                          {keyframeSet?requiredKeyframeRoles(planKeyframeMode(p,item)).map(role=>`${KEYFRAME_ROLE_NAMES[role]}: ${selectedKeyframe(item,role)?.title??'не выбран'}`).join(' · '):selected
                             ? step===0?scriptVariantLabel(p,selected):selected.title
                             : 'Сохраните описание или создайте несколько вариантов, затем выберите лучший.'}
                         </p>
@@ -1336,7 +1342,7 @@ function Workspace() {
                           ) : (
                             <FileText size={16} />
                           )}
-                          Вариант выбран
+                          {keyframeSet?'Выбор ключевых кадров показан выше':'Вариант выбран'}
                         </div>
                         <div className="checkline">
                           {selectedApproved ? (
@@ -1344,7 +1350,7 @@ function Workspace() {
                           ) : (
                             <FileText size={16} />
                           )}
-                          {selectedApproved ? 'Этот вариант утверждён' : isApproved(p, item) ? 'Утверждён другой вариант' : item.approvedId ? 'Утверждение требует пересмотра' : 'Вариант ещё не утверждён'}
+                          {keyframeSet?(selectedApproved?'Этот комплект утверждён':'Комплект ещё не утверждён'):selectedApproved ? 'Этот вариант утверждён' : isApproved(p, item) ? 'Утверждён другой вариант' : item.approvedId ? 'Утверждение требует пересмотра' : 'Вариант ещё не утверждён'}
                         </div>
                         {staleStoryboard ? <div className="note">
                           <p>Этот вариант раскадровки создан для прежней основы фильма. Сравните его с текущим планом: если он подходит, подтвердите его повторно.</p>
@@ -1380,6 +1386,7 @@ function Workspace() {
                             !selected ||
                             !ready ||
                             busy ||
+                            (keyframeSet&&keyframeIssues(p,item).length>0) ||
                             (step === 5 && (selected.kind !== 'image' || !selected.assetId)) ||
                             !variantCurrent(p, item, selected) ||
                             (step === 6 && selected.kind === 'video') ||
@@ -1389,12 +1396,13 @@ function Workspace() {
                           onClick={() => perform(() => action('approve'))}
                         >
                           <Check />
-                          {selectedApproved ? 'Утверждено' : 'Утвердить вариант'}
+                          {keyframeSet?(selectedApproved?'Комплект утверждён':'Утвердить комплект кадров'):selectedApproved ? 'Утверждено' : 'Утвердить вариант'}
                         </Button>
                         {!selectedApproved && (!ready || (selected && !variantCurrent(p, item, selected))) && <p className="note">
                           {!ready ? 'Сначала устраните причины блокировки предыдущих этапов в списке выше.' : 'Основа изменилась. Проверьте материал через «Правки», сохраните актуальную версию и утвердите её.'}
                         </p>}
                         </>}
+                        {keyframeSet&&!selectedApproved&&keyframeIssues(p,item).length>0&&<div className="note"><p>Проверьте комплект в разделе «Ключевые кадры плана»:</p>{keyframeIssues(p,item).map((issue,n)=><p key={n}>{issue.message}</p>)}</div>}
                         {item.approvedId && (
                           <Button
                             variant="ghost"
