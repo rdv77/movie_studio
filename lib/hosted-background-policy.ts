@@ -1,6 +1,6 @@
 import type {Job} from './domain';
 import {FAL_QWEN,FAL_H3,FAL_WAN,FAL_KLING} from './fal-models';
-import {GROK_VIDEO_1080} from './model-capabilities';
+import {GROK_VIDEO_1080,promptCapacity,fitsPrompt} from './model-capabilities';
 import {isGoogleVideo} from './google-models';
 import {zenProfile} from './zencreator-models';
 
@@ -12,6 +12,13 @@ import {zenProfile} from './zencreator-models';
 export function hostedQueuedDispatchEligible(job:Job):boolean{
   // LLM completion must stay in the foreground; waitUntil only has a short tail.
   if(job.purpose==='prompt-optimization'||job.compilation?.budget.needsOptimization&&job.promptOptimization?.state!=='done')return false;
+  // Queued jobs may predate a corrected endpoint limit. Recheck the frozen
+  // prompt, rather than trusting its historical needsOptimization flag.
+  if(!job.purpose&&!job.lipsync&&(job.kind==='image'||job.kind==='video')&&typeof job.prompt==='string'){
+    const cap=promptCapacity(job.model,job.kind);
+    const counted=cap.unit==='tokens'&&job.promptTokenCount?.text===job.prompt&&job.promptTokenCount.count<=cap.limit;
+    if(!counted&&!fitsPrompt(job.prompt,cap))return false;
+  }
   // These runners await the complete response, even if their selected model's
   // ordinary media adapter supports an asynchronous queue.
   if(job.purpose==='directing'||job.purpose==='voice-design'||job.soundInput||

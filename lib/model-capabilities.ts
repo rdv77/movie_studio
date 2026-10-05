@@ -10,6 +10,9 @@ export function promptCapacity(modelId:string,kind:'image'|'video'):PromptCapaci
   if(modelId==='MiniMax-H3')return api(7000,'API MiniMax H3');
   if(modelId==='fal-minimax-h3-max')return api(50000,'Схема API fal.ai / minimax/h3-max/image-to-video');
   if(modelId===KLING_VIDEO)return api(2500,'Схема API fal.ai / kling-video/v3/pro/image-to-video');
+  // Both studio modes use the same xAI generation endpoint. The 4096 limit
+  // was reported by its HTTP 400 validation response on 2026-10-05.
+  if(isGrokVideo(modelId))return api(4096,'Grok Video: предел 4096 по ответу API от 05.10.2026');
   if(modelId.startsWith('veo-'))return api(1024,'API Google Veo; подсчёт токенов проверяется перед отправкой','tokens');
   if(kind==='image'&&modelId.startsWith('gpt-image-'))return api(32000,'API GPT Image');
   if(modelId.startsWith('zencreator:'))return api(5000,'ZenCreator: подтверждённый лимит; перед отправкой проверяется каталог API');

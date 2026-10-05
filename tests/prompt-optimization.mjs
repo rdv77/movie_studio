@@ -14,10 +14,17 @@ globalThis.fetch=async(url,init)=>{
  const body=JSON.parse(init.body);assert.equal(body.model,'grok-4.6');assert(body.messages[1].content.includes('required:true'));
  if(responseMode==='wait')await new Promise(r=>release=r);
  if(responseMode==='network')throw Error('offline');
- return Response.json({id:'llm-receipt',usage:{cost_in_usd_ticks:'12345'},choices:[{message:{content:responseMode==='bad'?'not JSON':JSON.stringify({sections:[{key:'face',text:'Keep blue eyes, red cloak and face.'},{key:'action',text:'Raise arrow. Mouth closed.'}]})}}]});
+ return Response.json({id:'llm-receipt',usage:{cost_in_usd_ticks:'12345'},choices:[{message:{content:responseMode==='bad'?'not JSON':JSON.stringify({sections:responseMode==='whole'?[{key:'prompt',text:'Keep blue eyes, red cloak and face. Raise arrow. Mouth closed.'}]:[{key:'face',text:'Keep blue eyes, red cloak and face.'},{key:'action',text:'Raise arrow. Mouth closed.'}]})}}]});
 };
 try{
  let j=reset({prompt:'Short prompt.'});assert.equal(await prepareMediaPrompt('owner','film',j,'media-key'),undefined);assert.equal(calls,0);assert.equal(globalThis.keyReads,0);
+ for(const model of ['grok-imagine-video-1.5','grok-imagine-video-1.5-1080p']){
+   const before=calls;j=reset({model,prompt:'я'.repeat(4096)});assert.equal(await prepareMediaPrompt('owner','film',j,'media-key'),undefined);assert.equal(calls,before);
+   responseMode='whole';j=reset({model,prompt:'я'.repeat(4097),promptSections:undefined,compilation:{budget:{limit:60000,needsOptimization:false},compression:{shortened:false}}});
+   const repaired=await prepareMediaPrompt('owner','film',j,'media-key');assert.equal(calls,before+1);assert.equal(repaired.jobs[0].status,'queued');assert(repaired.jobs[0].prompt.length<=4096);assert.equal(repaired.jobs[1].status,'done');
+   await prepareMediaPrompt('owner','film',repaired.jobs[0],'media-key');assert.equal(calls,before+1,'Existing queued Grok job is optimized once despite obsolete snapshot');
+ }
+ calls=0;responseMode='ok';
  j=reset();const p=await prepareMediaPrompt('owner','film',j,'media-key');assert.equal(calls,1);assert.equal(p.jobs[0].status,'queued');assert(p.jobs[0].prompt.length<=2500);assert.equal(p.jobs[0].promptOptimization.state,'done');
  assert.equal(p.jobs[1].purpose,'prompt-optimization');assert.equal(p.jobs[1].actual,'12345');assert.equal(p.jobs[1].requestId,'llm-receipt');assert.equal(p.jobs[1].status,'done');assert(!p.jobs[0].requestId,'Media provider not called during optimization');
  await prepareMediaPrompt('owner','film',p.jobs[0],'media-key');assert.equal(calls,1,'A completed prompt is not optimized twice');

@@ -14,7 +14,7 @@ export const MODELS: {
   {id:'fal-kling-3.0-pro',name:'fal.ai · Kling 3.0 Pro',provider:'fal',kind:'video',estimate:'6720000000',
     note:'До 1080p · 3–15 сек · первый и конечный кадры · без собственной озвучки · $0.112/сек; лимит API 2500 символов, длинный промпт сокращает LLM'},
   {id:'grok-imagine-video-1.5-1080p',name:'Grok Imagine Video 1.5 · 1080p',provider:'xai',kind:'video',estimate:'15100000000',
-    note:'1080p · 1–15 сек · только первый кадр, без конечного и других референсов · $0.25/сек + $0.01 за изображение'},
+    note:'1080p · 1–15 сек · только первый кадр, без конечного и других референсов · промпт до 4096 символов, длинный сокращает LLM · $0.25/сек + $0.01 за изображение'},
   ...ZEN_MODELS,
   {id:'fal-minimax-h3-max',name:'fal.ai · MiniMax H3 Max',provider:'fal',kind:'video',estimate:'4800000000',
     note:'Видео из первого кадра · 6 сек · 768P · оценка $0.48 без учёта акций; списание уточняйте в fal.ai'},
@@ -81,7 +81,7 @@ export const MODELS: {
     provider: 'xai',
     kind: 'video',
     estimate: '8500000000',
-    note: '720p, 6 сек, первый кадр; ориентир $0.85',
+    note: '720p, первый и конечный кадры; промпт до 4096 символов, длинный сокращает LLM; ориентир $0.85 за 6 сек',
   },
   {
     id: 'MiniMax-Hailuo-2.3',

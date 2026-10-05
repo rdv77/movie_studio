@@ -10,6 +10,11 @@ const blocked=[job('grok-imagine-image-2.0'),job('gpt-image-2.5-sunburst'),job('
 const allowed=[job('fal-qwen-image-edit-2511'),job('fal-minimax-h3-max','video'),job('fal-wan-2.2-a14b','video'),job('flux-2-pro'),job('MiniMax-H3','video'),job('MiniMax-Hailuo-2.3','video'),job('grok-imagine-video-1.5','video'),job('veo-3.1-generate-preview','video'),job('gemini-omni-1.1-flash','video'),job('zencreator:image:QWEN_IMAGE'),job('zencreator:video:wan@2.7','video'),job('zencreator:text:grok','text'),job('sync-3','video','queued',{lipsync:{seconds:5}})];
 assert(blocked.every(j=>!P.hostedQueuedDispatchEligible(j)),'Synchronous media and all synchronous specialists stay foreground');assert(allowed.every(P.hostedQueuedDispatchEligible),'Only installed asynchronous submit protocols are allowed');
 assert(!P.hostedQueuedDispatchEligible({...allowed[0],kind:'text'}));assert(!P.hostedQueuedDispatchEligible(job('sync-3','video')),'Sync requires the separate lipsync adapter input');
+for(const model of ['grok-imagine-video-1.5','grok-imagine-video-1.5-1080p']){
+ const legacy=job(model,'video','queued',{prompt:'я'.repeat(4097),compilation:{budget:{limit:60000,needsOptimization:false}}});
+ assert(!P.hostedQueuedDispatchEligible(legacy),'Old queued oversized Grok request must optimize in foreground');
+ assert(P.hostedQueuedDispatchEligible({...legacy,prompt:'я'.repeat(4096)}),'Fitting Grok requests keep async background dispatch');
+}
 const p=D.newProject('Hosted time window');p.queueSettings={concurrency:8,providerLimits:{xai:8,openai:8,minimax:8,fal:8,elevenlabs:8}};
 const continued=[job('gpt-image-2.5-flare','image','pending',{requestId:'known-receipt'}),job('grok-imagine-image-2.0','image','saving',{output:{url:'https://mock.test/image.png'}}),job('eleven_v3','audio','saving',{purpose:'voice-design',voiceWorkflow:{provider:'elevenlabs'}}),job('eleven_v3','audio','saving',{soundInput:{layerId:'layer'}})];
 p.jobs=[...blocked,...allowed,...continued];p.directing={runs:[{id:'director-run',stopped:false,tasks:[{id:'task'}]}]};

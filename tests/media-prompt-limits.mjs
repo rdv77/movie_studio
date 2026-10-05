@@ -20,7 +20,13 @@ try{
  await assert.rejects(()=>P.generate({...job,model:M.KLING_VIDEO,prompt:'я'.repeat(2501)},'test',[ref],'16:9'),e=>e.notSent);
  assert.equal(M.promptCapacity('MiniMax-H3','video').limit,7000);assert.equal(M.promptCapacity('fal-minimax-h3-max','video').limit,50000);
  assert.equal(M.promptCapacity('veo-3.1-generate-preview','video').unit,'tokens');assert.equal(M.promptCapacity('veo-3.1-generate-preview','video').limit,1024);
- assert.equal(M.promptCapacity('grok-imagine-video-1.5','video').verified,false);
+ for(const model of ['grok-imagine-video-1.5',M.GROK_VIDEO_1080]){
+   const cap=M.promptCapacity(model,'video');assert.equal(cap.limit,4096);assert.equal(cap.unit,'characters');
+   const before=requests.length;
+   await assert.rejects(()=>P.generate({...job,model,prompt:'я'.repeat(4097)},'test',[ref],'16:9'),e=>e.notSent);
+   assert.equal(requests.length,before,'Oversized Grok prompt never reaches video API');
+   await P.generate({...job,model,prompt:'я'.repeat(4096)},'test',[ref],'16:9');assert.equal(requests.length,before+1);
+ }
  assert(M.fitsPrompt('я'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')));
  assert(M.fitsPrompt('😀'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')),'API maxLength counts Unicode characters, not JS UTF-16 units');
  assert.equal(V.grokVideoReservation(7,1,null,'1080p'),'17600000000');
