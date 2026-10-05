@@ -1,7 +1,7 @@
 'use client';
 import {ImageRetrySettings} from './image-retry-settings';
 import type {ImageRetryOptions} from '@/lib/image-retries';
-import {useMemo,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 import {additionalFrameItems,additionalFrameAdmission,type AdditionalFrameRole} from '@/lib/keyframe-batch';
 import {availableForDirecting} from '@/lib/model-capabilities';
 import {Button} from '@/components/ui/button';
@@ -22,14 +22,17 @@ export function KeyframeBatchEditor({p,busy,submit,permitMissingFrames,openPlan,
   const [role,setRole]=useState<AdditionalFrameRole>('end');
   const [opened,setOpened]=useState(initiallyOpen),[working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[fallback,setFallback]=useState(GROK_IMAGE_MODEL);
   const [view,setView]=useState<'missing'|'all'>('missing');
-  const rows=useMemo(()=>additionalFrameItems(p,role).map(item=>{
+  // Compiling every plan's prompt is only needed inside the open batch dialog.
+  // A normal frame choice must not pay this cost on every project refresh.
+  const rows=useMemo(()=>!opened?[]:additionalFrameItems(p,role).map(item=>{
     const admission=additionalFrameAdmission(p,item,role),first=selectedKeyframe(item,'start');
     let reason=admission.blocked,estimate:string|null=null;const modelId=first?.jobId?first.model:fallback;
     try{const m=model(modelId),prepared=prepareKeyframeGeneration(p,item.id,role,{model:m.id,refs:planReferenceIds(p,item)});const compiled=compilePrompt(p,item,m.id,{kind:'image',keyframe:role,prompt:prepared.roleInstruction,keyframeInstruction:prepared.roleInstruction,references:prepared.refs,startFrameId:first?.assetId,allowLegacyModel:!p.directing});estimate=m.id===GROK_IMAGE_MODEL?grokImageEstimate(prepared.imageSettings,compiled.references.length):m.estimate;}
     catch(e){reason=(e as Error).message;}
     return {item,first,...admission,reason,estimate,modelId};
-  }),[p,role,fallback]);
+  }),[p,role,fallback,opened]);
   const [included,setIncluded]=useState<string[]>(()=>initiallyOpen?rows.filter(r=>!r.reason&&r.missing).map(r=>r.item.id):[]);
+  useEffect(()=>{if(opened)setIncluded(rows.filter(r=>!r.reason&&r.missing).map(r=>r.item.id));},[opened,role]);
   const missing=rows.filter(r=>r.missing),visible=view==='missing'?missing:rows;
   const selected=rows.filter(r=>included.includes(r.item.id)&&!r.reason),needsPermission=selected.filter(r=>r.retryJobs.length);
   const total=selected.every(r=>r.estimate!==null)?selected.reduce((n,r)=>n+BigInt(r.estimate!),0n).toString():null;
