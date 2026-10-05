@@ -13,6 +13,12 @@ export type PreparedFrame={variantId:string;assetId:string;transform?:FrameCropT
 export type PreparedFrameHistory={role:KeyframeRole;frame:PreparedFrame;created:string};
 export type VideoPreparation={animaticVariantId:string;manifestBasis:string;shotId?:string;startFrame:PreparedFrame;endFrame?:PreparedFrame;middleFrame?:PreparedFrame;duration:number;overriddenRoles?:KeyframeRole[];frameHistory?:PreparedFrameHistory[];shotBasis?:string;sourceFrames?:{startFrame:PreparedFrame;endFrame?:PreparedFrame};sourceDuration?:number;legacyBases?:string[]};
 export type PreparedVideoItem=Item&{videoPreparation?:VideoPreparation};
+/** Preparation replaces only plan metadata. Share immutable history, jobs and
+ * media variants instead of duplicating the entire film in a 128 MB Worker.
+ * Reconciliation may also update linked voice-card metadata (stage 6). */
+export function videoPreparationDraft(p:Project):Project{
+  return {...p,items:p.items.map(item=>item.stage===7||item.stage===6?{...item}:item)};
+}
 export function selectedAnimaticManifest(p:Project,variantId=p.animatic?.selectedId):{variant:Variant;manifest:AnimaticManifest}{
   const variant=p.animatic?.variants.find(v=>v.id===variantId),manifest=(variant as Variant&{animaticManifest?:AnimaticManifest}|undefined)?.animaticManifest;
   if(!variant?.assetId||!manifest)throw Error('Для автоматического выбора кадров соберите аниматик с сохранённым составом. Старый файл остаётся доступным.');
@@ -45,7 +51,7 @@ function compatiblePreparation(p:Project,item:PreparedVideoItem,next:VideoPrepar
 }
 /** Uses original files recorded in this animatic, never a screenshot or a newer implicit approval. */
 export function prepareVideosFromAnimatic(p:Project,variantId:string){
-  const {manifest}=selectedAnimaticManifest(p,variantId);syncVideoPlans(p);const changed:string[]=[];
+  const {manifest}=selectedAnimaticManifest(p,variantId);syncVideoPlans(p);const changed:string[]=[],manifestBasis=versionSignature(manifest);
   for(const clip of manifest.clips){
     const source=p.items.find(i=>i.id===clip.itemId);if(!source||source.stage!==5||source.excludedAt||source.removedAt||source.planArchive)throw Error(`«${clip.title}» больше не входит в фильм. Соберите текущий аниматик.`);
     const item=p.items.find(i=>i.stage===7&&!i.planArchive&&!i.removedAt&&(clip.shotId?i.sourceShot?.shotId===clip.shotId:i.sourceShot?.title===source.sourceShot?.title)) as PreparedVideoItem|undefined;
@@ -53,7 +59,7 @@ export function prepareVideosFromAnimatic(p:Project,variantId:string){
     const frame=(role:KeyframeRole)=>{const f=clip.frames.find(f=>f.role===role);if(!f)return undefined;const value={variantId:f.variantId,assetId:f.assetId};assertOriginalFrame(p,clip.itemId,value);return value;};
     const startFrame=frame('start');if(!startFrame)throw Error(`«${clip.title}»: нет первого кадра.`);
     const endFrame=frame('end');
-    const data:VideoPreparation=compatiblePreparation(p,item,retainPreparedFrames(item.videoPreparation,{animaticVariantId:variantId,manifestBasis:versionSignature(manifest),shotId:clip.shotId,startFrame,endFrame,middleFrame:frame('middle'),duration:clip.duration,shotBasis:preparationShotBasis(p,item),sourceFrames:{startFrame:structuredClone(startFrame),endFrame:endFrame&&structuredClone(endFrame)},sourceDuration:clip.duration}));
+    const data:VideoPreparation=compatiblePreparation(p,item,retainPreparedFrames(item.videoPreparation,{animaticVariantId:variantId,manifestBasis,shotId:clip.shotId,startFrame,endFrame,middleFrame:frame('middle'),duration:clip.duration,shotBasis:preparationShotBasis(p,item),sourceFrames:{startFrame:structuredClone(startFrame),endFrame:endFrame&&structuredClone(endFrame)},sourceDuration:clip.duration}));
     if(versionSignature(item.videoPreparation)!==versionSignature(data)){item.videoPreparation=data;changed.push(item.id);}
   }
   return changed;

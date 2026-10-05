@@ -7,6 +7,11 @@ const picture=()=>{const id=D.id();assets.set(id,{id,projectId:p.id,mime:'image/
 for(const stage of [0,2,3,1,4]){const i=p.items.find(i=>i.stage===stage);D.addVariant(p,i.id,{text:stage===4?JSON.stringify({timingMode:'actual',shots:[{id:'s1',title:'Письмо',duration:5,description:'Поднять письмо',speechType:'none',dialogue:'',camera:'Общий',continuity:'Комната'}]}):'Approved'});D.approve(p,i.id);}
 const frame=p.items.find(i=>i.stage===5);frame.title='Письмо';frame.sourceShot={scriptId:p.items.find(i=>i.stage===4).id,shotId:'s1',title:frame.title};D.addVariant(p,frame.id,{kind:'image',assetId:picture(),duration:5});D.approve(p,frame.id);
 const original=D.chosen(frame),plan=editPlan(p,true),basis=A.animaticBasis(p),manifest=M.buildAnimaticManifest(p,plan,basis);A.saveAnimatic(p,{kind:'video',assetId:D.id(),duration:5,animaticManifest:manifest},basis);globalThis.film=structuredClone(p);
+const frozen=structuredClone(p),draft=V.videoPreparationDraft(p);
+assert.equal(draft.jobs,p.jobs,'Keep the request history shared instead of duplicating the film');
+assert.equal(draft.animatic,p.animatic,'Saved source manifests remain immutable shared data');
+for(const item of p.items){const copy=draft.items.find(i=>i.id===item.id);assert.equal(copy.variants,item.variants);if([6,7].includes(item.stage))assert.notEqual(copy,item);else assert.equal(copy,item);}
+V.prepareVideosFromAnimatic(draft,p.animatic.selectedId);assert.deepEqual(p,frozen,'A prepared draft must not mutate the original snapshot before validation/save');
 const post=body=>POST(new Request('http://localhost/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),{params:Promise.resolve({id:p.id})});
 let r=await post({revision:film.revision,action:'prepare',variantId:film.animatic.selectedId});assert.equal(r.status,200,await r.clone().text());let video=film.items.find(i=>i.stage===7&&!i.planArchive);assert.equal(video.videoPreparation.startFrame.assetId,original.assetId);assert.equal(video.videoPreparation.duration,5);const before=JSON.stringify(video.videoPreparation);
 r=await post({revision:film.revision,action:'prepare',variantId:film.animatic.selectedId});assert.equal(r.status,200);assert.equal(JSON.stringify(film.items.find(i=>i.id===video.id).videoPreparation),before);assert.equal(film.jobs.length,0,'Preparation never pays');

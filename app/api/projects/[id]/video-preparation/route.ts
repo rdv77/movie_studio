@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {api,owner,loadProject,saveProject,asset} from '@/lib/server';
-import {prepareVideosFromAnimatic,overridePreparedVideoFrame,cropPreparedVideoFrame} from '@/lib/video-from-animatic';
+import {prepareVideosFromAnimatic,overridePreparedVideoFrame,cropPreparedVideoFrame,videoPreparationDraft} from '@/lib/video-from-animatic';
 import {frameCropTransformSchema} from '@/lib/frame-crop';
 export const POST=api(async(req,ctx)=>{
  const user=await owner(req,true),p=await loadProject(user,(await ctx.params).id);
@@ -11,7 +11,7 @@ export const POST=api(async(req,ctx)=>{
   z.object({...base,...frame,action:z.literal('crop'),sourceVariantId:z.string().uuid(),expectedAssetId:z.string().uuid(),assetId:z.string().uuid(),transform:frameCropTransformSchema}),
  ]).parse(await req.json());
  if(s.revision!==p.revision)throw Error('Проект изменился. Просмотрите текущий состав аниматика.');
- const next=structuredClone(p);
+ const next=videoPreparationDraft(p);
  if(s.action==='prepare')prepareVideosFromAnimatic(next,s.variantId);
  else if(s.action==='override')overridePreparedVideoFrame(next,s.itemId,s.role,s.variantId);
  else {
@@ -23,9 +23,11 @@ export const POST=api(async(req,ctx)=>{
   if(!['image/png','image/jpeg','image/webp'].includes(original.mime)||original.size<=0)throw Error('Исходный файл должен быть изображением этого плана.');
   cropPreparedVideoFrame(next,s.itemId,s.role,s);
  }
+ const sources=new Map<string,boolean>();
  for(const item of next.items.filter(i=>i.stage===7&&i.videoPreparation))for(const f of [item.videoPreparation!.startFrame,item.videoPreparation!.endFrame,item.videoPreparation!.middleFrame].filter(Boolean)){
-  if(!['image/png','image/jpeg','image/webp'].includes((await asset(user,f!.assetId,p)).mime))throw Error('Исходный кадр должен быть изображением этого проекта.');
-  if(f!.transform)await asset(user,f!.transform.sourceAssetId,p);
+  sources.set(f!.assetId,true);
+  if(f!.transform&&!sources.has(f!.transform.sourceAssetId))sources.set(f!.transform.sourceAssetId,false);
  }
+ for(const [assetId,mustBeImage] of sources){const source=await asset(user,assetId,p);if(mustBeImage&&!['image/png','image/jpeg','image/webp'].includes(source.mime))throw Error('Исходный кадр должен быть изображением этого проекта.');}
  return Response.json(await saveProject(user,next,p.revision));
 });
