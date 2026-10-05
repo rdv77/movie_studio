@@ -17,7 +17,6 @@ import {videoPreparationIssue} from '../lib/video-from-animatic';
 import {grokVideoReservation,scaledVideoReservation} from '../lib/video-duration';
 import {supportsEndFrame} from '../lib/video-end-frame';
 import {AnimaticTimeline} from './animatic-timeline';
-import {manifestAssets} from '../lib/animatic-manifest';
 
 import {compilePrompt,type CompiledPrompt,type PromptInput} from '@/lib/prompt-compiler';
 import {mediaVariantPrompt} from '@/lib/prompt-jobs';
@@ -587,7 +586,6 @@ function Workspace() {
           kind: 'video',
           assetId: a.id,
           duration: seconds,
-          refs: manifest?manifestAssets(manifest):[],
         },
         animatic?'':target?.id,
       );

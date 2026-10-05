@@ -8,6 +8,9 @@ import {buildSoundscapeMix} from './soundscape';
 import {musicSettings,musicIssue} from './music';
 
 const identity=z.string().min(1).max(100),seconds=z.number().finite().positive().max(3600);
+// The full film's source list is not a provider's 8-image reference list:
+// up to 120 plans × 3 frames, 240 voices, 300 sound layers and one music track.
+export const ANIMATIC_MAX_SOURCE_ASSETS=120*3+240+300+1;
 export const animaticFrameSchema=z.object({role:z.enum(['start','middle','end']),variantId:identity,assetId:identity,at:z.number().min(0).max(3600),duration:seconds,model:z.string().max(150),sourceBasis:z.string().max(200).optional()});
 export const animaticManifestSchema=z.object({schemaVersion:z.literal(1),projectId:identity,scriptVariantId:identity.optional(),format:z.enum(['16:9','9:16']),basis:z.string().max(500000),seconds,clips:z.array(z.object({itemId:identity,shotId:identity.optional(),sceneId:identity.optional(),title:z.string().max(120),offset:z.number().min(0).max(10000),duration:seconds,frames:z.array(animaticFrameSchema).min(1).max(3),direction:shotDirectionSchema.optional()})).min(1).max(120),audio:z.array(z.object({variantId:identity,assetId:identity,offset:z.number().min(0).max(10000),duration:seconds,trim:z.number().min(0).max(3600),volume:z.number().min(0).max(2),speechType:z.string().optional(),speaker:z.string().optional()})).max(240),soundscape:z.array(z.object({layerId:identity,variantId:identity,assetId:identity,start:z.number().min(0),duration:seconds,trim:z.number().min(0),volume:z.number().min(0).max(2)}).passthrough()).max(300).optional(),music:z.object({variantId:identity,assetId:identity,settings:z.unknown()}).optional()});
 export type AnimaticManifest=z.infer<typeof animaticManifestSchema>;
@@ -20,7 +23,9 @@ export function frameSchedule(p:Project,item:Item,duration:number):AnimaticFrame
   const endHold=Math.max(1,Math.min(count-roles.length+1,Math.round((direction?.timing?.endingHold??duration*.4)*24)));
   const middleStart=roles.length===3?Math.max(1,Math.floor((count-endHold)*.5)):0;
   const boundaries=roles.length===1?[0,count]:roles.length===2?[0,count-endHold,count]:[0,middleStart,count-endHold,count];
-  return frames.map(({role,v},n)=>({role,variantId:v.id,assetId:v.assetId!,model:v.model,sourceBasis:v.keyframeReviewBasis,at:boundaries[n]/count*duration,duration:(boundaries[n+1]-boundaries[n])/count*duration}));
+  // JSON drops absent optional fields. Keep the expected snapshot identical
+  // before and after a browser request, including legacy frames without a basis.
+  return frames.map(({role,v},n)=>({role,variantId:v.id,assetId:v.assetId!,model:v.model,...(v.keyframeReviewBasis!==undefined?{sourceBasis:v.keyframeReviewBasis}:{}),at:boundaries[n]/count*duration,duration:(boundaries[n+1]-boundaries[n])/count*duration}));
 }
 export function buildAnimaticManifest(p:Project,plan:{clips:Variant[];audio:Variant[];seconds:number;music?:Variant;musicSettings?:unknown;soundscape?:unknown},basis:string):AnimaticManifest{
   const items=p.items.filter(i=>i.stage===5&&participates(p,i));if(items.length!==plan.clips.length)throw Error('Состав раскадровки изменился.');

@@ -2,7 +2,7 @@ import {allowMissingAdditionalFrames} from '@/lib/keyframe-batch';
 import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
 import {setCharacterBinding} from '@/lib/character-bindings';
 import {applyMontageProposal} from '../../../../lib/montage-review';
-import {animaticManifestSchema,manifestAssets} from '../../../../lib/animatic-manifest';
+import {animaticManifestSchema,manifestAssets,ANIMATIC_MAX_SOURCE_ASSETS} from '../../../../lib/animatic-manifest';
 import { approveReview } from '@/lib/review-center';
 import { recordCharacterVersion, restoreCharacterVersion, captureVersionInfo } from '@/lib/creative-versions';
 import { syncVideoPlans } from '@/lib/video';
@@ -67,6 +67,13 @@ const variant = z.object({
   mergedFromIds: z.array(z.string().uuid()).min(2).max(2).optional(),
 });
 const approvalSelection=z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),keyframes:keyframeSelectionSchema.optional()});
+// Older open tabs send all manifest sources again in refs. Accept the full
+// bounded film list here; keep the generic generation/edit limit at eight.
+const animaticPreview=variant.extend({
+  refs:z.array(z.string().uuid()).max(ANIMATIC_MAX_SOURCE_ASSETS).default([]),
+  basis:animaticManifestSchema.shape.basis.min(1),
+  animaticManifest:animaticManifestSchema.optional(),
+});
 async function checkApprovalAssets(user:string,p:Project,itemId:string,variantId:string){
   const item=getItem(p,itemId),selected=item.stage===5&&hasKeyframeConfig(p,item)
     ?storyboardApprovalVariants(p,item):item.variants.filter(v=>v.id===variantId);
@@ -153,12 +160,12 @@ export const PATCH = api(async (req, ctx) => {
       p.animaticSettings=z.object({sound:z.enum(['silent','voices']),music:z.boolean(),motion:z.boolean()}).parse(d);break;
     }
     case 'saveAnimaticPreview': {
-      const v=variant.parse(d),basis=z.string().min(1).max(100000).parse(d?.basis);
+      const {basis,animaticManifest:manifest,...v}=animaticPreview.parse(d);
       if(!v.assetId||(await asset(user, v.assetId, p)).mime!=='video/mp4')throw new Error('Для аниматика нужен файл MP4.');
-      for (const ref of [...v.refs,...(v.characterRefs??[]),...(v.character?.refs??[])]) await asset(user,ref,p);
-      const manifest=d?.animaticManifest?animaticManifestSchema.parse(d.animaticManifest):undefined;
-      if(manifest)for(const ref of manifestAssets(manifest))await asset(user,ref,p);
-      saveAnimatic(p,{...v,animaticManifest:manifest},basis);break;
+      const sources=new Set([...v.refs,...(v.characterRefs??[]),...(v.character?.refs??[]),...(v.location?.refs??[]),...(v.location?.approvedAngles.flatMap(a=>a.refs)??[]),...(manifest?manifestAssets(manifest):[])]);
+      for (const ref of sources) await asset(user,ref,p);
+      // The validated manifest already retains every source, including history.
+      saveAnimatic(p,{...v,refs:manifest?[]:v.refs,animaticManifest:manifest},basis);break;
     }
     case 'selectAnimatic':
     case 'approveAnimatic':
