@@ -21,16 +21,18 @@ export function scheduleBackgroundWork(context:BackgroundExecutionContext|null|u
   context.waitUntil(Promise.resolve().then(work).catch(error=>{onError?.(error);}));return true;
 }
 /** Trusted worker adapter uses owners read from the database, never forged HTTP auth headers. */
-export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxFlights?:number;dispatchQueued?:(job:Job,project:Project)=>boolean;dispatchDirectors?:boolean}={}){
+export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxFlights?:number;flightLeaseMs?:number;continueJob?:(job:Job)=>boolean;dispatchQueued?:(job:Job,project:Project)=>boolean;dispatchDirectors?:boolean}={}){
   const maxFlights=options.maxFlights??8;if(!Number.isInteger(maxFlights)||maxFlights<1||maxFlights>32)throw Error('Неверное число фоновых операций.');
-  const flights=new Map<string,Promise<unknown>>(),attempted=new Map<string,number>(),now=adapters.now??Date.now;
+  const flights=new Map<string,{promise:Promise<unknown>;expires:number}>(),attempted=new Map<string,number>(),now=adapters.now??Date.now;
   const prefix=(owner:string,id:string)=>JSON.stringify([owner,id]);
   const launch=(key:string,work:()=>Promise<unknown>)=>{
-    if(flights.has(key))return flights.get(key)!;
-    const promise=Promise.resolve().then(work).catch(error=>{adapters.onError?.(error);}).finally(()=>flights.delete(key));flights.set(key,promise);return promise;
+    if(flights.has(key))return flights.get(key)!.promise;
+    const flight={promise:undefined! as Promise<unknown>,expires:now()+(options.flightLeaseMs??Infinity)};
+    flight.promise=Promise.resolve().then(work).catch(error=>{adapters.onError?.(error);}).finally(()=>{if(flights.get(key)===flight)flights.delete(key);});flights.set(key,flight);return flight.promise;
   };
   async function tickProject(owner:string,id:string){
-    const p=await adapters.loadProject(owner,id),scope=prefix(owner,id),pending:Promise<unknown>[]=[];
+    for(const [key,flight] of flights)if(flight.expires<=now())flights.delete(key);
+    let p=await adapters.loadProject(owner,id);const scope=prefix(owner,id),pending:Promise<unknown>[]=[];
     // Watchdogs only persist a deadline; they never send/poll another paid request.
     for(const job of p.jobs.filter(j=>j.purpose!=='directing'&&waitExpired(j,now()))){
       const key=scope+':watch:'+job.id;pending.push(launch(key,()=>adapters.executeMediaJob(owner,id,job.id,'check-wait')));
@@ -42,16 +44,19 @@ export function createBackgroundWorker(adapters:BackgroundAdapters,options:{maxF
     // Filter BEFORE fair selection; held synchronous jobs must not starve
     // asynchronous submissions. The executor still rechecks the full saved
     // project in CAS. Existing receipts and saved files are never filtered.
-    const queueProject=options.dispatchQueued?{...p,jobs:p.jobs.filter(j=>j.status!=='queued'||options.dispatchQueued!(j,p))}:p;
+    let queueProject=options.dispatchQueued?{...p,jobs:p.jobs.filter(j=>j.status!=='queued'||options.dispatchQueued!(j,p))}:p;
     for(const job of queueRunnableJobs(queueProject,inputFlights,attempted,now())){
       if(flights.size>=maxFlights)break;
       const key=scope+':job:'+job.id;if(flights.has(key))continue;
       // Expired dispatches are handled by the watchdog above, not resent.
-      if(job.status==='dispatching')continue;
+      if(job.status==='dispatching'||options.continueJob&&!options.continueJob(job))continue;
       attempted.set(job.id,now());
       pending.push(launch(key,()=>job.purpose==='voice-design'?adapters.executeVoiceJob(owner,id,job.id):
         (job as typeof job&{soundInput?:unknown}).soundInput&&adapters.executeSoundJob?adapters.executeSoundJob(owner,id,job.id):adapters.executeMediaJob(owner,id,job.id)));
     }
+    // Executors reload their current CAS state. Do not retain this complete
+    // selection snapshot while provider I/O/downloads save another one.
+    p=undefined!;queueProject=undefined!;
     await Promise.allSettled(pending);
   }
   async function tickAll(){

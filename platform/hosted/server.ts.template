@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { encodeProjectState, decodeProjectState, ProjectStorageError } from './project-state';
 import { projectAssetIds } from './project-assets';
 import { captureQueueHook } from './api-queue-hook';
+import {MediaWorkBusyError} from './media-work-slot';
 export const runtime = env as unknown as {
   DB: D1Database;
   FILES: R2Bucket;
@@ -54,6 +55,7 @@ export function api(fn: (req: Request, ctx: any) => Promise<Response>) {
       }
       return response;
     } catch (e) {
+      if(e instanceof MediaWorkBusyError)return Response.json({error:e.message,code:e.code},{status:503,headers:{'Retry-After':'5'}});
       return Response.json(
         {
           error:

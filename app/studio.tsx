@@ -346,7 +346,7 @@ function Workspace() {
   const aq = useQuery<Asset[]>({
     queryKey: ['assets', projectId],
     queryFn: () => request('/api/assets?projectId=' + encodeURIComponent(projectId)),
-    enabled: !!projectId,
+    enabled: !!projectId && p?.id === projectId && !pq.isFetching,
   });
   const cq = useQuery<any>({
     queryKey: ['connections'],

@@ -24,9 +24,9 @@ export function queueHookProject(method: string, pathname: string, body?: unknow
   const action = typeof body === 'object' && body !== null && 'action' in body
     ? (body as { action?: unknown }).action : undefined;
   if (route === 'jobs') {
-    // The watchdog is deliberately read/reconciliation only. Never dispatch a
-    // different queued attempt merely because the browser checked a timeout.
-    if (jobId && (action === undefined || ['resume-wait', 'recover-result', 'recover-voice-file'].includes(String(action)))) return projectId;
+    // The browser already advances saved jobs. A second after-response worker
+    // races its next tick/file refresh and duplicates the large project in RAM.
+    // Explicit recovery and normal polling both leave scheduling to that queue.
     return;
   }
   if (jobId) return;

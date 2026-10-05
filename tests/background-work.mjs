@@ -15,4 +15,12 @@ let caught;assert(W.scheduleBackgroundWork({waitUntil:p=>{promise=p;}},async()=>
 const watchdog=structuredClone(p);watchdog.jobs=[{...job(undefined,'dispatching'),started:'2026-10-01T10:00:00Z'}];const actions=[];const watchWorker=W.createBackgroundWorker({listProjects:async()=>[],loadProject:async()=>watchdog,executeMediaJob:async(_,__,id,action)=>{actions.push(action);return watchdog;},executeVoiceJob:async()=>{throw Error('Unexpected voice');},runDirectorStep:async()=>watchdog,now:()=>tickTime});await watchWorker.tickProject('owner',watchdog.id);assert.deepEqual(actions,['check-wait']);
 const secret='0123456789abcdef0123456789abcdef';assert(await W.workerSecretMatches(secret,secret));assert(!await W.workerSecretMatches(secret,'wrong'));assert(!await W.workerSecretMatches(undefined,secret));assert(!await W.workerSecretMatches('short','short'));assert(!await W.workerSecretMatches(secret,'x'.repeat(1000)));
 assert.throws(()=>W.createBackgroundWorker({}, {maxFlights:0}));
+// A cancelled hosted event can strand its JS promise. Lease expiry only drops
+// the local flight; the persisted dispatching status still prohibits resubmit.
+let clock=tickTime,finishOld;const leaseProject=D.newProject('Cancelled event');leaseProject.jobs=[job(undefined)];let submits=0;
+const leased=W.createBackgroundWorker({...adaptersForLease(),now:()=>clock},{flightLeaseMs:35_000});
+function adaptersForLease(){return {listProjects:async()=>[],loadProject:async()=>structuredClone(leaseProject),executeVoiceJob:async()=>leaseProject,runDirectorStep:async()=>leaseProject,executeMediaJob:async(_,__,id)=>{submits++;const j=leaseProject.jobs.find(j=>j.id===id);j.status='dispatching';j.started=new Date(clock).toISOString();if(submits===1)await new Promise(r=>finishOld=r);else j.status='done';return leaseProject;}};}
+const orphan=leased.tickProject('owner',leaseProject.id);await new Promise(r=>setImmediate(r));assert.equal(submits,1);
+clock+=35_000;leaseProject.jobs.push(job(undefined));await leased.tickProject('owner',leaseProject.id);assert.equal(submits,2,'Unrelated queued job can advance after orphan expiry');assert.equal(leaseProject.jobs[0].status,'dispatching','Paid request with no receipt is never silently reset');
+finishOld();await orphan;assert.equal(leased.inFlightCount(),0);
 console.log('PASS background engine: trusted database owners, media/voice routing, overlapping ticks without duplicate calls, no unknown/failed retry, watchdog-only expiry, waitUntil/no-context behavior and constant-time secret digest check. Mock executors only.');

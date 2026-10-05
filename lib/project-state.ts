@@ -1,5 +1,6 @@
 import type { Project } from './domain';
 import type { ObjectStore } from './storage-types';
+import {projectAssetIds} from './project-assets';
 
 // D1 limits a string/table row to 2,000,000 bytes. Keep ample headroom and
 // store growing project snapshots as private blobs in the existing R2 binding.
@@ -18,7 +19,22 @@ export async function encodeProjectState(files:ObjectStore,user:string,p:Project
     const saved=await files.put(key,bytes,{httpMetadata:{contentType:'application/json'}});
     if(!saved)throw new Error('Empty storage response');
   }catch {throw new ProjectStorageError('Не удалось сохранить данные проекта. Предыдущая сохранённая версия остаётся доступной. Повторите действие позже.');}
-  return {state:JSON.stringify({[tag]:'r2-v1',key,size:bytes.byteLength,sha256:await hash(bytes),revision:p.revision})};
+  // File-list refreshes need membership, not another 18+ MB film snapshot.
+  // This index is written with the same immutable snapshot and D1 revision.
+  return {state:JSON.stringify({[tag]:'r2-v1',key,size:bytes.byteLength,sha256:await hash(bytes),revision:p.revision,assetIds:[...projectAssetIds(p)]})};
+}
+
+/** Only call with a row already authorized by owner/id. Old pointers fall back
+ * to the full snapshot once; their next normal save writes the small index. */
+export async function storedProjectAssetIds(user:string,id:string,state:string,revision:number):Promise<Set<string>|undefined>{
+  let data:any;try{data=JSON.parse(state);}catch{return;}
+  if(!data||typeof data!=='object')return;
+  if(!Object.hasOwn(data,tag))return data.id===id&&Array.isArray(data.items)&&Array.isArray(data.jobs)?projectAssetIds(data):undefined;
+  const scope=await prefix(user,id),start=scope+revision+'/';
+  if(data[tag]!=='r2-v1'||data.revision!==revision||typeof data.key!=='string'||!data.key.startsWith(start)||
+    !/^[0-9a-f-]{36}\.json$/.test(data.key.slice(start.length))||!Array.isArray(data.assetIds)||
+    !data.assetIds.every((value:unknown)=>typeof value==='string'&&value.length>0))return;
+  return new Set<string>(data.assetIds);
 }
 
 export async function decodeProjectState(files:ObjectStore,user:string,id:string,state:string,revision:number):Promise<Project> {

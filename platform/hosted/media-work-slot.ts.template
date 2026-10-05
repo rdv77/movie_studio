@@ -1,0 +1,18 @@
+/** One isolate has one memory budget, shared by overlapping HTTP requests.
+ * Refuse before loading a large project or claiming a paid request. This is
+ * local admission only; database CAS remains the cross-isolate authority. */
+// A cancelled Workers request may never settle its suspended promise/finally.
+// This lease bounds only the local memory gate; it never requeues a job or
+// authorizes resending a provider request. Durable CAS/status still owns that.
+export const MEDIA_WORK_LEASE_MS=10*60*1000;
+let occupied:{token:symbol;expires:number}|undefined;
+export class MediaWorkBusyError extends Error {
+  readonly code='MEDIA_WORKER_BUSY';
+  constructor(message='Сервер обрабатывает предыдущий файл. Задача остаётся в очереди и продолжится автоматически.'){super(message);}
+}
+export async function withMediaWorkSlot<T>(work:()=>Promise<T>,busyMessage?:string,leaseMs=MEDIA_WORK_LEASE_MS):Promise<T>{
+  if(occupied&&occupied.expires>Date.now())throw new MediaWorkBusyError(busyMessage);
+  const token=Symbol('media-work');
+  occupied={token,expires:Date.now()+leaseMs};
+  try{return await work();}finally{if(occupied?.token===token)occupied=undefined;}
+}

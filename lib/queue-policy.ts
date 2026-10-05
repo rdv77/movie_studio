@@ -55,14 +55,19 @@ export function queueSlotIssue(p:QueueProject,job:Job,locallyClaimed:ReadonlySet
     const itemIssue=queueAdmissionIssue(p,job.itemId,job.batchId);if(itemIssue&&job.purpose!=='media-review')return itemIssue;
   }
   const occupied=p.jobs.filter(j=>j.id!==job.id&&(queueOccupied(j)||locallyClaimed.has(j.id))),settings=queueSettings(p);
-  if(occupied.length>=settings.concurrency)return `Все ${settings.concurrency} места очереди заняты. Попытка ожидает отправки.`;
+  // The optimization audit records a request made INSIDE its parent media
+  // slot. Counting both blocks every remaining job at concurrency=3 when one
+  // unrelated video is pending. Keep the audit in provider accounting only.
+  const projectSlots=occupied.filter(j=>j.purpose!=='prompt-optimization'||!occupied.some(parent=>parent.promptOptimization?.auditId===j.id));
+  if(projectSlots.length>=settings.concurrency)return `Все ${settings.concurrency} места очереди заняты. Попытка ожидает отправки.`;
   const provider=jobProvider(job),providerLimit=providerQueueLimit(p,provider);
   if(occupied.filter(j=>jobProvider(j)===provider).length>=providerLimit)return `Достигнут лимит провайдера: ${providerLimit} одновременных задач. Попытка ожидает отправки.`;
   return '';
 }
 /** Fair selection for browser or worker. Polling an existing receipt uses no new provider slot. */
 export function queueRunnableJobs(p:QueueProject,inputFlights:ReadonlySet<string>,attempted:ReadonlyMap<string,number>,time=Date.now()):Job[]{
-  const settings=queueSettings(p),active=p.jobs.filter(j=>j.purpose!=='directing'&&queueActive(j));
+  const settings=queueSettings(p),active=p.jobs.filter(j=>j.purpose!=='directing'&&queueActive(j)&&
+    (j.purpose!=='prompt-optimization'||waitExpired(j,time)));
   const flights=new Set([...inputFlights].filter(id=>active.some(j=>j.id===id)));
   const slots=Math.max(0,settings.concurrency-flights.size),picked:Job[]=[],claimed=new Set(flights);
   const candidates=active.filter(j=>!flights.has(j.id)&&(j.status!=='dispatching'||waitExpired(j,time)));

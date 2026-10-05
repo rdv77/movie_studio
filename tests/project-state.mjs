@@ -17,7 +17,9 @@ const seed=(p,user=owner)=>rows.set(p.id,{owner:user,title:p.title,state:JSON.st
 seed(p);assert.deepEqual(await S.loadProject(owner,p.id),p);assert.equal(reads.length,0,'Legacy inline load does not touch R2');
 const large=structuredClone(p);large.jobs.push({id:D.id(),itemId:p.items[0].id,status:'done',prompt:'Я'.repeat(1_150_000),actual:'123456789',requestId:'paid-receipt'});large.removedVariants=[{itemId:p.items[1].id,variant:{id:D.id(),text:'Удалённый образ',assetId:D.id()},removedAt:D.now()}];
 const old=structuredClone(large);await S.saveProject(owner,large,0);assert.equal(large.revision,1);
-let pointer=JSON.parse(rows.get(p.id).state);assert.equal(pointer.$kadrProjectState,'r2-v1');assert(rows.get(p.id).state.length<500);assert.equal(pointer.size,new TextEncoder().encode(JSON.stringify({...old,revision:1})).length);
+let pointer=JSON.parse(rows.get(p.id).state);assert.equal(pointer.$kadrProjectState,'r2-v1');assert(rows.get(p.id).state.length<2000);assert.equal(pointer.size,new TextEncoder().encode(JSON.stringify({...old,revision:1})).length);
+assert((await C.storedProjectAssetIds(owner,p.id,rows.get(p.id).state,1)).has(old.removedVariants[0].variant.assetId));
+assert.equal(await C.storedProjectAssetIds('stranger',p.id,rows.get(p.id).state,1),undefined);
 assert.deepEqual(await S.loadProject(owner,p.id),large,'Full large state, assets, approvals and receipts round trip');
 const readsBefore=reads.length,writesBefore=writes.length;await assert.rejects(()=>S.loadProject('stranger',p.id),e=>e.status===404);await assert.rejects(()=>S.saveProject('stranger',large,1),e=>e.status===404);assert.equal(reads.length,readsBefore);assert.equal(writes.length,writesBefore);
 await assert.rejects(()=>S.saveProject(owner,structuredClone(large),0),e=>e.status===409);assert.equal(writes.length,writesBefore,'Stale caller does not upload a blob');
