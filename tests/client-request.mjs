@@ -62,7 +62,11 @@ try{
   assert.deepEqual(await P.json(Response.json({id:'receipt',data:[]})),{id:'receipt',data:[]});
   await assert.rejects(()=>P.json(Response.json({base_resp:{status_code:1001,status_msg:'Invalid params'}})),e=>e instanceof P.ProviderError&&e.definite&&e.message.includes('Invalid params'));
   const ui=await readFile('app/studio.tsx','utf8');
-  assert.match(ui,/import \{request\} from '@\/lib\/client-request'/);
+  assert.match(ui,/import \{request,ApiResponseError\} from '@\/lib\/client-request'/);
+  replies(Response.json({error:'Capacity',code:'MEDIA_WORKER_BUSY'},{status:503}));
+  await assert.rejects(()=>C.request(route,'POST'),e=>e.code==='MEDIA_WORKER_BUSY'&&!e.uncertain);
+  assert.equal(calls.length,1,'A capacity response does not replay the POST');
+  assert.match(ui,/e\.code==='MEDIA_WORKER_BUSY'\)return/);
   assert.match(ui,/Read saved state; never create a replacement attempt\.[\s\S]*invalidateQueries/);
   console.log('PASS client responses: HTML/malformed/network recovery for GET, bounded rereads, status/endpoint diagnostics without response disclosure, zero write retries, multipart and JSON API errors; provider invalid success remains ambiguous. No paid requests.');
 }finally{globalThis.fetch=oldFetch;}

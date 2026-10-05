@@ -1,7 +1,7 @@
 /** API failures must never expose an HTML page or turn an ambiguous write into a retry. */
 export class ApiResponseError extends Error {
   constructor(message: string, public status: number, public endpoint: string,
-    public retryable: boolean, public uncertain: boolean) {
+    public retryable: boolean, public uncertain: boolean, public code?:string) {
     super(message);
     this.name = 'ApiResponseError';
   }
@@ -40,7 +40,8 @@ export async function apiResponse<T = any>(r: Response, url: string, method = 'G
       : typeof data?.error?.message === 'string' ? data.error.message : 'Не удалось выполнить действие.';
     if (/Unexpected (?:token|end)[\s\S]*(?:JSON|json)/.test(message))
       throw transportError(url, method, r.status, 'format');
-    throw new ApiResponseError(message, r.status, endpointFor(url), r.status === 408 || r.status === 429 || r.status >= 500, false);
+    throw new ApiResponseError(message, r.status, endpointFor(url), r.status === 408 || r.status === 429 || r.status >= 500, false,
+      r.status===503&&data?.code==='MEDIA_WORKER_BUSY'?'MEDIA_WORKER_BUSY':undefined);
   }
   if (data === null || typeof data !== 'object') throw transportError(url, method, r.status, 'format');
   return data;

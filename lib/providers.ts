@@ -49,6 +49,7 @@ export async function generate(
   format: string,
   characterRefs: string[] = [],
   endFrame?: string,
+  binaryRefs?:Blob[],
 ): Promise<Result> {
   validateEndFrameData(j, endFrame);
   if (endFrame && refs.length !== 1) throw new ProviderError('Для видео с конечным кадром нужен ровно один первый кадр. Запрос не отправлен.', true, true);
@@ -94,13 +95,20 @@ export async function generate(
       ...(typeof url==='string'&&url?{url}:{error:'MiniMax не вернул картинку. Проверьте расход в кабинете; повтор запускается вручную.'})};
   }
   if(j.kind==='image'&&isOpenAIImage(j.model)) {
-    if(j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT||refs.length>8)throw new ProviderError('GPT Image: до 32 000 символов полного промпта и до 8 референсов в студии. Запрос не отправлен.',true,true);
+    const images=binaryRefs??refs;
+    if(j.prompt.length>OPENAI_IMAGE_PROMPT_LIMIT||images.length>8)throw new ProviderError('GPT Image: до 32 000 символов полного промпта и до 8 референсов в студии. Запрос не отправлен.',true,true);
     const settings={model:j.model,prompt:j.prompt,n:1,size:openAIImageSize(format),quality:'high',output_format:'png'};
     let body:unknown=settings,requestHeaders=h;
-    if(refs.length) {
+    if(images.length) {
       const form=new FormData();for(const [key,value] of Object.entries(settings))form.set(key,String(value));
       let total=0;
-      for(const [index,ref] of refs.entries()) {
+      for(const [index,ref] of images.entries()) {
+        if(ref instanceof Blob){
+          total+=ref.size;
+          if(!['image/png','image/jpeg','image/webp'].includes(ref.type)||ref.size>10*1024*1024||total>OPENAI_IMAGE_REFS_BYTES)
+            throw new ProviderError('GPT Image: PNG, JPEG или WebP до 10 МБ, суммарно до 20 МБ. Запрос не отправлен.',true,true);
+          form.append('image[]',ref,`reference-${index+1}.${ref.type.split('/')[1]}`);continue;
+        }
         const match=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(ref);
         if(!match)throw new ProviderError('GPT Image: нужен референс PNG, JPEG или WebP.',true,true);
         const size=Math.floor(match[2].length*3/4)-(match[2].endsWith('==')?2:match[2].endsWith('=')?1:0);
@@ -114,7 +122,7 @@ export async function generate(
       }
       body=form;requestHeaders={Authorization:`Bearer ${key}`} as typeof h;
     }
-    const response=await call('https://api.openai.com/v1/images/'+(refs.length?'edits':'generations'),requestHeaders,body);
+    const response=await call('https://api.openai.com/v1/images/'+(images.length?'edits':'generations'),requestHeaders,body);
     d=await json(response);
     const usage=d.usage,requestId=response.headers.get('x-request-id')??undefined;
     const encoded=d.data?.[0]?.b64_json;

@@ -20,7 +20,9 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
       redirect: 'manual',
     };
     // Validate locally before distinguishing a transport failure from a sent request.
-    new Request(url, options);
+    // Validating multipart with a throwaway Request serializes every image a
+    // second time. Validate its headers/method without duplicating the body.
+    new Request(url, body instanceof FormData?{...options,body:undefined}:options);
   } catch {
     throw new ProviderError('Запрос не отправлен: ошибка подготовки обращения к модели.', true, true);
   }

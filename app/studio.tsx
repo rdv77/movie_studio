@@ -1,7 +1,7 @@
 'use client';
 import {ImageRetrySettings} from './image-retry-settings';
 import type {ImageRetryOptions} from '@/lib/image-retries';
-import {request} from '@/lib/client-request';
+import {request,ApiResponseError} from '@/lib/client-request';
 import {StoryboardCharacterBindings} from './storyboard-character-bindings';
 import {AudioQcEditor} from './audio-qc-editor';
 import {BatchScopeSelector} from './batch-scope-selector';
@@ -471,6 +471,9 @@ function Workspace() {
             qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next));
             qc.invalidateQueries({queryKey:['assets',projectId]});
           } catch(e) {
+            // Local capacity refusal happens before loading/claiming the job.
+            // Keep this same queued ID for the next tick, without error churn.
+            if(e instanceof ApiResponseError&&e.code==='MEDIA_WORKER_BUSY')return;
             if(activeProject.current===projectId)setError(e instanceof Error?e.message:'Не удалось проверить задачу.');
             // A gateway may lose the HTTP response while the claimed job still
             // completes. Read saved state; never create a replacement attempt.

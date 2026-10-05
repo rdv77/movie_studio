@@ -1,4 +1,6 @@
 import {enqueueImageRetry} from '@/lib/image-retries';
+import {imageBlobs} from '@/lib/image-inputs';
+import {isOpenAIImage} from '@/lib/openai-image';
 import {runSoundscapeStep} from '@/lib/soundscape-runner';
 import {isSoundJob} from '@/lib/soundscape';
 import {runVoiceWorkflowStep} from '@/lib/voice-design-runner';
@@ -111,6 +113,9 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   const key = saving && !refreshZen && model(j.model).provider!=='google' ? '' : await getKey(user, model(j.model).provider);
   const polling = j.status === 'pending';
   if (!polling && !saving) {
+    // The claim reloads a current snapshot. Do not retain the previous 18+ MB
+    // film while loading/encoding its successor during CAS.
+    p=undefined!;
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status !== 'queued')
@@ -153,12 +158,18 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     if (j.status === 'cancelled'||j.status === 'queued') return p;
   }
   try {
+    const directImages=!polling&&!saving&&!j.lipsync&&j.kind==='image'&&isOpenAIImage(j.model);
+    const binaryRefs=directImages?await imageBlobs(user,j.refs,p):undefined;
     const refs =
-      polling || saving || j.lipsync
+      polling || saving || j.lipsync || directImages
         ? []
         : await Promise.all(j.refs.map((ref) => imageData(user, ref, p)));
     const characterRefs = polling || saving || j.lipsync ? [] : await Promise.all((j.characterRefs??[]).map(ref=>imageData(user, ref, p)));
     let endFrame=polling||saving||j.lipsync||!j.endFrameAssetId?undefined:await imageData(user,j.endFrameAssetId,p);
+    const format=p.format;
+    // All ownership/source checks finished. Provider I/O needs only this job.
+    // Lipsync still reads its project-scoped inputs below before releasing it.
+    if(!j.lipsync)p=undefined!;
     const directed=polling||saving||j.kind!=='audio'?undefined:await generateDirectedSpeech(j,key,model(j.model).provider as 'minimax'|'elevenlabs');
     const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await poll(j, key) : saving
       ? j.output!
@@ -174,9 +185,9 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
             video = new Blob([await v.arrayBuffer()], {type: va.mime}); audio = new Blob([await a.arrayBuffer()], {type: aa.mime});
           } catch { throw new ProviderError('Не удалось загрузить файлы синхронизации. Запрос не отправлен.', true, true); }
           return generateSync(j, key, video, audio);
-        })()) : await (polling ? poll(j, key) : generate(j, key, refs, p.format, characterRefs,endFrame)));
+        })()) : await (polling ? poll(j, key) : generate(j, key, refs, format, characterRefs,endFrame,binaryRefs)));
     // Do not keep large reference strings across project snapshot writes.
-    refs.length=0;characterRefs.length=0;endFrame=undefined;
+    refs.length=0;characterRefs.length=0;endFrame=undefined;if(binaryRefs)binaryRefs.length=0;p=undefined!;
     await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (result.actual != null) {
