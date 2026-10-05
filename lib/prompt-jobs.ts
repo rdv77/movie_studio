@@ -5,6 +5,7 @@ import { compilePrompt, type CompiledPrompt, type PromptInput } from './prompt-c
 import { model } from './models';
 import { grokVideoReservation, modernVideoTiming, scaledVideoReservation } from './video-duration';
 import {captureVideoPreparationBasis} from './video-preparation-basis';
+import type {KeyframeJob} from './keyframes';
 
 /** Compact provenance saved with both the attempt and its resulting variant. */
 export type PromptCompilationSnapshot = {
@@ -47,9 +48,11 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
   ];
   const count = input.variantCount ?? 1, index = input.variantIndex ?? 1;
   const prompt = mediaVariantPrompt(job.brief, index, count);
+  const sourceFrame = job.kind === 'image' && input.keyframe && input.keyframe !== 'start'
+    ? item.variants.find(v => v.id === (job as KeyframeJob).sourceFrameVariantId && v.kind === 'image' && v.assetId && job.refs.includes(v.assetId)) : undefined;
   const result = compilePrompt(p, item, job.model, {
     ...input, kind: job.kind, prompt, references: refs,
-    startFrameId: input.startFrameId ?? (job.kind === 'video' ? job.refs[0] : undefined),
+    startFrameId: input.startFrameId ?? (job.kind === 'video' ? job.refs[0] : sourceFrame?.assetId),
     endFrameId: input.endFrameId ?? (job as Job & { endFrameAssetId?: string }).endFrameAssetId,
     characterIds: input.characterIds ?? job.characterIds,
     duration: input.duration ?? (job.kind === 'video' ? job.duration : undefined),

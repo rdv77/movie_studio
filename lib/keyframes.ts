@@ -147,7 +147,8 @@ export function keyframeRoleInstruction(p:Project,item:KeyframeItem,role:Keyfram
   const state=role==='start'?shot?.stateIn:role==='end'?shot?.stateOut:undefined;
   const framing=role==='start'?d?.framingStart:role==='end'?d?.framingEnd:undefined;
   return [`Создай одно цельное изображение: ${KEYFRAME_ROLE_NAMES[role].toLocaleLowerCase('ru')} этого же плана. Без коллажа, надписей, стрелок и панелей.`,
-    role!=='start'?'Обязательный визуальный источник — выбранный первый кадр. Сохрани героев, одежду, предметы, свет и стиль этого файла; измени только указанные действие, положение и ракурс.':'Покажи начало действия, а не его результат.',
+    role!=='start'?'Выбранный первый кадр — визуальная основа: сохрани лица, одежду, окружение, свет и стиль. Начальную позу не копируй; покажи только указанное ниже состояние одного момента. Не изображай последовательность действий.':'Покажи только начальное состояние до действия, а не его результат.',
+    role==='end'&&'Итоговые позы, взгляды, расположение предметов и крупность берутся из конечного состояния. Не добавляй начальную фазу в изображение. Если по сценарию конец совпадает с началом, не придумывай различий.',
     frame&&`Изображение момента: ${frame}`,state&&`Состояние: ${state}`,framing&&`Крупность: ${framing}`,
     role==='end'&&shot?.continuityChanges&&`Изменения к окончанию: ${shot.continuityChanges}`,
     role==='middle'&&d?.actionBeats&&`Промежуточные действия: ${JSON.stringify(d.actionBeats)}`].filter(Boolean).join('\n');

@@ -2,13 +2,17 @@ import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 await mkdir('work/tests', { recursive: true });
-await build({ stdin: { resolveDir: process.cwd(), contents: `export * as C from './lib/prompt-compiler';export * as D from './lib/domain';export * as J from './lib/prompt-jobs';export * as A from './lib/prompt-assets';export * as B from './lib/character-bindings';export * as P from './lib/plan-references';export {MODELS} from './lib/models';` },
+await build({ stdin: { resolveDir: process.cwd(), contents: `export * as T from './lib/prompt-text';export * as K from './lib/keyframes';export * as S from './lib/storyboard';export * as C from './lib/prompt-compiler';export * as D from './lib/domain';export * as J from './lib/prompt-jobs';export * as A from './lib/prompt-assets';export * as B from './lib/character-bindings';export * as P from './lib/plan-references';export {MODELS} from './lib/models';` },
   bundle: true, platform: 'node', format: 'esm', outfile: 'work/tests/prompt-compiler.mjs', external: ['@ffmpeg/ffmpeg'] });
 let providerCalls = 0;
 const previousFetch = globalThis.fetch;
 globalThis.fetch = () => { providerCalls++; throw Error('Compiler tests must never call providers'); };
 try {
-  const { C, D, J, A, B, P, MODELS } = await import('../work/tests/prompt-compiler.mjs');
+  const { T, K, S, C, D, J, A, B, P, MODELS } = await import('../work/tests/prompt-compiler.mjs');
+  const visual=T.frameStyleText('# Стиль\n\n**Техника:** 2D акварель\n\n### Палитра и свет\n\nПарадный двор: золотой свет.\n\nТихий лес: синий свет.\n\n### Персонажи и предметы\n\nВ финале герой находит корону.\n\n### Художественное решение\n\nТонкий контур.', ['Парадный двор'], ['Тихий лес']);
+  assert(visual.includes('2D акварель') && visual.includes('золотой свет') && visual.includes('Тонкий контур'));
+  assert(!visual.includes('синий свет') && !visual.includes('корону'));
+  assert.equal(T.frameStyleText('Рисованная анимация без надписей.',[],[]),'Рисованная анимация без надписей.');
   const p = D.newProject('Компилятор только текущего плана');
   const card = (stage, title, id = D.id()) => { const item = { id, stage, title, variants: [] }; p.items.push(item); return item; };
   const approve = (item, data) => { const v = D.makeVariant(p, item, data); item.variants.push(v); item.selectedId = item.approvedId = v.id; return v; };
@@ -97,7 +101,7 @@ try {
   }
   assert(!result.criticalText.includes('Алый плащ') && !result.criticalText.includes('Серебряный меч'));
   assert(result.prompt.includes('рты всех персонажей закрыты'));
-  assert(result.prompt.includes('Только для стыковки — выход предыдущего плана'));
+  assert(!result.prompt.includes('Только для стыковки — выход предыдущего плана'));
   assert(!result.criticalText.includes('Борис вышел в лес'));
   assert.equal(result.budget.compiledCharacters, result.prompt.length);
   assert(result.prompt.length <= result.budget.limit);
@@ -139,6 +143,47 @@ try {
   assert.equal(finalImage.references[0].role, 'first-frame');
   assert(finalImage.criticalText.includes(current.stateOut) && finalImage.criticalText.includes(current.direction.endFrame));
   assert(!finalImage.criticalText.includes(current.direction.startFrame));
+  // End frames must not inherit the prepared start prompt or global story arc.
+  {
+    const film=structuredClone(p),card=film.items.find(i=>i.id===frame.id),script=film.items.find(i=>i.id===source.id);
+    const sourceVariant=script.variants.find(v=>v.id===script.approvedId),data=JSON.parse(sourceVariant.text),shot=data.shots.find(s=>s.id===current.id);
+    data.shots.forEach(s=>s.continuity??='');
+    shot.imagePrompt='НАЧАЛЬНЫЙ_ПРОМПТ: Анна ещё не взяла письмо, руки пусты.';
+    shot.direction.performance=[{character:'Анна',objective:'Прочитать',subtext:'Сомнение',visibleAction:'ПОСЛЕДОВАТЕЛЬНОСТЬ: берёт письмо и оборачивается',emotionStart:'Ожидание',emotionEnd:'Решимость'}];
+    sourceVariant.text=JSON.stringify(data);
+    const hero=film.items.find(i=>i.id===anna.id);hero.variants[0].character.description='БИОГРАФИЯ: позднее Анна встречает королеву';
+    const styleCard=film.items.find(i=>i.id===style.id);styleCard.variants.find(v=>v.id===styleCard.approvedId).text+='\n\nФИНАЛ_ФИЛЬМА: другой дворец';
+    for(const i of film.items.filter(i=>i.stage<=4).sort((a,b)=>D.stagePosition(a.stage)-D.stagePosition(b.stage))){
+      if(!i.approvedId){const v=D.makeVariant(film,i,{text:'Основа'});i.variants.push(v);i.selectedId=i.approvedId=v.id;}
+      i.variants.find(v=>v.id===i.approvedId).deps=D.dependencies(film,i.stage);
+    }
+    const oldTask=S.storyboardPrompt(film,card),guidance=K.keyframeRoleInstruction(film,card,'end');
+    assert(oldTask.includes('НАЧАЛЬНЫЙ_ПРОМПТ'));
+    const args={kind:'image',keyframe:'end',keyframeInstruction:guidance,startFrameId:first,references:[ids.anna,ids.yard,first]};
+    const oldClient=C.compilePrompt(film,card,'gpt-image-2.5-flare',{...args,prompt:oldTask});
+    const preview=C.compilePrompt(film,card,'gpt-image-2.5-flare',{...args,prompt:guidance});
+    for(const compiled of [oldClient,preview]){
+      for(const marker of ['НАЧАЛЬНЫЙ_ПРОМПТ','БИОГРАФИЯ','ФИНАЛ_ФИЛЬМА','ПОСЛЕДОВАТЕЛЬНОСТЬ',shot.stateIn,shot.direction.startFrame,'Борис вышел в лес','Анна Мария ждёт у ворот'])assert(!compiled.prompt.includes(marker),marker);
+      assert(compiled.prompt.includes(shot.stateOut));assert(compiled.prompt.includes(shot.direction.endFrame));
+      assert(compiled.prompt.includes('Решимость'));assert(compiled.prompt.includes('Изображение 1: Выбранный первый кадр'));
+      assert.equal(compiled.prompt.split(shot.stateOut).length,2,'The role default does not duplicate the state');
+      assert.equal(compiled.references[0].assetId,first);
+    }
+    const api=J.compileMediaJob(film,{...job,model:'gpt-image-2.5-flare',brief:guidance,refs:args.references,sourceFrameVariantId:card.variants[0].id},{keyframe:'end',keyframeInstruction:guidance});
+    assert.equal(api.prompt,preview.prompt,'Single/bulk preview and job admission pin the same image and moment');
+    assert.deepEqual(api.refs,preview.references.map(r=>r.assetId));
+    const start=C.compilePrompt(film,card,'gpt-image-2.5-flare',{kind:'image',prompt:oldTask,references:[ids.anna,ids.yard]});
+    assert(start.prompt.includes('НАЧАЛЬНЫЙ_ПРОМПТ') && start.prompt.includes(shot.stateIn));
+    const manual=C.compilePrompt(film,card,'gpt-image-2.5-flare',{...args,prompt:'РУЧНАЯ ПРАВКА: письмо ближе к груди.'});
+    assert(manual.criticalText.includes('РУЧНАЯ ПРАВКА: письмо ближе к груди.'));
+    film.hiddenReferenceIds=[first];
+    assert.throws(()=>C.compilePrompt(film,card,'gpt-image-2.5-flare',{...args,prompt:guidance}),e=>e.code==='first_frame');
+    // A cyclic action is allowed to finish where it began; no invented difference.
+    delete film.hiddenReferenceIds;shot.stateOut=shot.stateIn;shot.direction.endFrame=shot.direction.startFrame;
+    sourceVariant.text=JSON.stringify(data);
+    const cyclic=C.compilePrompt(film,card,'gpt-image-2.5-flare',{...args,prompt:'Сохранить итоговое состояние.'});
+    assert(cyclic.prompt.includes('не придумывай отличий'));
+  }
   const middleImage=C.compilePrompt(p,frame,'grok-imagine-image-2.0',{...base,keyframe:'middle',startFrameId:first,keyframeInstruction:'Письмо уже поднято над столом, рука ещё не у груди.'});
   assert(middleImage.criticalText.includes('Один промежуточный момент') && middleImage.criticalText.includes('Письмо уже поднято'));
   assert(!middleImage.criticalText.includes('Самое начало текущего плана') && !middleImage.criticalText.includes('Начальный ключевой кадр'));

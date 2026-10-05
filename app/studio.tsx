@@ -2005,7 +2005,7 @@ function GenerateDialog({
             : 'Предложи доработанный вариант текущего материала с учетом утвержденной основы. Сохрани ключевые решения и учти мои правки.'
           : item.character ? 'Создай один вариант образа героя по сохранённой карточке. Учти исходные изображения и указания режиссёра.'
           : k === 'video' ? videoPrompt(p, item) : k === 'image' && item.stage === 5 && videoShot(p, item)
-            ? storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.',
+            ? frameRole && frameRole !== 'start' ? keyframeRoleInstruction(p, item, frameRole) : storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.',
       );
       const imageDefaults = [5,7].includes(item.stage)?planReferenceIds(p,item):item.character ? [] : v?.refs?.length ? v.refs
         : approvedCharacters(p).length ? [] : p.items
@@ -2038,7 +2038,7 @@ function GenerateDialog({
   const effectiveRefs=pinnedStart?[pinnedStart,...baseRefs.filter(r=>r!==pinnedStart)]:baseRefs;
   const visibleReferenceIds=[5,7].includes(item.stage)?new Set([...(kind==='video'?planFrameIds(p,item):[...planReferenceIds(p,item),...planFrameIds(p,item)]),...effectiveRefs]):undefined;
   const effectiveCharacters=[5,7].includes(item.stage)?planCharacterIds(p,item,characterIds):characterIds.filter(id=>approvedCharacters(p).some(c=>c.itemId===id));
-  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',keyframe:frameRole,keyframeInstruction:frameRole?keyframeRoleInstruction(p,item,frameRole):undefined,prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:undefined,endFrameId:kind==='video'&&supportsEndFrame(m.id)?item.videoPreparation?.endFrame?.assetId:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:item.videoPreparation?.duration??shot?.duration,allowLegacyModel:!p.directing});
+  const mediaInput=(m:(typeof MODELS)[number]):PromptInput=>({kind:kind as 'image'|'video',keyframe:frameRole,keyframeInstruction:frameRole?keyframeRoleInstruction(p,item,frameRole):undefined,prompt:mediaVariantPrompt(prompt.trim(),1,Number.isFinite(count)?Math.min(4,Math.max(1,Math.trunc(count))):1),references:kind==='video'?[...effectiveRefs.map(assetId=>({assetId,role:'first-frame' as const})),...videoCharacterRefs(p,m.provider,effectiveCharacters).map(assetId=>({assetId,role:'character' as const}))]:effectiveRefs,startFrameId:kind==='video'?effectiveRefs[0]:pinnedStart,endFrameId:kind==='video'&&supportsEndFrame(m.id)?item.videoPreparation?.endFrame?.assetId:undefined,characterIds:kind==='video'?effectiveCharacters:undefined,duration:item.videoPreparation?.duration??shot?.duration,allowLegacyModel:!p.directing});
   const compiledModels=new Map<string,{result?:CompiledPrompt,error?:string}>();
   if(kind==='image'||kind==='video')for(const m of selected){try{compiledModels.set(m.id,{result:compilePrompt(p,item,m.id,mediaInput(m))});}catch(error){compiledModels.set(m.id,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'});}}
   const imagePromptError=[...compiledModels.values()].map(x=>x.error).find(Boolean)??'';

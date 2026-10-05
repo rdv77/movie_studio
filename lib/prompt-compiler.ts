@@ -12,8 +12,9 @@ import { videoPrompt } from './video';
 import { planFields, storyboardPrompt } from './storyboard';
 import { supportsEndFrame } from './video-end-frame';
 import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
-import {compactPromptText,preparedPromptBody} from './prompt-text';
+import {compactPromptText,preparedPromptBody,frameStyleText} from './prompt-text';
 import {boundCharacterId,shotBindsCharacter} from './character-bindings';
+import {keyframeRoleInstruction} from './keyframes';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -193,10 +194,18 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const locationState = plan?.locationState ?? (scene as typeof scene & { locationState?: LocationState })?.locationState;
 
   const keyframe = input.keyframe ?? 'start';
+  const stillPlan = input.kind === 'image' && !!plan;
+  const anchoredStill = stillPlan && keyframe !== 'start' && !!(input.startFrameId || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'first-frame'));
+  const exclude = (key: string, label: string, text: string | undefined) => {
+    if (text?.trim()) omitted.push({key, label, reason: 'irrelevant', characters: text.length});
+  };
   add('format', 'Формат', input.kind === 'image' ? `Одно цельное изображение анимационного фильма, ${p.format}. Без текста, коллажа, субтитров и пузырей речи.`
     : `Один непрерывный анимационный видеоплан, ${p.format}. Без дополнительных персонажей, склеек внутри клипа, надписей и субтитров.`, true);
   add('instruction', 'Обязательная задача режиссёра', input.instruction, true);
-  add('keyframe-instruction', 'Назначение ключевого кадра', input.keyframeInstruction, true);
+  const generatedRoleInstruction = stillPlan && input.keyframeInstruction === keyframeRoleInstruction(p, item, keyframe);
+  // State, pose, framing and changes are rendered once from the approved shot below.
+  if (!generatedRoleInstruction) add('keyframe-instruction', 'Назначение ключевого кадра', input.keyframeInstruction, true);
+  else add('keyframe-role', 'Назначение ключевого кадра', keyframe === 'end' ? 'Создай последний кадр текущего плана.' : keyframe === 'start' ? 'Первый кадр текущего плана.' : 'Промежуточный кадр текущего плана.', true);
   add('card-notes', 'Сохранённые правки к карточке плана', reviewedNotes, true);
   if ([5,7].includes(item.stage) && heroes.length) add('face-identity', 'Узнаваемость лица — обязательное условие',
     `${heroes.map(h=>h.profile.name).join(', ')}: это те же конкретные персонажи из утверждённых образов. Сохраняй форму лица, посадку и расстояние между глазами, брови, нос, губы, линию челюсти, возраст, цвет глаз, волос и кожи, причёску и отличительные признаки по их образцам. Не заменяй лица типовыми, не омолаживай и не приукрашивай. Стиль, свет, эмоция и ракурс не меняют идентичность. Не смешивай лица разных героев. Меняй только позу, выражение и ракурс по постановке; не превращай общий план в портрет ради детализации лица.`, true);
@@ -213,7 +222,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       : 'Состав не выделен в старом плане. Показывай только персонажей, непосредственно названных в его описании; не добавляй героев из соседних планов или референсов.', true);
     if (input.kind === 'image') {
       add('moment', 'Единственный момент изображения', keyframe === 'middle' ? 'Один промежуточный момент действия этого плана. Не повторяй начальное или конечное состояние, не показывай несколько фаз одновременно.'
-        : keyframe === 'end' ? 'Конец текущего плана после его действий. Не изображай промежуточные фазы одновременно.'
+        : keyframe === 'end' ? 'Конец текущего плана после его действий: одна неподвижная итоговая поза и композиция. Состояние к концу, конечный ключевой кадр и конечные положения ниже определяют изображение; не копируй начальную позу из референса. Не изображай путь к результату или несколько фаз одновременно. Если действие по сценарию возвращается в исходное состояние, сохрани именно этот результат, не придумывай отличий.'
           : 'Самое начало текущего плана до его действий. Не выполняй будущие действия в первом кадре.', true);
       if (keyframe === 'middle') {
         add('state-boundaries', 'Границы действия — не текущее состояние картинки', [plan.stateIn && `Вход: ${plan.stateIn}.`, plan.stateOut && `Выход: ${plan.stateOut}.`, 'Выбери только одну промежуточную фазу согласно назначению ключевого кадра.'].filter(Boolean).join(' '), true);
@@ -237,22 +246,30 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     add(`hero.${hero.item.id}`, `Постоянная идентичность ${c.name}`, [physical.appearance, physical.actorProfile?.identity].filter(Boolean).join('\n') || 'Сохранить лицо, возраст и пропорции утверждённого образа; не выдумывать новые постоянные черты.', true);
     add(`hero-source.${hero.item.id}`, item.stage === 1 ? 'Работа с прообразами героя' : `Постоянные указания к образу ${c.name}`, physical.instructions, true);
     add(`hero-locked.${hero.item.id}`, `Нельзя менять у героя ${c.name}`, physical.locked, true);
-    optional(`hero-performance.${hero.item.id}`, `Характер и манеры ${c.name}`, [c.description, c.actorProfile?.mannerisms].filter(Boolean).join('\n\n'), 65);
-    if (c.actorProfile) {
+    const performance = [c.description, c.actorProfile?.mannerisms].filter(Boolean).join('\n\n');
+    if (stillPlan) exclude(`hero-performance.${hero.item.id}`, `Биография и общие манеры ${c.name} — не состояние этого кадра`, performance);
+    else optional(`hero-performance.${hero.item.id}`, `Характер и манеры ${c.name}`, performance, 65);
+    if (c.actorProfile && !stillPlan) {
       const actor = c.actorProfile;
       optional(`actor.${hero.item.id}`, `Актёрская задача ${c.name} — без изменения утверждённой внешности`,
         [`Роль: ${actor.role}. Мотив: ${actor.motivation}. Внутреннее противоречие: ${actor.contradiction}.`,
           ...actor.traits.map(t => `${t.name} · ${t.intensity}/10: ${t.intensity === 0 ? 'Не усиливать и не акцентировать эту особенность.' : t.instruction}`)].join('\n\n'), 90);
     }
   }
-  const continuity = plan?.sceneContinuity ?? scene?.continuity ?? [];
+  // The pinned image already shows the current costume/props. Replaying the scene's
+  // initial ledger and all earlier handovers here can undo the requested end state.
+  const continuity = anchoredStill ? [] : plan?.sceneContinuity ?? scene?.continuity ?? [];
+  if (anchoredStill) add('source-continuity', 'Что сохранить из первого изображения', 'Сохрани идентичность героев, одежду, постоянные предметы, географию, технику рисунка, палитру и свет выбранного первого кадра. Изменяй позы, взгляды, положение предметов и крупность только согласно целевому моменту ниже. Описание конечного состояния важнее начального расположения на референсе.', true);
   for (const c of continuity.filter(c => heroes.some(h => c.characterId ? c.characterId === h.item.id : normalized(c.character) === normalized(h.profile.name)) ||
     (plan?.cast ?? []).some(name => name === c.characterId || normalized(name) === normalized(c.character))))
     add(`continuity.${c.characterId ?? c.character}`, `Одежда и предметы ${c.character}`, `Одежда: ${c.outfit}. Предметы, состояние и владелец: ${c.props}. Не меняй их без описанного действия.`, true);
   // History is ordered: take / hand over / take again are distinct transitions,
   // even when two rows have identical text. Never deduplicate these changes.
-  for (const change of plan?.previousChanges ?? []) add(`prior.${change.id}`, 'Уже произошедшее изменение — сохранять', change.changes, true);
-  if (!continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
+  for (const change of plan?.previousChanges ?? []) {
+    if (anchoredStill) exclude(`prior.${change.id}`, 'История действий — состояние уже видно в первом кадре', change.changes);
+    else add(`prior.${change.id}`, 'Уже произошедшее изменение — сохранять', change.changes, true);
+  }
+  if (!anchoredStill && !continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
   for (const card of locations) {
     const v = approved(card) as WorldVariant | undefined, profile = (item.stage === 3 ? (card as WorldItem).location : undefined) ?? v?.location ?? (card as WorldItem).location;
     if (profile) {
@@ -274,7 +291,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       optional(`portrait-world.${card.id}`, `Среда героя — ${card.title}`, profile ? [profile.identity, profile.permanentProps].filter(Boolean).join('\n\n') : v.text, 70);
     }
   }
-  add('location-layout', 'Текущее расположение предметов локации', locationState?.layout, true);
+  if (!anchoredStill) add('location-layout', 'Текущее расположение предметов локации', locationState?.layout, true);
   add('location-changes', 'Разрешённые изменения локации', locationState?.allowedChanges, true);
   optional('location-state', 'Свет, время, погода и художественное решение сцены', [locationState?.time, locationState?.light, locationState?.weather, locationState?.artDirection].filter(Boolean).join('\n\n'), 80);
   add('mouth', 'Правило речи и рта', input.kind === 'video' ? speechDirection(speech)
@@ -288,7 +305,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     const framing = input.kind === 'image' && !middle ? keyframe === 'end' ? direction.framingEnd : direction.framingStart : undefined;
     const framingPath = [direction.framingStart && FRAMING_NAMES[direction.framingStart], direction.framingEnd && FRAMING_NAMES[direction.framingEnd]].filter(Boolean).join(' → ');
     add('framing', 'Крупность', framing ? FRAMING_NAMES[framing] : middle && framingPath ? `Промежуточная на пути ${framingPath}; одна композиция.` : input.kind === 'video' ? framingPath : '', true);
-    add('composition', 'Композиция', direction.composition, true);
+    if (!(stillPlan && keyframe === 'end' && direction.endFrame)) add('composition', 'Композиция', direction.composition, true);
     add('angle', 'Ракурс', direction.angle && `${direction.angle.type}${direction.angle.description ? ': ' + direction.angle.description : ''}`, true);
     add('attention', 'Центр внимания', middle && direction.attention ? `Одна промежуточная фаза между ${direction.attention.start} и ${direction.attention.end}.` : input.kind === 'image' ? keyframe === 'end' ? direction.attention?.end : direction.attention?.start
       : direction.attention && `В начале: ${direction.attention.start}. В конце: ${direction.attention.end}.`, true);
@@ -301,23 +318,42 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       optional('transition', 'Стыковка после плана — не внутренняя склейка', direction.transition?.description, 60);
       optional('sound', 'Звуки без собственной речи и пения', [direction.sound?.ambience, ...(direction.sound?.effects ?? []).map(s => `${s.at} сек: ${s.description}`), direction.sound?.silence ? 'Тишина' : undefined].filter(Boolean).join('\n\n'), 55);
     }
-    optional('performance', 'Видимые актёрские действия текущего плана', direction.performance?.map(a => `${a.character}: ${a.visibleAction}. ${a.emotionStart} → ${a.emotionEnd}`).join('\n\n'), 90);
-  } else add('camera-legacy', input.kind === 'image' ? 'Начальный ракурс' : 'Камера', plan?.camera ?? plan?.cinematography, true);
+    optional('performance', stillPlan ? 'Эмоция в изображаемый момент' : 'Видимые актёрские действия текущего плана', direction.performance?.map(a => stillPlan && keyframe !== 'middle'
+      ? `${a.character}: ${keyframe === 'end' ? a.emotionEnd : a.emotionStart}`
+      : `${a.character}: ${a.visibleAction}. ${a.emotionStart} → ${a.emotionEnd}`).join('\n\n'), 90);
+  } else if (!(stillPlan && keyframe === 'end' && plan?.stateOut)) add('camera-legacy', input.kind === 'image' ? 'Ракурс ключевого кадра' : 'Камера', plan?.camera ?? plan?.cinematography, true);
   optional('design', 'Художественное решение текущего плана', plan?.productionDesign, 90);
-  for (const style of p.items.filter(i => i.stage === 2 && active(i) && approved(i))) optional(`style.${style.id}`, 'Единый визуальный стиль фильма', approved(style)!.text, 95);
-  if (p.directing) {
+  for (const style of p.items.filter(i => i.stage === 2 && active(i) && approved(i))) {
+    if (anchoredStill) exclude(`style.${style.id}`, 'Общее описание фильма — стиль уже задан первым изображением', approved(style)!.text);
+    else {
+      const original = approved(style)!.text;
+      const visual = stillPlan ? frameStyleText(original,
+        locations.flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? '']),
+        p.items.filter(card => card.stage === 3 && active(card) && !locations.some(l => l.id === card.id)).flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? ''])) : original;
+      optional(`style.${style.id}`, 'Единый визуальный стиль фильма', visual, 95);
+      if (visual !== original) omitted.push({key:`style-context.${style.id}`,label:'Сюжетные разделы и другие локации общего описания стиля',reason:'irrelevant',characters:Math.max(0,original.length-visual.length)});
+    }
+  }
+  if (p.directing && !stillPlan) {
     const brief = effectiveCreativeBrief(p.directing.brief, scene?.creativeOverrides as CreativeOverrides | undefined);
     optional('creative', 'Творческое задание этой сцены', `Жанр: ${brief.genre}. Подход: ${brief.director}. Приёмы: ${brief.techniques}. Воздействие: ${brief.effect}.`, 75);
     if (brief.strengths) optional('creative-strengths', 'Сила выбранных приёмов', `Шкала 0–10: 0 — не применять приём, 10 — выраженно применять. Утверждённые события, внешность и состояние важнее интенсивности. ${JSON.stringify(brief.strengths)}`, 70);
   }
   const at = plans.findIndex(s => plan?.id ? s.id === plan.id : s.title === plan?.title);
-  optional('previous', 'Только для стыковки — выход предыдущего плана', plans[at - 1]?.stateOut, 25);
-  optional('next', 'Только для стыковки — вход следующего плана', plans[at + 1]?.stateIn, 25);
+  if (!stillPlan) {
+    optional('previous', 'Только для стыковки — выход предыдущего плана', plans[at - 1]?.stateOut, 25);
+    optional('next', 'Только для стыковки — вход следующего плана', plans[at + 1]?.stateIn, 25);
+  }
   // Only the exact studio-generated repetition may be compressed. Manual instructions
   // are critical unless the caller supplies a separate, explicit director delta.
   const taskWithoutSeries = input.prompt.replace(/\n\nСоздай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/, '').trim();
   const generatedTask = input.kind === 'video' ? videoPrompt(p, item) : item.stage === 5 ? storyboardPrompt(p, item) : '';
-  if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) {
+  const roleTask = stillPlan && !!input.keyframeInstruction?.trim() && taskWithoutSeries === input.keyframeInstruction.trim();
+  const automaticStartTask = stillPlan && keyframe !== 'start' && !!generatedTask.trim() && taskWithoutSeries === generatedTask.trim();
+  if (roleTask || automaticStartTask) {
+    omitted.push({key: 'task', label: roleTask ? 'Повтор назначения ключевого кадра' : 'Автоматический промпт первого кадра — не относится к этому моменту', reason: roleTask ? 'duplicate' : 'irrelevant', characters: taskWithoutSeries.length});
+    add('series', 'Вариант', input.prompt.match(/Создай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/)?.[0], true);
+  } else if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) {
     const saved=input.kind==='image'?(sourcePlan as PromptPlan&{imagePrompt?:string})?.imagePrompt:(sourcePlan as PromptPlan&{videoPrompt?:string})?.videoPrompt;
     const preparedShot=p.directing?.scenes.flatMap(scene=>scene.shots).find(shot=>shot.id===sourcePlan?.id);
     const prepared=!!preparedShot?.promptBasis&&saved?.trim()===taskWithoutSeries&&(input.kind==='image'?preparedShot.imagePrompt:preparedShot.videoPrompt)?.trim()===taskWithoutSeries;
@@ -389,7 +425,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (!references.some(ref=>ref.role==='character'&&ref.assetId===hero.variant?.assetId))
       warnings.push(`Не прикреплён утверждённый образ героя «${hero.profile.name}». По тексту или исходному фото лицо может отличаться от выбранного варианта. Отметьте изображение утверждённого героя в референсах этого плана.`);
   }
-  if (input.kind === 'video' && !references.some(ref => ref.role === 'first-frame'))
+  if ((input.kind === 'video' || anchoredStill) && !references.some(ref => ref.role === 'first-frame'))
     throw new PromptCompilationError('first_frame', 'Выберите первый кадр именно текущего плана. Он скрыт, удалён или относится к другой карточке.');
   if (input.kind === 'video' && endFrame && capability.adapter.lastFrame && !references.some(ref => ref.role === 'last-frame'))
     throw new PromptCompilationError('last_frame', 'Выберите конечный кадр именно текущего плана. Он скрыт, удалён или относится к другой карточке.');
@@ -397,7 +433,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     throw new PromptCompilationError('references_required', 'Qwen Image Edit нужен хотя бы один относящийся к плану референс. Выберите героя, локацию или начальный кадр.');
   if (references.length > capability.adapter.maxImageReferences || input.kind === 'video' && references.filter(ref => ref.role !== 'first-frame' && ref.role !== 'last-frame').length > capability.adapter.maxAdditionalReferences)
     throw new PromptCompilationError('reference_count', `Выбрано ${references.length} подходящих изображений, но адаптер допускает ${capability.adapter.maxImageReferences}. Снимите лишние референсы или выберите другую модель; обязательные образы не исключаются автоматически.`);
-  for (const [n, ref] of references.entries()) add(`ref-role.${n}`, `Изображение ${n + 1}`, ref.role === 'first-frame' ? 'Начальная композиция текущего плана; сохраняй лица и окружение.'
+  for (const [n, ref] of references.entries()) add(`ref-role.${n}`, `Изображение ${n + 1}`, ref.role === 'first-frame' ? anchoredStill
+    ? 'Выбранный первый кадр текущего плана — визуальная основа для внешности, одежды, окружения и стиля. Начальные позы и положение предметов НЕ являются заданием для новой картинки. Изобрази только целевой момент, описанный в этом запросе; не копируй первый кадр целиком.'
+    : 'Начальная композиция текущего плана; сохраняй лица и окружение.'
     : ref.role === 'last-frame' ? 'Конечная композиция текущего плана.' : ref.role === 'character' ? canonicalFace(ref)
       ? `Утверждённый образ героя ${ref.label} — основной образец его лица и внешности. Воспроизведи узнаваемые черты этого конкретного героя, а не похожий типаж. Он важнее исходных прообразов и стилизации. Не копируй позу или фон; костюм и текущее состояние задаёт постановка.`
       : `Исходный прообраз героя ${ref.label}, вспомогательный референс. Если приложен утверждённый образ этого героя, его лицо и внешность имеют приоритет. Не смешивай лица, не копируй позу или фон.`

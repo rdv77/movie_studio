@@ -9,8 +9,7 @@ import type {Project} from '@/lib/domain';
 import {money} from '@/lib/domain';
 import {model,MODELS} from '@/lib/models';
 import {planReferenceIds} from '@/lib/plan-references';
-import {storyboardPrompt} from '@/lib/storyboard';
-import {selectedKeyframe,prepareKeyframeGeneration,KEYFRAME_ROLE_NAMES} from '@/lib/keyframes';
+import {selectedKeyframe,prepareKeyframeGeneration,keyframeRoleInstruction,KEYFRAME_ROLE_NAMES} from '@/lib/keyframes';
 import {compilePrompt} from '@/lib/prompt-compiler';
 import {grokImageEstimate,GROK_IMAGE_MODEL} from '@/lib/image-quality';
 
@@ -26,7 +25,7 @@ export function KeyframeBatchEditor({p,busy,submit,permitMissingFrames,openPlan,
   const rows=useMemo(()=>additionalFrameItems(p,role).map(item=>{
     const admission=additionalFrameAdmission(p,item,role),first=selectedKeyframe(item,'start');
     let reason=admission.blocked,estimate:string|null=null;const modelId=first?.jobId?first.model:fallback;
-    try{const m=model(modelId),prepared=prepareKeyframeGeneration(p,item.id,role,{model:m.id,refs:planReferenceIds(p,item)});const compiled=compilePrompt(p,item,m.id,{kind:'image',keyframe:role,prompt:storyboardPrompt(p,item),keyframeInstruction:prepared.roleInstruction,references:prepared.refs,allowLegacyModel:!p.directing});estimate=m.id===GROK_IMAGE_MODEL?grokImageEstimate(prepared.imageSettings,compiled.references.length):m.estimate;}
+    try{const m=model(modelId),prepared=prepareKeyframeGeneration(p,item.id,role,{model:m.id,refs:planReferenceIds(p,item)});const compiled=compilePrompt(p,item,m.id,{kind:'image',keyframe:role,prompt:prepared.roleInstruction,keyframeInstruction:prepared.roleInstruction,references:prepared.refs,startFrameId:first?.assetId,allowLegacyModel:!p.directing});estimate=m.id===GROK_IMAGE_MODEL?grokImageEstimate(prepared.imageSettings,compiled.references.length):m.estimate;}
     catch(e){reason=(e as Error).message;}
     return {item,first,...admission,reason,estimate,modelId};
   }),[p,role,fallback]);
@@ -68,7 +67,7 @@ export function KeyframeBatchEditor({p,busy,submit,permitMissingFrames,openPlan,
       <details><summary>Модель для первых кадров, загруженных вручную</summary><label className="block">Если первый кадр загружен вручную <select disabled={disabled} className="caption-select" value={fallback} onChange={e=>setFallback(e.target.value)}>{MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label></details>
       <fieldset disabled={disabled}><ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some(c=>c.id===m.provider&&c.configured))} initialEstimate={total} count={selected.filter(r=>r.modelId!==imageRetry.fallbackModel).length} referenceCount={5}/></fieldset>
       <p>Оценка серии: {money(total)}. Каждая попытка сохранится в журнале; автоматического утверждения нет.</p>
-      <Button disabled={disabled||!selected.length||!!needsPermission.length||p.limit!==null&&total===null} onClick={async()=>{setWorking(true);setError('');try{await submit({revision:p.revision,batchId:crypto.randomUUID(),keyframe:role,model:fallback,imageRetry,refs:[],referenceMode:'selected',estimate:null,plans:selected.map(r=>({itemId:r.item.id,prompt:storyboardPrompt(p,r.item),refs:planReferenceIds(p,r.item)}))});setOpened(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Создать ключевые кадры · {selected.length}</Button>
+      <Button disabled={disabled||!selected.length||!!needsPermission.length||p.limit!==null&&total===null} onClick={async()=>{setWorking(true);setError('');try{await submit({revision:p.revision,batchId:crypto.randomUUID(),keyframe:role,model:fallback,imageRetry,refs:[],referenceMode:'selected',estimate:null,plans:selected.map(r=>({itemId:r.item.id,prompt:keyframeRoleInstruction(p,r.item,role),refs:planReferenceIds(p,r.item)}))});setOpened(false);}catch(e){setError((e as Error).message);}finally{setWorking(false);}}}>Создать ключевые кадры · {selected.length}</Button>
       {notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}
     </>}
   </section>;

@@ -21,3 +21,28 @@ export function preparedPromptBody(text: string, format: string): string {
   const at=text.lastIndexOf(marker),suffix=at<0?'':text.slice(at);
   return at>=0&&suffix.includes('Постоянная внешность:')&&suffix.includes('Правило речи для этого плана:')?text.slice(0,at).trim():text;
 }
+
+/** Extract visual rules from a mixed film-style document without rewriting facts.
+ * Unknown/free-form sections stay intact. Only explicit narrative/production
+ * sections and paragraphs naming a different known location are excluded. */
+export function frameStyleText(text: string, currentLocations: readonly string[], otherLocations: readonly string[]): string {
+  const normalize = (s: string) => s.toLocaleLowerCase('ru').normalize('NFKC').replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const names = (values: readonly string[]) => values.map(normalize).filter(s => s.length >= 4);
+  const current = names(currentLocations), other = names(otherLocations).filter(s => !current.includes(s));
+  const narrative = /^(?:сценарий|сюжет|события|персонажи|герои|реквизит|предметы|(?:\S+\s+)?постановочные при[её]мы|режисс[её]рские при[её]мы|финальный (?:образ|кадр)|монтаж|композиция и движение|хронометраж|речь|озвучка)(?:\s|[:—-]|$)/iu;
+  let excludedAt: number | undefined;
+  const visual = text.replace(/\r\n?/g, '\n').split('\n').filter(line => {
+    const heading = line.match(/^\s*(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      if (excludedAt !== undefined && level <= excludedAt) excludedAt = undefined;
+      if (narrative.test(heading[2])) excludedAt = Math.min(excludedAt ?? level, level);
+    }
+    if (excludedAt !== undefined) return false;
+    return !/^\s*\*\*(?:формат|речь|озвучка|хронометраж|длительность)\s*:?[\s*]/iu.test(line);
+  }).join('\n');
+  return visual.split(/\n[\t ]*\n+/).filter(paragraph => {
+    const value = ` ${normalize(paragraph)} `;
+    return !other.some(name => value.includes(` ${name} `)) || current.some(name => value.includes(` ${name} `));
+  }).map(s => s.trim()).filter(Boolean).join('\n\n');
+}
