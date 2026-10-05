@@ -1,3 +1,4 @@
+import {prepareMediaPrompt} from '@/lib/prompt-optimization-runner';
 import {enqueueImageRetry} from '@/lib/image-retries';
 import {imageBlobs} from '@/lib/image-inputs';
 import {isOpenAIImage} from '@/lib/openai-image';
@@ -75,6 +76,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   // A watchdog may run while the original HTTP request is still in flight.
   // It only checks the deadline; it must never dispatch or poll a provider.
   if(recoveryAction==='check-wait')return p;
+  if(j.purpose==='prompt-optimization')return p;
   if(j.purpose==='voice-design')return runVoiceWorkflowStep(user,id,jobId);
   if(isSoundJob(j))return runSoundscapeStep(user,id,jobId);
   // A byte-return TTS may already be paid and stored when the final project
@@ -158,6 +160,12 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     if (j.status === 'cancelled'||j.status === 'queued') return p;
   }
   try {
+    if(!polling&&!saving&&!j.lipsync&&!j.purpose&&['image','video'].includes(j.kind)){
+      p=undefined!;
+      const prepared=await prepareMediaPrompt(user,id,j,key);
+      if(prepared)return prepared;
+      p=await loadProject(user,id);
+    }
     const directImages=!polling&&!saving&&!j.lipsync&&j.kind==='image'&&isOpenAIImage(j.model);
     const binaryRefs=directImages?await imageBlobs(user,j.refs,p):undefined;
     const refs =

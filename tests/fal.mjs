@@ -22,7 +22,7 @@ try {
   assert.deepEqual(JSON.parse(requests.at(-1).body).image_size,{width:w,height:h});
  }
  let before=requests.length;
- for(const [j,refs] of [[job,[]],[job,['https://untrusted.test/x.png']],[{...job,prompt:'a'.repeat(5001)},[ref]]])await assert.rejects(()=>P.generate(j,key,refs,'16:9'),e=>e.notSent);
+ for(const [j,refs] of [[job,[]],[job,['https://untrusted.test/x.png']],[{...job,prompt:'a'.repeat(60001)},[ref]]])await assert.rejects(()=>P.generate(j,key,refs,'16:9'),e=>e.notSent);
  assert.equal(requests.length,before);
  assert.throws(()=>M.prepareFalJobs([job],[]),/референс/);
  assert.throws(()=>M.prepareFalJobs([job],[{mime:'image/png',size:21*1024*1024}]),/20 МБ/);

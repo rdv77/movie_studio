@@ -1,7 +1,7 @@
 import type { Job } from './domain';
 import type { Result } from './providers';
 import { call, json, ProviderError } from './provider-http';
-import { FAL_ENDPOINTS, FAL_H3, isFalImage, isFalVideo, prepareFalJobs } from './fal-models';
+import { FAL_ENDPOINTS, FAL_H3, FAL_KLING, isFalImage, isFalVideo, prepareFalJobs } from './fal-models';
 import { validateEndFrameData } from './video-end-frame';
 import { modernVideoTiming, videoRequestTiming } from './video-duration';
 
@@ -38,6 +38,10 @@ export async function generateFal(j:Job,key:string,refs:string[],format:string,e
     prompt:j.prompt,image_urls:refs,image_size:sizes[format],num_images:1,
     num_inference_steps:28,guidance_scale:4.5,output_format:'png',acceleration:'regular',
     enable_safety_checker:true,sync_mode:false,
+  } : j.model === FAL_KLING ? {
+    prompt:j.prompt,start_image_url:refs[0],
+    duration:String(videoRequestTiming(j.model,j.duration,true).requestedSeconds),
+    ...(endFrame?{end_image_url:endFrame}:{}),generate_audio:false,shot_type:'customize',
   } : j.model === FAL_H3 ? {
     prompt:j.prompt,image_url:refs[0],duration:videoRequestTiming(j.model,j.duration,!!endFrame||modernVideoTiming(j)).requestedSeconds,resolution:'768P',
     ...(endFrame ? {end_image_url:endFrame} : {}),

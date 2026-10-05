@@ -23,7 +23,7 @@ export async function validateCompiledMediaAssets(job: Job, load: (id: string) =
     throw Error('Первый кадр видеоплана должен быть PNG, JPEG или WebP.');
   if (job.model === 'MiniMax-H3' && refs.some(a => a.size > 10 * 1024 * 1024)) throw Error('MiniMax H3: первый кадр должен быть не больше 10 МБ. Запрос не отправлен.');
   // Retain adapter-specific limits, duration checks and minimum budget reservation.
-  prepareFalJobs([job], refs);
-  prepareGoogleJobs([job], refs);
-  prepareZenJobs([job], refs);
+  prepareFalJobs([job], refs, false, true);
+  prepareGoogleJobs([job], refs, true);
+  prepareZenJobs([job], refs, true);
 }

@@ -14,6 +14,7 @@ import {SoundscapeEditor} from './soundscape-editor';
 import {VoiceStudioShell} from './voice-studio-shell';
 import {VideoPreparationPanel} from './video-preparation';
 import {videoPreparationIssue} from '../lib/video-from-animatic';
+import {isGrokVideo,GROK_VIDEO_1080,KLING_VIDEO} from '../lib/model-capabilities';
 import {grokVideoReservation,scaledVideoReservation} from '../lib/video-duration';
 import {supportsEndFrame} from '../lib/video-end-frame';
 import {AnimaticTimeline} from './animatic-timeline';
@@ -2058,7 +2059,7 @@ function GenerateDialog({
         : null
       : m.id==='grok-imagine-video-1.5' ? (8500000000n+BigInt(videoCharacterRefs(p,'xai',effectiveCharacters).length)*100000000n).toString()
         : m.estimate);
-  const computed=(m:(typeof MODELS)[number])=>{const cost=baseComputed(m),c=compiledModels.get(m.id)?.result;if(kind==='video'&&item.videoPreparation&&c?.capability.duration)return m.id==='grok-imagine-video-1.5'?grokVideoReservation(c.capability.duration.requestedSeconds,c.references.length,cost):scaledVideoReservation(m.estimate,cost,c.capability.duration.requestedSeconds);return cost;};
+  const computed=(m:(typeof MODELS)[number])=>{const cost=baseComputed(m),c=compiledModels.get(m.id)?.result;if(kind==='video'&&(item.videoPreparation||[GROK_VIDEO_1080,KLING_VIDEO].includes(m.id))&&c?.capability.duration)return isGrokVideo(m.id)?grokVideoReservation(c.capability.duration.requestedSeconds,c.references.length,cost,m.id===GROK_VIDEO_1080?'1080p':'720p'):scaledVideoReservation(m.estimate,cost,c.capability.duration.requestedSeconds);return cost;};
   let total: string | null = null;
   try {
     const costs = selected.map(computed);
@@ -2429,7 +2430,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
   catch { costError = 'Укажите стоимость в USD, например 0.85.'; }
   perAttempt=googleEstimate(m.id,perAttempt);
   const videoInput=(r:(typeof rows)[number]):PromptInput=>({kind:'video',endFrameId:supportsEndFrame(m.id)?snapshot.items.find(i=>i.id===r.itemId)?.videoPreparation?.endFrame?.assetId:undefined,prompt:r.prompt.trim(),references:[...(r.ref?[{assetId:r.ref,role:'first-frame' as const}]:[]),...videoCharacterRefs(snapshot,m.provider,planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds)).map(assetId=>({assetId,role:'character' as const}))],startFrameId:r.ref||undefined,characterIds:planCharacterIds(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,characterIds),duration:r.duration,allowLegacyModel:!snapshot.directing});
-  let total:string|null=null;try{const prices=included.map(r=>{const item=snapshot.items.find(i=>i.id===r.itemId)!;if(!item.videoPreparation)return perAttempt;const c=compilePrompt(snapshot,item,m.id,videoInput(r));return m.id==='grok-imagine-video-1.5'?grokVideoReservation(c.capability.duration!.requestedSeconds,c.references.length,perAttempt):scaledVideoReservation(m.estimate,perAttempt,c.capability.duration!.requestedSeconds);});if(prices.every(x=>x!==null))total=prices.reduce((s,x)=>s+BigInt(x!),0n).toString();}catch{}
+  let total:string|null=null;try{const prices=included.map(r=>{const item=snapshot.items.find(i=>i.id===r.itemId)!;if(!item.videoPreparation&&![GROK_VIDEO_1080,KLING_VIDEO].includes(m.id))return perAttempt;const c=compilePrompt(snapshot,item,m.id,videoInput(r));return isGrokVideo(m.id)?grokVideoReservation(c.capability.duration!.requestedSeconds,c.references.length,perAttempt,m.id===GROK_VIDEO_1080?'1080p':'720p'):scaledVideoReservation(m.estimate,perAttempt,c.capability.duration!.requestedSeconds);});if(prices.every(x=>x!==null))total=prices.reduce((s,x)=>s+BigInt(x!),0n).toString();}catch{}
   const budget=totals(p);if(!costError&&p.limit!==null){if(total===null||budget.unknown)costError='При лимите укажите оценку и сверьте неизвестные списания в разделе расходов.';else if(BigInt(total)+BigInt(budget.actual)+BigInt(budget.reserved)>BigInt(p.limit))costError='Эта серия превысит лимит проекта.';}
   const blockReasons=included.flatMap(r=>{const errors=videoPlanIssues(r.title,r.duration,r.ref?1:0,r.prompt.trim(),20000,[m.id]);try{compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,m.id,videoInput(r));}catch(e){errors.push(r.title+': '+(e instanceof Error?e.message:'Не удалось подготовить запрос.'));}return errors;});
   const incomplete = blockReasons.length>0;
@@ -3149,6 +3150,7 @@ function Budget({ p, action, perform, replace }: any) {
                   <strong>
                     {[...MODELS, ...SYNC_MODELS,...MUSIC_MODELS].find((m) => m.id === j.model)?.name ?? j.model}
                   </strong>
+                  {j.purpose==='prompt-optimization'&&<small>{j.brief}</small>}{j.promptOptimization&&<small>Подготовка промпта: {j.promptOptimization.state==='done'?'готово':j.promptOptimization.state==='running'?'LLM сокращает текст':'нужна проверка журнала'}</small>}
                   {j.purpose==='voice-test'&&<small>Проба голоса · {j.voiceName||j.voiceId}</small>}
                   {(j.purpose==='music'||j.purpose==='music-ideas')&&<small>{j.purpose==='music'?'Музыкальное сопровождение':'Музыкальные направления по сценарию'}</small>}
                   <small>{new Date(j.created).toLocaleString('ru-RU')}</small>

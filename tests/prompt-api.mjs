@@ -43,9 +43,9 @@ try {
   reset();const response=await single(request(input()),context());assert.equal(response.status,200,await response.clone().text());
   assert(!globalThis.promptAssetLookups.includes(foreignAsset),'Irrelevant known images are removed before asset reads');
   const [gpt,grok]=globalThis.promptState.jobs;
-  assert(gpt.prompt.length>grok.prompt.length && gpt.prompt.length<=32000 && grok.prompt.length<=5000,'Every selected model compiles independently');
+  assert.equal(gpt.compilation.budget.limit,32000);assert.equal(grok.compilation.budget.limit,60000);assert.equal(gpt.prompt,grok.prompt,'Fits both endpoints: no per-model text reduction');
   for(const job of [gpt,grok]){assert.deepEqual(job.refs,[heroAsset,locAsset]);assert(job.compilation);assert.equal(job.compilation.budget.compiledCharacters,job.prompt.length);assert(job.prompt.includes('Синий плащ') && job.prompt.includes('Сумка на левом плече'));}
-  assert.equal(grok.estimate,'1000000000');assert(grok.compilation.compression.omitted.some(x=>x.reason==='budget'));
+  assert.equal(grok.estimate,'1000000000');assert(!grok.compilation.compression.omitted.some(x=>x.reason==='budget'),'A fitting prompt is not trimmed to an artificial 5000-character limit');
   const pure=C.compilePrompt(ready,frames[0],grok.model,{kind:'image',keyframe:'start',keyframeInstruction:prepareKeyframeGeneration(ready,frames[0].id,'start',{model:grok.model,refs:[heroAsset,locAsset,foreignAsset]}).roleInstruction,prompt:'Нарисуй начало плана.',references:[heroAsset,locAsset,foreignAsset],allowLegacyModel:true});assert.equal(grok.prompt,pure.prompt);
 
   reset();const batch=await storyboard(request({revision:ready.revision,batchId:D.id(),model:'grok-imagine-image-2.0',refs:[],estimate:'1',plans:frames.map(frame=>({itemId:frame.id,prompt:'Нарисуй начало плана.',refs:[heroAsset,locAsset,foreignAsset]}))}),context());
@@ -57,10 +57,11 @@ try {
 
   reset();const remainingBody={revision:ready.revision,batchId:D.id(),sourceItemId:videos[0].id,sourceVariantId:video.id,estimate:'10000000000',plans:[{itemId:videos[1].id,ref:frameAssets[1],prompt:'Подними письмо и сохрани взгляд'}]};
   const videoBatch=await remaining(request(remainingBody),context());assert.equal(videoBatch.status,200,await videoBatch.clone().text());const motion=globalThis.promptState.jobs[0];assert(motion.compilation);assert.deepEqual(motion.refs,[frameAssets[1]]);assert(motion.prompt.includes('рты закрытыми весь план'));assert(motion.prompt.includes(shots[1].stateOut));
-  reset();const longRemaining=await remaining(request({...remainingBody,batchId:D.id(),plans:[{...remainingBody.plans[0],prompt:longTask}]}),context());assert.equal(longRemaining.status,400);assert((await longRemaining.json()).error.includes('Обязательная постановка'),'32K input accepted; the actual video provider limit is checked by the compiler');assert.equal(globalThis.promptState.jobs.length,0);
+  reset();const longRemaining=await remaining(request({...remainingBody,batchId:D.id(),plans:[{...remainingBody.plans[0],prompt:longTask}]}),context());assert.equal(longRemaining.status,200,await longRemaining.clone().text());assert(globalThis.promptState.jobs[0].prompt.includes(longTask.trim()));
 
   reset();const tooLarge=structuredClone(ready);const badHero=tooLarge.items.find(i=>i.id===hero.id);badHero.variants.find(v=>v.id===badHero.approvedId).character.appearance='НЕОБХОДИМАЯ ВНЕШНОСТЬ '.repeat(400);globalThis.promptState=tooLarge;
-  const badBody={...input(),models:['grok-imagine-image-2.0']};const before=JSON.stringify(globalThis.promptState);const failure=await single(request(badBody),context());assert.equal(failure.status,400);assert((await failure.json()).error.includes('Обязательная постановка'));assert.equal(JSON.stringify(globalThis.promptState),before);assert.equal(globalThis.promptState.jobs.length,0);
+  const badBody={...input(),models:['grok-imagine-image-2.0']};const failure=await single(request(badBody),context());assert.equal(failure.status,200,await failure.clone().text());assert(globalThis.promptState.jobs[0].prompt.includes('НЕОБХОДИМАЯ ВНЕШНОСТЬ'));
+
   reset();const unknown=makeImage();globalThis.promptAssets.get(unknown).projectId=D.id();const outside=await single(request({...input(),refs:[unknown]}),context());assert.equal(outside.status,400,'An unknown upload still needs a project-scoped asset check');assert.equal(globalThis.promptState.jobs.length,0);
   assert.equal(calls,0);console.log('PASS prompt APIs: per-model compile/refs, exact preview, single/bulk/remaining metadata, mandatory errors before enqueue, scoped unknown uploads; no paid API calls');
 } finally {globalThis.fetch=originalFetch}

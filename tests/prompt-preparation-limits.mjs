@@ -32,9 +32,10 @@ try{
   const manual='Анна хлопает. Анна хлопает.';const manualCompiled=C.compilePrompt(p,frame,'gpt-image-2.5-flare',{kind:'image',prompt:manual,references:[]});assert(manualCompiled.criticalText.includes(manual),'Repeated manual action must not be deduplicated');
   const history=C.compilePrompt(p,frame,'gpt-image-2.5-flare',{kind:'image',prompt:'Начальный кадр',references:[],plan:{id:shot.id,title:shot.title,cast:shot.cast,stateIn:shot.stateIn,sceneContinuity:scene.continuity,previousChanges:[{id:'a',changes:'Анна взяла письмо.'},{id:'b',changes:'Анна передала письмо.'},{id:'c',changes:'Анна взяла письмо.'}]}});
   assert.equal(history.criticalText.split('Анна взяла письмо.').length,3,'Identical changes separated by another transition remain in order');
-  assert.throws(()=>C.compilePrompt(p,frame,'gpt-image-2.5-flare',{kind:'image',prompt:'X'.repeat(33000),references:[]}),e=>e.code==='critical_too_long');
-  assert.throws(()=>C.compilePrompt(p,frame,'zencreator:image:QWEN_IMAGE',{kind:'image',prompt:'X'.repeat(5100),references:[]}),e=>e.code==='critical_too_long','Provider budgets stay enforced');
-  assert.throws(()=>C.compilePrompt(p,frame,'gpt-image-2.5-flare',{kind:'image',prompt:'X'.repeat(1100),providerPromptLimit:1000,allowLegacyModel:true,references:[]}),e=>e.code==='critical_too_long');
+  for(const [model,length,providerPromptLimit] of [['gpt-image-2.5-flare',33000,undefined],['zencreator:image:QWEN_IMAGE',5100,undefined],['gpt-image-2.5-flare',1100,1000]]) {
+    const long=C.compilePrompt(p,frame,model,{kind:'image',prompt:'X'.repeat(length),providerPromptLimit,allowLegacyModel:true,references:[]});
+    assert(long.budget.needsOptimization);assert(long.prompt.includes('X'.repeat(length)),'Raw brief is kept for conditional LLM optimization');
+  }
   const snapshot=structuredClone(p),tooLarge=R.newDirectorRun(snapshot,'gpt-6-astra','compress');assert.throws(()=>R.applyDirectorResult(snapshot,tooLarge,tooLarge.tasks[0],{shots:[{id:shot.id,imagePrompt:'X'.repeat(12001),videoPrompt:'Valid'}]}));
   if(existsSync('work/prompt-limit-errors.json')){
     globalThis.preparationState=JSON.parse(readFileSync('work/prompt-limit-errors.json','utf8'));

@@ -4,6 +4,7 @@ import { ProviderError } from './provider-http';
 /** Installed, payload-tested adapters only. Other upstream capabilities stay disabled. */
 export const END_FRAME_ADAPTERS: Record<string, { field: string; source: string; checked: string; maxBytes?: number }> = {
   'grok-imagine-video-1.5': { field: 'last_frame', source: 'https://docs.x.ai/developers/model-capabilities/video/reference-to-video', checked: '2026-10-01' },
+  'fal-kling-3.0-pro': {field:'end_image_url',source:'https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video/api',checked:'2026-10-05',maxBytes:20*1024*1024},
   'MiniMax-H3': { field: 'content[].role=last_frame', source: 'https://platform.minimax.io/docs/guides/video-generation', checked: '2026-10-01', maxBytes: 10 * 1024 * 1024 },
   'fal-minimax-h3-max': { field: 'end_image_url', source: 'https://fal.ai/models/minimax/h3-max/image-to-video/api', checked: '2026-10-01', maxBytes: 20 * 1024 * 1024 },
 };
@@ -12,7 +13,7 @@ type EndJob = Pick<Job, 'model' | 'kind' | 'endFrameAssetId'>;
 export type EndFrameAsset = { mime: string; size: number };
 export function assertEndFrameModel(job: EndJob): void {
   if (job.kind !== 'video' || !supportsEndFrame(job.model))
-    throw new ProviderError('Этот адаптер не передаёт конечный кадр. Выберите Grok Video 1.5, MiniMax H3 или fal H3 Max. Запрос не отправлен.', true, true);
+    throw new ProviderError('Этот адаптер не передаёт конечный кадр. Выберите Grok Video 1.5 720p, MiniMax H3, fal H3 Max или Kling 3.0 Pro. Запрос не отправлен.', true, true);
 }
 export function validateEndFrameAsset(job: EndJob, file?: EndFrameAsset): void {
   assertEndFrameModel(job);

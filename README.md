@@ -1,5 +1,7 @@
 # Кадр — Movie Studio
 
+[Лимиты API, условное сокращение промптов, Kling 3.0 Pro и Grok 1080p](docs/media-model-limits.md).
+
 Последовательная разработка: [план выпусков](docs/release-plan.md), [требования](docs/implementation-plan.md), [журнал](docs/release-progress.md). [Режимы качества Grok](docs/grok-image-quality.md).
 
 [Руководство нового процесса](docs/director-workflow-v2.md) · [Очередь, фон и отчёт расходов](docs/R13-queue-cost-background.md) · [Проверка настоящей сборки](docs/offline-film-verification.md).

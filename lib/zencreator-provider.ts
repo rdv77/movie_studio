@@ -42,6 +42,12 @@ export async function checkZenConnection(key:string) {
   return {credits:balance.credits,checkedAt:new Date().toISOString(),models:ZEN_MODELS.map(m=>({id:m.id,name:m.name,kind:m.kind,
     available:available(tools,m.id,m.kind==='video'?1:0),references:m.kind==='image'?available(tools,m.id,1):undefined}))};
 }
+export async function zenPromptLimit(j:Job,key:string):Promise<number|undefined> {
+  const tools=await catalog(key),tool=tools.find((t:any)=>t.name===zenTool(j.model,j.refs.length));
+  const schema=tool?.input_schema,props=schemaNode(schema,schema)?.properties??{};
+  const cap=schemaNode(schema,props.prompt).maxLength??schemaNode(schema,props.positive_prompt).maxLength;
+  return Number.isSafeInteger(cap)&&cap>0?cap:undefined;
+}
 export async function generateZen(j:Job,key:string,refs:string[],format:string):Promise<Result> {
   const p=zenProfile(j.model);
   if(!p)throw new ProviderError('ZenCreator: неизвестная модель.',true,true);

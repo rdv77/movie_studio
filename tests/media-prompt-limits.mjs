@@ -1,0 +1,38 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as P from './lib/providers';export * as M from './lib/model-capabilities';export * as V from './lib/video-duration';export * as O from './lib/prompt-optimization';export * as C from './lib/prompt-compiler';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/media-prompt-limits.mjs'});
+const {P,M,V,O,C}=await import('../work/tests/media-prompt-limits.mjs');
+const original=globalThis.fetch,ref='data:image/png;base64,AA==',end='data:image/png;base64,AQ==',id='764cabcf-b745-4b3e-ae38-1200304cf45b';
+try{
+ const requests=[];globalThis.fetch=async(url,init)=>{requests.push({url,...init,body:JSON.parse(init.body??'{}')});return Response.json({request_id:id})};
+ const job={kind:'video',prompt:'Preserve face. Slowly raise the arrow. Mouth closed.',duration:7,refs:['start'],videoPreparationBasis:'current'};
+ await P.generate({...job,model:M.GROK_VIDEO_1080},'test-only',[ref],'16:9');
+ const grok=requests.at(-1).body;
+ assert.equal(grok.model,'grok-imagine-video-1.5');assert.equal(grok.resolution,'1080p');assert.equal(grok.duration,7);assert.deepEqual(grok.image,{url:ref});
+ assert(!('last_frame' in grok)&&!('reference_images' in grok));
+ const n=requests.length;
+ await assert.rejects(()=>P.generate({...job,model:M.GROK_VIDEO_1080},'test',[ref],'16:9',[end]),e=>e.notSent);
+ await assert.rejects(()=>P.generate({...job,model:M.GROK_VIDEO_1080,endFrameAssetId:'end'},'test',[ref],'16:9',[],end),e=>e.notSent);
+ assert.equal(requests.length,n);
+ await P.generate({...job,model:M.KLING_VIDEO,endFrameAssetId:'end'},'test',[ref],'16:9',[],end);
+ const kling=requests.at(-1);assert.equal(kling.url,'https://queue.fal.run/fal-ai/kling-video/v3/pro/image-to-video');
+ assert.equal(kling.body.start_image_url,ref);assert.equal(kling.body.end_image_url,end);assert.equal(kling.body.duration,'7');assert.equal(kling.body.generate_audio,false);assert(!('resolution' in kling.body));
+ await assert.rejects(()=>P.generate({...job,model:M.KLING_VIDEO,prompt:'я'.repeat(2501)},'test',[ref],'16:9'),e=>e.notSent);
+ assert.equal(M.promptCapacity('MiniMax-H3','video').limit,7000);assert.equal(M.promptCapacity('fal-minimax-h3-max','video').limit,50000);
+ assert.equal(M.promptCapacity('veo-3.1-generate-preview','video').unit,'tokens');assert.equal(M.promptCapacity('veo-3.1-generate-preview','video').limit,1024);
+ assert.equal(M.promptCapacity('grok-imagine-video-1.5','video').verified,false);
+ assert(M.fitsPrompt('я'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')));
+ assert(M.fitsPrompt('😀'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')),'API maxLength counts Unicode characters, not JS UTF-16 units');
+ assert.equal(V.grokVideoReservation(7,1,null,'1080p'),'17600000000');
+ assert.equal(C.promptModelCapability(M.GROK_VIDEO_1080).adapter.maxImageReferences,1);
+ assert.equal(C.promptModelCapability(M.GROK_VIDEO_1080).adapter.lastFrame,false);
+ assert.equal(C.promptModelCapability(M.KLING_VIDEO).newDirecting,true);
+ assert.equal(C.promptModelCapability(M.KLING_VIDEO).adapter.lastFrame,true);
+ const sections=[{key:'identity',label:'Лицо',text:'Green eyes, blue coat.',required:true,priority:100},{key:'motion',label:'Действие',text:'Arrow rises; mouth closed.',required:true,priority:100}];
+ const cap=M.promptCapacity(M.KLING_VIDEO,'video');
+ assert.equal(O.parseOptimizedPrompt(JSON.stringify({sections:sections.map(({key,text})=>({key,text}))}),sections,cap),'Green eyes, blue coat.\nArrow rises; mouth closed.');
+ assert.throws(()=>O.parseOptimizedPrompt('{"sections":[{"key":"identity","text":"face"}]}',sections,cap),/обязательные/);
+ assert.throws(()=>O.parseOptimizedPrompt(JSON.stringify({sections:sections.map(({key})=>({key,text:'я'.repeat(2000)}))}),sections,cap),/превышает/);
+ assert.throws(()=>O.parseOptimizedPrompt('```No JSON```',sections,cap),/JSON/);
+ console.log('PASS API limits/Unicode units; Kling first+last and async queue; Grok 1080p first-only; conservative cost reservation; optimizer structural validation. No paid API calls.');
+}finally{globalThis.fetch=original}

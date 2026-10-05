@@ -1,3 +1,4 @@
+import {isGrokVideo,GROK_VIDEO_1080} from './model-capabilities';
 import type { Job, Project } from './domain';
 import { getItem } from './domain';
 import { GROK_IMAGE_MODEL, grokImageEstimate } from './image-quality';
@@ -63,7 +64,7 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
   const last = result.references.find(ref => ref.role === 'last-frame');
   const auxiliary = result.references.filter(ref => ref.role !== 'first-frame' && ref.role !== 'last-frame').map(ref => ref.assetId);
   const output: CompiledMediaJob = {
-    ...job, prompt: result.prompt,
+    ...job, prompt: result.prompt, promptSections:result.budget.needsOptimization||model(job.model).provider==='zencreator'?result.sections:undefined, promptOptimization:undefined, promptTokenCount:undefined,
     refs: job.kind === 'video' ? [first!.assetId] : result.references.map(ref => ref.assetId),
     characterRefs: job.kind === 'video' && auxiliary.length ? auxiliary : undefined,
     compilation: compilationSnapshot(result, job.kind === 'image' ? input.keyframe ?? 'start' : undefined),
@@ -72,8 +73,8 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
   };
   if(job.kind==='video'&&item.videoPreparation)output.videoPreparationBasis=captureVideoPreparationBasis(p,item,output);
   if (job.model === GROK_IMAGE_MODEL) output.estimate = grokImageEstimate(job.imageSettings, output.refs.length);
-  if (job.kind==='video' && (last || modernVideoTiming(job) || item.videoPreparation))
-    output.estimate=job.model==='grok-imagine-video-1.5'?grokVideoReservation(output.providerDuration!,result.references.length,job.estimate)
+  if (job.kind==='video' && (last || modernVideoTiming(job) || item.videoPreparation || ['fal-kling-3.0-pro',GROK_VIDEO_1080].includes(job.model)))
+    output.estimate=isGrokVideo(job.model)?grokVideoReservation(output.providerDuration!,result.references.length,job.estimate,job.model===GROK_VIDEO_1080?'1080p':'720p')
       : scaledVideoReservation(model(job.model).estimate,job.estimate,output.providerDuration!);
   return output;
 }

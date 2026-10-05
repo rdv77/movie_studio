@@ -105,6 +105,9 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  promptSections?: import('./prompt-compiler').PromptSection[];
+  promptTokenCount?: {text:string;count:number;method:'api'|'utf8-upper-bound'};
+  promptOptimization?: {auditId:string;state:'running'|'done'|'failed';original:string;limit:number;unit:'characters'|'tokens'};
   imageRetry?: import('./image-retries').ImageRetryState;
   soundInput?:{layerId:string;generation:SoundGeneration;late?:boolean};
   providerDuration?:number;
@@ -125,7 +128,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review';
+  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review' | 'prompt-optimization';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;

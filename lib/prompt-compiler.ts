@@ -1,6 +1,6 @@
 import type { CharacterBrief, Item, Project } from './domain';
 import { model } from './models';
-import { availableForDirecting, promptCapacity } from './model-capabilities';
+import { availableForDirecting, promptCapacity, promptSize, GROK_VIDEO_1080, KLING_VIDEO } from './model-capabilities';
 import { selectedReferences } from './reference-selection';
 import { speechDirection, speechInfo, type SpeechType } from './speech-mode';
 import { effectiveCreativeBrief, type CreativeOverrides } from './creative-brief';
@@ -31,7 +31,7 @@ export type PromptPlan = {
 };
 export type PromptCapability = {
   modelId: string; provider: string; kind: 'image' | 'video';
-  promptLimit: number; limitSource: string; newDirecting: boolean;
+  promptUnit: 'characters'|'tokens'; promptLimit: number; limitSource: string; newDirecting: boolean;
   adapter: { firstFrame: boolean; lastFrame: boolean; requiresFirstFrame: boolean; maxImageReferences: number; maxAdditionalReferences: number; camera: 'text'; nativeAudio: 'possible' | 'none' | 'unknown' };
   upstream: { lastFrame: boolean | 'unknown'; lastFrameField?: string; source?: string; checked?: string };
   duration?: { requestedSeconds: number; planMaxSeconds: number; variableResult: boolean };
@@ -42,11 +42,11 @@ export function promptModelCapability(modelId: string): PromptCapability {
   const m = model(modelId);
   if (m.kind !== 'image' && m.kind !== 'video' || m.provider === 'sync') throw new PromptCompilationError('model_kind', 'Выберите модель генерации изображения или видеоплана.');
   const cap = promptCapacity(modelId, m.kind);
-  const video = m.kind === 'video', maxAdditional = video && m.provider === 'xai' ? 7 : 0, lastFrame = video && supportsEndFrame(modelId);
+  const video = m.kind === 'video', maxAdditional = video && m.provider === 'xai' && modelId!==GROK_VIDEO_1080 ? 7 : 0, lastFrame = video && supportsEndFrame(modelId);
   const requestedSeconds = googleSeconds(modelId) ?? zenProfile(modelId)?.seconds ?? 6;
   const result: PromptCapability = {
-    modelId, provider: m.provider, kind: m.kind, promptLimit: cap.limit, limitSource: cap.source,
-    newDirecting: availableForDirecting(modelId) && cap.limit >= 5000,
+    modelId, provider: m.provider, kind: m.kind, promptUnit:cap.unit, promptLimit: cap.limit, limitSource: cap.source,
+    newDirecting: availableForDirecting(modelId),
     adapter: { firstFrame: video, lastFrame, requiresFirstFrame: video,
       maxImageReferences: video ? 1 + Number(lastFrame) + maxAdditional : m.provider === 'xai' ? 5 : 8,
       maxAdditionalReferences: maxAdditional, camera: 'text',
@@ -56,6 +56,7 @@ export function promptModelCapability(modelId: string): PromptCapability {
     ...(video ? { duration: { requestedSeconds, planMaxSeconds: Object.hasOwn(VIDEO_DURATION_CONTRACTS,modelId)?VIDEO_DURATION_CONTRACTS[modelId].max:requestedSeconds, variableResult: modelId === 'gemini-omni-1.1-flash' } } : {}),
   };
   if (modelId === 'grok-imagine-video-1.5') result.upstream = { lastFrame: true, lastFrameField: 'last_frame', checked: '2026-10-01', source: 'https://docs.x.ai/developers/model-capabilities/video/reference-to-video' };
+  if(modelId===KLING_VIDEO)result.upstream={lastFrame:true,lastFrameField:'end_image_url',checked:'2026-10-05',source:'https://fal.ai/models/fal-ai/kling-video/v3/pro/image-to-video/api'};
   if (modelId === 'MiniMax-H3') result.upstream = { lastFrame: true, lastFrameField: 'content[].role=last_frame', checked: '2026-10-01', source: 'https://platform.minimax.io/docs/guides/video-generation' };
   if (modelId === 'fal-minimax-h3-max') result.upstream = { lastFrame: true, lastFrameField: 'end_image_url', checked: '2026-10-01', source: 'https://fal.ai/models/minimax/h3-max/image-to-video/api' };
   return result;
@@ -77,7 +78,8 @@ export type PromptInput = {
 export type PromptExclusion = { key: string; label: string; reason: 'budget' | 'irrelevant' | 'hidden' | 'unsupported' | 'duplicate'; characters?: number; assetId?: string };
 export type CompiledPrompt = {
   prompt: string; references: CompiledReference[]; criticalText: string; capability: PromptCapability;
-  budget: { limit: number; source: string; criticalCharacters: number; originalCharacters: number; compiledCharacters: number; remaining: number };
+  sections: PromptSection[];
+  budget: { unit?:'characters'|'tokens'; used?:number; needsOptimization?:boolean; limit: number; source: string; criticalCharacters: number; originalCharacters: number; compiledCharacters: number; remaining: number };
   compression: { shortened: boolean; omitted: PromptExclusion[]; includedKeys: string[] };
   warnings: string[];
 };
@@ -116,8 +118,8 @@ function belongsToPlan(frame: Item, item: Item, plan: PromptPlan): boolean {
   if (item.sourceShot?.scriptId && frame.sourceShot?.scriptId !== item.sourceShot.scriptId) return false;
   return frame.id === item.id || !!frame.sourceShot && (plan.id ? frame.sourceShot.shotId === plan.id : frame.sourceShot.title === plan.title);
 }
-type Section = { key: string; label: string; text: string; priority: number; required: boolean };
-const render = (sections: readonly Section[]) => sections.map(s => `${s.label}: ${s.text}`).join('\n\n');
+export type PromptSection = { key: string; label: string; text: string; priority: number; required: boolean };
+const render = (sections: readonly PromptSection[]) => sections.map(s => `${s.label}: ${s.text}`).join('\n\n');
 
 /** Pure, deterministic preflight. Never performs compression calls, reads files, enqueues or mutates. */
 export function compilePrompt(p: Project, item: Item, modelId: string, input: PromptInput): CompiledPrompt {
@@ -127,8 +129,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   if (input.providerPromptLimit !== undefined && (!Number.isInteger(input.providerPromptLimit) || input.providerPromptLimit <= 0))
     throw new PromptCompilationError('provider_limit', 'Некорректный лимит из каталога провайдера.');
   const limit = Math.min(capability.promptLimit, input.providerPromptLimit ?? Infinity);
-  if ((!capability.newDirecting || limit < 5000) && !input.allowLegacyModel)
-    throw new PromptCompilationError('short_model', `Для новой постановки выберите модель с бюджетом не меньше 5000 символов. У этой модели доступно ${limit}. Старые результаты и запросы сохранены.`);
+  if ((!capability.newDirecting) && !input.allowLegacyModel)
+    throw new PromptCompilationError('short_model', `Этот старый компактный адаптер не используется для новой постановки. Выберите другую модель. Старые результаты и запросы сохранены.`);
   const plans = resolvePlans(p, item), sourcePlan = input.plan ?? plans.find(s => item.sourceShot?.shotId ? s.id === item.sourceShot.shotId : s.title === (item.sourceShot?.title ?? item.title));
   const value = item.variants.find(v => v.id === item.selectedId);
   const fields = sourcePlan && !input.plan && [5, 7].includes(item.stage) ? planFields(p, item, value) : undefined;
@@ -159,7 +161,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (conflict) throw new PromptCompilationError('direction_timing', `${conflict.message} Исправьте постановку перед запуском.`);
   }
 
-  const warnings: string[] = [], omitted: PromptExclusion[] = [], sections: Section[] = [];
+  const warnings: string[] = modelId===GROK_VIDEO_1080?['Grok 1080p: передаётся только первый кадр. Конечный кадр и отдельные образы героев исключены; внешний вид задаёт первый кадр.']:[], omitted: PromptExclusion[] = [], sections: PromptSection[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
     if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority });
   };
@@ -446,20 +448,17 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   if (capability.duration?.variableResult) warnings.push('Фактическая длительность результата может отличаться от запрошенной; проверьте файл перед озвучкой и монтажом.');
 
   const mandatory = sections.filter(s => s.required), criticalText = render(mandatory);
-  if (criticalText.length > limit) throw new PromptCompilationError('critical_too_long', `Обязательная постановка занимает ${criticalText.length} символов при лимите ${limit}. Сократите правки режиссёра, постоянную внешность, одежду, предметы или действия текущего плана либо выберите модель с большим бюджетом. Автоматическое описание можно заменить краткими правками. Обязательные признаки не обрезаны; запрос не отправлен.`,
-    { limit, requiredCharacters: criticalText.length, sections: mandatory.map(s => s.label) });
-  const kept = new Set(mandatory.map(s => s.key));
-  const includedTexts = new Set(mandatory.map(s => s.text));
-  let used = criticalText.length;
-  for (const section of sections.filter(s => !s.required).sort((a, b) => b.priority - a.priority)) {
-    if (includedTexts.has(section.text)) { omitted.push({ key: section.key, label: section.label, reason: 'duplicate', characters: section.text.length }); continue; }
-    const cost = render([section]).length + (used ? 2 : 0);
-    if (used + cost <= limit) { kept.add(section.key); includedTexts.add(section.text); used += cost; }
-    else omitted.push({ key: section.key, label: section.label, reason: 'budget', characters: section.text.length });
-  }
-  const included = sections.filter(s => kept.has(s.key)), prompt = render(included);
-  return { prompt, references, criticalText, capability,
-    budget: { limit, source: input.providerPromptLimit !== undefined && input.providerPromptLimit < capability.promptLimit ? 'проверенный лимит текущего каталога API' : capability.limitSource,
-      criticalCharacters: criticalText.length, originalCharacters: render(sections).length, compiledCharacters: prompt.length, remaining: limit - prompt.length },
-    compression: { shortened: prompt.length < render(sections).length, omitted, includedKeys: included.map(s => s.key) }, warnings: [...new Set(warnings)] };
+  const seenTexts=new Set<string>();
+  const included=sections.filter(section=>{
+    if(!section.required&&seenTexts.has(section.text)){omitted.push({key:section.key,label:section.label,reason:'duplicate',characters:section.text.length});return false;}
+    seenTexts.add(section.text);return true;
+  });
+  const prompt=render(included),used=promptSize(prompt,{unit:capability.promptUnit}),needsOptimization=used>limit;
+  if(needsOptimization)warnings.push(capability.promptUnit==='tokens'
+    ? 'Перед отправкой сервер проверит токены. LLM сократит промпт только при превышении лимита. Если API не поддерживает подсчёт, используется консервативная верхняя граница по UTF-8.'
+    : 'Промпт превышает лимит. Перед генерацией подключённая текстовая LLM сократит его, сохранив обязательные детали. Это отдельный платный запрос в журнале.');
+  return {prompt,references,criticalText,capability,sections:included,
+    budget:{limit,unit:capability.promptUnit,used,needsOptimization,source:input.providerPromptLimit!==undefined?'Проверенный лимит каталога API':capability.limitSource,
+      criticalCharacters:criticalText.length,originalCharacters:render(sections).length,compiledCharacters:prompt.length,remaining:limit-used},
+    compression:{shortened:prompt.length<render(sections).length,omitted,includedKeys:included.map(s=>s.key)},warnings:[...new Set(warnings)]};
 }

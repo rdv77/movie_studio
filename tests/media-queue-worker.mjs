@@ -24,6 +24,9 @@ export async function runSoundscapeStep(user,id,jobId){specialCalls.push({user,i
 export async function runDirectorStep(user,id){specialCalls.push({user,id,kind:'director'});const p=projects.get(id);for(const r of p.directing?.runs??[])for(const t of r.tasks)t.result={};p.revision++;return structuredClone(p);}
 `;
 await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as Q from './lib/queue-policy';export {executeMediaJob} from './lib/media-job-runner';export {projectWorkerTick} from './lib/project-worker';export {POST} from './app/api/projects/[id]/jobs/[jobId]/route';export {POST as cron} from './app/api/worker/tick/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/media-queue-worker.mjs',plugins:[{name:'mock',setup(b){
+  // This test exercises the cross-worker CAS queue, not one isolate's memory
+  // gate (covered separately by video-preparation-memory / hosted slot tests).
+  b.onResolve({filter:/\/hosted-media-job$/},()=>({path:process.cwd()+'/lib/media-job-runner.ts'}));
   b.onResolve({filter:/^(?:@\/lib\/|\.\/)(server|providers|voice-design-runner|soundscape-runner|director-runner)$/},a=>({path:a.path.endsWith('/server')?'server':a.path.endsWith('/providers')?'provider':'workflow',namespace:'mock'}));
   b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'mock'}));
   b.onResolve({filter:/^vinext\/shims\/request-context$/},()=>({path:'context',namespace:'mock'}));

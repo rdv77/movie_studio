@@ -61,6 +61,7 @@ try {
  globalThis.saved=0;globalThis.storageFailure=false;
  mock((url,o)=>{
   assert.equal(o.headers['x-goog-api-key'],key);
+  if(url.endsWith(':countTokens'))return Response.json({totalTokens:600});
   if(o.method==='POST'){posts++;return Response.json({name:task});}
   if(url.includes('/operations/'))return Response.json({name:task,done:true,response:{generateVideoResponse:{generatedSamples:[{video:{uri:base+'/files/test'}}]}}});
   return new Response(new Uint8Array([1]),{headers:{'content-type':'video/mp4'}});

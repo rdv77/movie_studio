@@ -41,12 +41,12 @@ export function isZenCreatorImage(id:string) { return zenProfile(id)?.kind==='im
 export function zenCredits(id: string, refs = 0) { const p=zenProfile(id); return p ? (refs ? p.editCredits??p.credits : p.credits) : undefined; }
 export function generationSeconds(id: string) { return googleSeconds(id)??zenProfile(id)?.seconds??(Object.hasOwn(VIDEO_DURATION_CONTRACTS,id)?VIDEO_DURATION_CONTRACTS[id].max:6); }
 export function zenTool(id: string, refs = 0) { const p=zenProfile(id); return p?.kind==='text'?'run_any_llm':p?.kind==='video'?'videogen':refs?'image_editor':'by_prompt'; }
-export function prepareZenJobs(jobs: Job[], assets: {mime:string;size:number}[] = []) {
+export function prepareZenJobs(jobs: Job[], assets: {mime:string;size:number}[] = [], admission=false) {
   for(const j of jobs) {
     const p=zenProfile(j.model); if(!p)continue;
     if(j.kind!==p.kind)throw new Error('ZenCreator: тип модели не совпадает с задачей.');
     if(!j.prompt.trim()||(p.kind==='text'&&j.prompt.length>32000))throw new Error('ZenCreator: текстовый промпт должен содержать от 1 до 32 000 символов. Запрос не отправлен.');
-    if(p.kind==='image'&&j.prompt.length>ZEN_IMAGE_PROMPT_LIMIT)throw new Error('ZenCreator: полный промпт изображения длиннее 5000 символов. Откройте новое окно генерации для подготовки компактного запроса. Запрос не отправлен.');
+    if(!admission&&p.kind==='image'&&j.prompt.length>ZEN_IMAGE_PROMPT_LIMIT)throw new Error('ZenCreator: полный промпт изображения длиннее 5000 символов. Откройте новое окно генерации для подготовки компактного запроса. Запрос не отправлен.');
     if(p.kind==='text'&&j.refs.length)throw new Error('ZenCreator: текстовые модели в студии принимают только текст; уберите референсы.');
     if(p.kind==='video'&&(j.refs.length!==1||!Number.isFinite(j.duration)||j.duration<=0||j.duration>generationSeconds(j.model)))throw new Error(`ZenCreator: выберите один первый кадр и план до ${generationSeconds(j.model)} секунд.`);
     if(j.refs.length>8||assets.some(a=>!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)||assets.reduce((s,a)=>s+a.size,0)>20*1024*1024)

@@ -221,18 +221,19 @@ try {
   const smallLimit = result.criticalText.length + 280;
   const paragraphA = 'НЕОБЯЗАТЕЛЬНЫЙ ПАРАГРАФ А. '.repeat(30), paragraphB = 'НЕОБЯЗАТЕЛЬНЫЙ ПАРАГРАФ Б. '.repeat(30);
   const compressed = C.compilePrompt(p, frame, 'grok-imagine-image-2.0', { ...base, prompt: paragraphA + '\n\n' + paragraphB, instruction:'Сохранить письмо на столе.', providerPromptLimit: smallLimit, allowLegacyModel: true });
-  assert.throws(() => C.compilePrompt(p,frame,'grok-imagine-image-2.0',{...base,prompt:'РУЧНАЯ ПРАВКА '.repeat(1000)}),e=>e.code==='critical_too_long','Manual director text must never disappear as optional context');
-  assert.throws(() => C.compilePrompt(p,frame,'grok-imagine-image-2.0',{...base,prompt:'РУЧНАЯ ПРАВКА '.repeat(1000),keyframeInstruction:'Создай первый кадр.'}),e=>e.code==='critical_too_long','Generated keyframe guidance is not a director delta and must not make manual text optional');
-  assert(compressed.compression.shortened && compressed.compression.omitted.some(r => r.reason === 'budget'));
+  for(const extra of [{},{keyframeInstruction:'Создай первый кадр.'}]) {
+    const manual=C.compilePrompt(p,frame,'grok-imagine-image-2.0',{...base,prompt:'РУЧНАЯ ПРАВКА '.repeat(1000),providerPromptLimit:5000,...extra});
+    assert(manual.budget.needsOptimization);assert(manual.prompt.includes('РУЧНАЯ ПРАВКА '.repeat(1000).trim()),'Preserve raw director text for LLM, never silently cut');
+  }
+  assert(compressed.budget.needsOptimization);
   assert(compressed.criticalText.includes('Синий плащ') && compressed.criticalText.includes('Красная сумка в левой руке'));
-  for (const paragraph of [paragraphA.trim(), paragraphB.trim()]) assert(!compressed.prompt.includes(paragraph.split(' ').slice(0, 4).join(' ')) || compressed.prompt.includes(paragraph), 'Optional paragraphs are included whole or omitted, not sentence-cut');
+  assert(compressed.prompt.includes(paragraphA.trim())&&compressed.prompt.includes(paragraphB.trim()));
   assert(!compressed.prompt.includes('…'));
-  assert.throws(() => C.compilePrompt(p, frame, 'grok-imagine-image-2.0', { ...base, instruction: 'ОБЯЗАТЕЛЬНАЯ ФРАЗА '.repeat(1000) }), e => e.code === 'critical_too_long' && e.details.requiredCharacters > e.details.limit && e.message.includes('не обрезаны'));
   const larger = C.compilePrompt(p, frame, 'gpt-image-2.5-flare', { ...base, instruction: 'ОБЯЗАТЕЛЬНАЯ ФРАЗА '.repeat(1000) });
   assert(larger.criticalText.includes('ОБЯЗАТЕЛЬНАЯ ФРАЗА '.repeat(1000).trim()));
   assert.equal(larger.budget.limit, 32000);
   assert.throws(() => C.compilePrompt(p, frame, 'grok-imagine-image-2.0', { ...base, providerPromptLimit: 0 }), e => e.code === 'provider_limit');
-  assert.equal(C.compilePrompt(p, frame, 'grok-imagine-image-2.0', { ...base, providerPromptLimit: 100000 }).budget.limit, 5000);
+  assert.equal(C.compilePrompt(p, frame, 'grok-imagine-image-2.0', { ...base, providerPromptLimit: 100000 }).budget.limit, 60000);
 
   // Current target drafts are used for hero generation without stealing profiles from other cards.
   const changed = structuredClone(p); const changedHero = changed.items.find(i => i.id === anna.id);
@@ -252,6 +253,10 @@ try {
   assert.equal(C.promptModelCapability('grok-imagine-video-1.5').adapter.lastFrame, true);
   assert.equal(C.promptModelCapability('MiniMax-H3').promptLimit, 7000);
   assert.equal(C.promptModelCapability('MiniMax-Hailuo-2.3').newDirecting, false);
+  const hd=C.compilePrompt(p,video,'grok-imagine-video-1.5-1080p',{kind:'video',prompt:'Движение',startFrameId:first,endFrameId:end,references:[{assetId:ids.anna,role:'character'},{assetId:end,role:'last-frame'}]});
+  assert.deepEqual(hd.references.map(r=>r.assetId),[first]);assert(hd.warnings.some(w=>w.includes('только первый')));
+  const kling=C.compilePrompt(p,video,'fal-kling-3.0-pro',{kind:'video',prompt:'Движение',startFrameId:first,endFrameId:end});
+  assert.deepEqual(kling.references.map(r=>r.assetId),[first,end]);assert.equal(kling.budget.limit,2500);assert.equal(kling.capability.newDirecting,true);
   assert.equal(providerCalls, 0);
   // The only fixture mutation after this snapshot was explicitly creating the legacy target card.
   assert.equal(JSON.stringify({ ...p, items: p.items.filter(i => i.id !== legacyCard.id) }), before, 'Compilation never mutates a project, selection, versions or approvals');
