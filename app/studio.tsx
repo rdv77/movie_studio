@@ -2049,6 +2049,7 @@ function GenerateDialog({
   const compiledModels=new Map<string,{result?:CompiledPrompt,error?:string}>();
   if(kind==='image'||kind==='video')for(const m of selected){try{compiledModels.set(m.id,{result:compilePrompt(p,item,m.id,mediaInput(m))});}catch(error){compiledModels.set(m.id,{error:error instanceof Error?error.message:'Не удалось подготовить запрос.'});}}
   const imagePromptError=[...compiledModels.values()].map(x=>x.error).find(Boolean)??'';
+  const requestSeconds=(modelId:string)=>compiledModels.get(modelId)?.result?.capability.duration?.requestedSeconds??generationSeconds(modelId);
   const miniRefError=selected.map(m=>{const ids=compiledModels.get(m.id)?.result?.references.map(x=>x.assetId)??[];const files=ids.map(id=>(assets as Asset[]).find(a=>a.id===id)).filter((a):a is Asset=>!!a);return isFalImage(m.id)?falRefIssue(files):isMiniMaxImage(m.id)?miniMaxImageRefIssue(files):'';}).find(Boolean)??'';
   const speechIssue=kind==='audio'&&speechMeta.speechType==='character'&&!speechMeta.speaker.trim()?'Укажите имя говорящего героя.':'';
   const referenceError='';
@@ -2333,12 +2334,12 @@ function GenerateDialog({
         {kind === 'video' && (
           <div className="note">
             {selected.some(m=>m.id==='MiniMax-H3')&&<p>MiniMax H3 использует выбранный первый кадр; пропорции видео определяются этим изображением. Сохранённый ключ MiniMax должен иметь доступ Pay-as-you-go. Образы героев учитываются в первом кадре и тексте, отдельные изображения героев не добавляются к этому запросу.</p>}
-            <p>{selected.length ? selected.map(m=>`${m.name}: ${m.id===GOOGLE_OMNI?'запрос на ':''}${generationSeconds(m.id)} сек`).join(' · ') : 'Выберите модель, чтобы увидеть длительность'}.  Для монтажа требуется {shot?.duration ?? 6} сек по сценарию. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
+            <p>{selected.length ? selected.map(m=>`${m.name}: запрос на ${requestSeconds(m.id)} сек`).join(' · ') : 'Выберите модель, чтобы увидеть длительность'}. Для монтажа требуется {item.videoPreparation?.duration ?? shot?.duration ?? 6} сек. Проверьте, что действие успевает завершиться. Точность камеры зависит от модели.</p>
             {selected.some(m=>m.provider==='google')&&<p>Google получает выбранную картинку и описания включённых героев. Референсы героев отдельными файлами в этом режиме не передаются. Встроенный звук ролика не заменяет утверждённую озвучку фильма. Оценку Google можно увеличить; уменьшить ниже расчётной нельзя.</p>}
             {selected.some(m=>m.id===GOOGLE_OMNI)&&<p>Gemini Omni: длительность задаётся просьбой в промпте, результат может длиться 3–10 секунд. После генерации проверьте хронометраж. Ориентир $1.05 за попытку включает 10 секунд 720p и запас на вход; фактические расходы зависят от токенов.</p>}
             {refs.length !== 1 && <p role="alert">Выберите или загрузите один первый кадр именно для этого плана. Общая раскадровка не подставляется во все сцены автоматически.</p>}
             <PlanSpeechNote p={p} item={item}/>
-            {shot&&selected.length>0&&<VideoTiming p={p} item={item} planSeconds={shot.duration} videoSeconds={Math.min(...selected.map(m=>generationSeconds(m.id)))}/>}
+            {shot&&selected.length>0&&<VideoTiming p={p} item={item} planSeconds={item.videoPreparation?.duration??shot.duration} videoSeconds={Math.min(...selected.map(m=>requestSeconds(m.id)))}/>}
             {!shot && <p role="alert">Для этой карточки не найден план в утверждённом сценарии. Подтяните планы и выберите нужную карточку.</p>}
           </div>
         )}
@@ -2447,7 +2448,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
           <Input aria-label="Оценка одной попытки, USD" value={estimate} inputMode="decimal" onChange={e => setEstimate(e.target.value)} />
         </Field>
         <ZenCost modelId={m.id} refs={1} count={included.length}/>
-        <p className="muted">Каждый исходный ролик: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`${generationSeconds(m.id)} сек`}. Для подготовленных кадров время запроса показано в предпросмотре. В финальной сборке по умолчанию сохраняется весь ролик; участок можно выбрать вручную.</p>
+        <p className="muted">Длительность модели: {m.id===GOOGLE_OMNI?'запрос на 10 сек, фактически 3–10 сек; проверьте результат':`до ${generationSeconds(m.id)} сек`}. Время каждого запроса определяется планом и возможностями модели. В финальной сборке по умолчанию сохраняется весь ролик; участок можно выбрать вручную.</p>
         {m.provider==='google'&&<p className="muted">Один первый кадр и текстовые описания выбранных героев. Оценку можно увеличить, но нельзя уменьшить ниже расчётной. Списание сверяйте в Google AI Studio; встроенный звук не заменяет утверждённые голоса.</p>}
         <p className="muted">Каждый план получает только образы своих участников и собственный первый кадр.</p>
         <BatchScopeSelector rows={rows.map(r=>mediaBatchCandidate(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,'video'))} selected={included.map(r=>r.itemId)} disabled={busy} onChange={ids=>setRows(rs=>rs.map(r=>({...r,include:ids.includes(r.itemId)})))}/>
@@ -2485,7 +2486,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
                   onChange={e => { const f = e.target.files?.[0]; if (f) perform(async () => { const a = await upload(f); update(r.itemId, { ref: a.id }); }); e.target.value = ''; }} />
               </div>
               <PlanSpeechNote p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!}/>
-              <VideoTiming p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} planSeconds={r.duration} videoSeconds={generationSeconds(m.id)}/>
+              <VideoTiming p={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} planSeconds={r.duration} videoSeconds={(()=>{try{return compilePrompt(snapshot,snapshot.items.find(i=>i.id===r.itemId)!,m.id,videoInput(r)).capability.duration!.requestedSeconds;}catch{return generationSeconds(m.id);}})()}/>
               <details className="mt-3"><summary>Правки задачи этого плана</summary><Textarea className="edit-text short mt-3" aria-label={`Видеопромпт ${index + 1}`} value={r.prompt} onChange={e => update(r.itemId, { prompt: e.target.value })}/></details>
               <PromptPreview project={snapshot} item={snapshot.items.find(i=>i.id===r.itemId)!} modelIds={[m.id]} input={videoInput(r)}/>
               {videoDurationIssue(r.title,r.duration,[m.id])&&<p role="alert">{videoDurationIssue(r.title,r.duration,[m.id])}</p>}
