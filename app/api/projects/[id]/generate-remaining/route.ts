@@ -1,4 +1,5 @@
 import {videoBatchPlans} from '@/lib/batch-scope';
+import {assertGenerationBasis} from '@/lib/generation-basis';
 import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import { planCharacterIds } from '@/lib/plan-references';
 import { compileMediaJob } from '@/lib/prompt-jobs';
@@ -17,11 +18,13 @@ import { videoCharacterRefs, videoCharacters } from '@/lib/characters';
 const input = z.object({
   revision: z.number().int(), batchId: z.string().uuid(),
   basis: z.string().max(20000).optional(),
+  sourceBasis:z.string().max(100).optional(),
   sourceItemId: z.string().uuid(), sourceVariantId: z.string().uuid(),
   mode:z.enum(['remaining','all']).default('remaining'),
   estimate: z.string().regex(/^\d+$/).nullable(),
   characterIds: z.array(z.string().uuid()).max(120).optional(),
   plans: z.array(z.object({ itemId: z.string().uuid(), ref: z.string().uuid(),
+    basis:z.string().max(100).optional(),
     prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT),
     instruction:z.string().trim().max(MEDIA_INPUT_LIMIT).optional(),
   })).min(1).max(120),
@@ -36,6 +39,7 @@ export const POST = api(async (req, ctx) => {
   if (!stageReady(p, 7)) throw new Error('Утвердите предыдущие этапы.');
   const queueIssue=videoAdmissionIssue(p);if(queueIssue)throw new Error(queueIssue);
   const source = getItem(p, s.sourceItemId);
+  if(s.sourceBasis)assertGenerationBasis(p,source.id,s.revision,s.sourceBasis);
   const m = selectedVideoModel(p, source);
   if (!m || chosen(source)?.id !== s.sourceVariantId)
     throw new Error('Выберите готовый видеоролик с доступной моделью и заново откройте окно создания оставшихся планов.');
@@ -47,6 +51,7 @@ export const POST = api(async (req, ctx) => {
   for (const row of s.plans) {
     const item = remaining.find(i => i.id === row.itemId);
     if (!item) throw new Error('Состав выбранных планов изменился. Выполняемые и неизвестные запросы не повторяются; повтор готового материала нужно явно отметить в серии.');
+    if(row.basis)assertGenerationBasis(p,item.id,s.revision,row.basis);
     const characterIds=planCharacterIds(p,item,s.characterIds);
     const characterRefs=videoCharacterRefs(p,m.provider,characterIds);
     const shot = videoShot(p, item)!;

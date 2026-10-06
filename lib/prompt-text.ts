@@ -27,7 +27,8 @@ export function preparedPromptBody(text: string, format: string): string {
  * sections and paragraphs naming a different known location are excluded. */
 export function frameStyleText(text: string, currentLocations: readonly string[], otherLocations: readonly string[]): string {
   const normalize = (s: string) => s.toLocaleLowerCase('ru').normalize('NFKC').replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-  const names = (values: readonly string[]) => values.map(normalize).filter(s => s.length >= 4);
+  // Exact word boundaries also support real short location names: «Лес», «Двор».
+  const names = (values: readonly string[]) => values.map(normalize).filter(s => s.length >= 3);
   const current = names(currentLocations), other = names(otherLocations).filter(s => !current.includes(s));
   const narrative = /^(?:сценарий|сюжет|события|персонажи|герои|реквизит|предметы|(?:\S+\s+)?постановочные при[её]мы|режисс[её]рские при[её]мы|финальный (?:образ|кадр)|монтаж|композиция и движение|хронометраж|речь|озвучка)(?:\s|[:—-]|$)/iu;
   let excludedAt: number | undefined;

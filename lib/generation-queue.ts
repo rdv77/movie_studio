@@ -3,6 +3,7 @@ import { assertBudget, dependencies, jobCurrent, getItem, stageReady, type Job, 
 import { selectedReferences } from './reference-selection';
 import {queueAdmissionIssue,queueRunnableJobs,DEFAULT_QUEUE_CONCURRENCY} from './queue-policy';
 import {stampGenerationVersions} from './creative-versions';
+import {generationBasis} from './generation-basis';
 
 export const activeGeneration = (j:Job) => ['queued','dispatching','pending','saving'].includes(j.status);
 export const storyboardJob = (p:Project,j:Job) => j.kind==='image' && p.items.some(i=>i.id===j.itemId&&i.stage===5&&!i.removedAt&&!i.planArchive);
@@ -31,9 +32,12 @@ export async function enqueuePlanJobs(snapshot:Project,jobs:Job[],load:()=>Promi
   if(![1,2,3,5,7].includes(stage)||jobs.some(j=>getItem(snapshot,j.itemId).stage!==stage||!parallelJob(snapshot,j)))throw new Error('Неверный состав серии материалов.');
   const items=[...new Set(jobs.map(j=>j.itemId))];
   const originals=new Map(items.map(id=>[id,JSON.stringify(getItem(snapshot,id))])),basis=dependencies(snapshot,stage);
+  const creativeBases=new Map([...new Set([...items,...(sourceItemId?[sourceItemId]:[])])].map(id=>[id,generationBasis(snapshot,id)]));
   for(let n=0;n<5;n++) {
     const p=await load();
     if(p.jobs.some(j=>j.batchId===batchId))return p;
+    if([...creativeBases].some(([id,basis])=>generationBasis(p,id)!==basis))
+      throw new Error('Основа или выбранные референсы изменились во время сохранения. Проверьте задачу заново.');
     if((jobs.every(j=>j.basisVersion===2)?jobs.some(j=>!jobCurrent(p,getItem(p,j.itemId),j)):dependencies(p,stage)!==basis)||items.some(id=>JSON.stringify(getItem(p,id))!==originals.get(id))||!stageReady(p,stage)||
       sourceItemId&&getItem(p,sourceItemId).selectedId!==getItem(snapshot,sourceItemId).selectedId)
       throw new Error('Основа или выбранный план изменились. Проверьте задачу заново.');

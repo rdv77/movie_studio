@@ -105,6 +105,8 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  timings?: import('./job-progress').JobTimings;
+  pollRetry?: import('./job-progress').PollRetry;
   promptSections?: import('./prompt-compiler').PromptSection[];
   promptTokenCount?: {text:string;count:number;method:'api'|'utf8-upper-bound'};
   promptOptimization?: {auditId:string;auditIds?:string[];triedModels?:string[];warnings?:string[];state:'running'|'retrying'|'done'|'failed';original:string;limit:number;unit:'characters'|'tokens'};

@@ -9,7 +9,13 @@ export class ProviderError extends Error {
     super(message);
   }
 }
-export async function call(url: string, h: Record<string, string>, body?: unknown, timeoutMs=180000) {
+export function providerDetail(value:unknown,key=''):string{
+  if(typeof value!=='string')return '';
+  return (key?value.split(key).join('[скрыто]'):value)
+    .replace(/Bearer\s+\S+|(?:api[_-]?key|authorization)\s*[:=]\s*\S+/gi,'[скрыто]')
+    .replace(/data:\S+|https?:\/\/\S+/gi,'[адрес]').replace(/[\r\n\t]+/g,' ').slice(0,500);
+}
+export async function call(url: string, h: Record<string, string>, body?: unknown, timeoutMs=body?180000:30000) {
   let options: RequestInit;
   try {
     options = {
@@ -26,14 +32,26 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
   } catch {
     throw new ProviderError('Запрос не отправлен: ошибка подготовки обращения к модели.', true, true);
   }
-  let r: Response;
-  try {
-    r = await fetch(url, options);
-  } catch (e) {
-    throw new ProviderError(
-      (e instanceof Error&&/Timeout|Abort/.test(e.name)?`Провайдер не ответил за ${timeoutMs/1000} сек. `:'Связь с провайдером прервалась. ')+ 'Исход запроса неизвестен; этот запрос автоматически не повторяется.',
-    );
+  let r: Response|undefined;
+  // Only idempotent reads may retry. A paid POST is never repeated here,
+  // including when its response is lost or the provider returns HTTP 5xx.
+  for(let attempt=0;attempt<(body?1:3);attempt++){
+    try{r=await fetch(url,{...options,signal:AbortSignal.timeout(timeoutMs)});}
+    catch(e){
+      if(!body&&attempt<2){await new Promise(resolve=>setTimeout(resolve,250*2**attempt));continue;}
+      throw new ProviderError((e instanceof Error&&/Timeout|Abort/.test(e.name)?`Провайдер не ответил за ${timeoutMs/1000} сек. `:'Связь с провайдером прервалась. ')+
+        (body?'Исход запроса неизвестен; этот запрос автоматически не повторяется.':'Не удалось прочитать состояние прежнего запроса. Новая генерация не отправлялась.'));
+    }
+    if(!body&&attempt<2&&(r.status===429||r.status>=500)){
+      const retryAfter=Number(r.headers.get('retry-after'))*1000;
+      // Long provider pauses belong to the persisted polling backoff. Do not
+      // occupy an HTTP worker just to sleep for a minute.
+      if(Number.isFinite(retryAfter)&&retryAfter>2000)break;
+      await r.body?.cancel();await new Promise(resolve=>setTimeout(resolve,Math.max(250*2**attempt,Number.isFinite(retryAfter)?retryAfter:0)));continue;
+    }
+    break;
   }
+  if(!r)throw new ProviderError('Не удалось прочитать ответ провайдера.');
   if (r.status >= 300 && r.status < 400)
     throw new ProviderError('Провайдер перенаправил запрос. Переход не выполнен; проверьте обращение и списание в кабинете.', true);
   if (!r.ok) {
@@ -107,7 +125,7 @@ export async function json(r: Response) {
     throw new ProviderError(`Провайдер вернул некорректные данные (HTTP ${r.status}). Исход запроса неизвестен; автоматического повтора не будет.`);
   if (d.base_resp?.status_code)
     throw new ProviderError(
-      `MiniMax: ${d.base_resp.status_msg || d.base_resp.status_code}`,
+      `MiniMax: ${providerDetail(d.base_resp.status_msg) || d.base_resp.status_code}`,
       true,
     );
   return d;

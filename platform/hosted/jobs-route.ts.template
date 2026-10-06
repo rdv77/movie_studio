@@ -1,10 +1,12 @@
 import {api,owner} from '@/lib/server';
-import {executeMediaJob} from '@/lib/media-job-runner';
+import {executeMediaJob} from '@/lib/hosted-media-job';
+import {unchangedJobProgress} from '@/lib/job-progress';
 
 export const POST=api(async(req,ctx)=>{
   const user=await owner(req,true),{id,jobId}=await ctx.params;
-  const action=((await req.json().catch(()=>null)) as {action?:unknown}|null)?.action;
+  const body=(await req.json().catch(()=>null)) as {action?:unknown;compact?:boolean;revision?:number}|null;
+  const action=body?.action;
   const p=await executeMediaJob(user,id,jobId,action);
   // The hosted api wrapper schedules saved work; check-wait never kicks it.
-  return Response.json(p);
+  return Response.json(body?.compact?unchangedJobProgress(p,body.revision)??p:p);
 });

@@ -1,4 +1,5 @@
 import {imageRetrySchema,prepareImageRetries,imageRetryValidationJobs} from '@/lib/image-retries';
+import {assertGenerationBasis} from '@/lib/generation-basis';
 import {scenarioVariantInstruction} from '@/lib/scenario-generation';
 import {preparedVideoInputs} from '@/lib/video-from-animatic';
 import {prepareKeyframeGeneration,keyframeRoleInstruction,type KeyframeRole} from '@/lib/keyframes';
@@ -31,7 +32,7 @@ export const POST = api(async (req, ctx) => {
   const user = await owner(req, true);
   const p = await loadProject(user, (await ctx.params).id);
   const s = z.object({
-    revision: z.number().int(), batchId: z.string().uuid(), itemId: z.string().uuid(),
+    revision: z.number().int(), basis:z.string().max(100).optional(), batchId: z.string().uuid(), itemId: z.string().uuid(),
     models: z.array(z.string()).min(1).max(MODELS.length), count: z.number().int().min(1).max(4),
     prompt: z.string().trim().min(1).max(MEDIA_INPUT_LIMIT), instruction: z.string().trim().max(MEDIA_INPUT_LIMIT).optional(),
     keyframe:z.enum(['start','middle','end']).optional(), refs: z.array(z.string().uuid()).max(8), characterIds: z.array(z.string().uuid()).max(120).optional(),
@@ -42,7 +43,7 @@ export const POST = api(async (req, ctx) => {
     estimates: z.record(z.string(), z.string().regex(/^\d+$/).nullable()),
   }).parse(await req.json());
   if (p.jobs.some(j => j.batchId === s.batchId)) return Response.json(p);
-  if (s.revision !== p.revision) throw Error('Проект изменился. Обновите оценку серии.');
+  assertGenerationBasis(p,s.itemId,s.revision,s.basis);
   const item = getItem(p, s.itemId);
   if (item.planArchive) throw Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария. Запрос не отправлен.');
   if (item.removedAt) throw Error('Сначала восстановите удалённую карточку героя.');

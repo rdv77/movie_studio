@@ -134,7 +134,7 @@ try {
   const actorProject = structuredClone(p), actorItem = actorProject.items.find(i=>i.id===anna.id);
   actorItem.character = {...actorItem.character,actorProfile:{identity:'Поменять лицо — этот новый текст не должен заменить утверждённую картинку',role:'Главный герой',motivation:'Защитить письмо',contradiction:'Боится довериться',mannerisms:'Прячет дрожь в руках',traits:[{name:'Сдержанность',intensity:8,instruction:'Сначала взгляд, затем короткий жест'}]}};
   const actorCompiled = C.compilePrompt(actorProject,actorProject.items.find(i=>i.id===video.id),'grok-imagine-video-1.5',{kind:'video',prompt:'',startFrameId:first,references:[ids.anna]});
-  assert(actorCompiled.prompt.includes('Защитить письмо') && actorCompiled.prompt.includes('Сдержанность · 8/10') && actorCompiled.prompt.includes('Прячет дрожь в руках'));
+  assert(!actorCompiled.prompt.includes('Защитить письмо') && !actorCompiled.prompt.includes('Сдержанность · 8/10') && !actorCompiled.prompt.includes('Прячет дрожь в руках'),'The full actor biography is not a new action in this video shot');
   assert(!actorCompiled.prompt.includes('Поменять лицо'),'Current actor direction must not replace approved physical identity');
   assert(actorCompiled.criticalText.includes(anna.variants[0].character.appearance));
   assert.deepEqual(actorCompiled.references.map(r=>r.assetId),[first,ids.anna]);
@@ -257,6 +257,31 @@ try {
   assert.deepEqual(hd.references.map(r=>r.assetId),[first]);assert(hd.warnings.some(w=>w.includes('только первый')));
   const kling=C.compilePrompt(p,video,'fal-kling-3.0-pro',{kind:'video',prompt:'Движение',startFrameId:first,endFrameId:end});
   assert.deepEqual(kling.references.map(r=>r.assetId),[first,end]);assert.equal(kling.budget.limit,2500);assert.equal(kling.capability.newDirecting,true);
+  {
+    const film=structuredClone(p),target=film.items.find(i=>i.id===video.id),sourceCard=film.items.find(i=>i.id===source.id);
+    const text=sourceCard.variants.find(v=>v.id===sourceCard.approvedId),data=JSON.parse(text.text),shot=data.shots.find(s=>s.id===current.id);
+    shot.previousChanges=Array.from({length:35},(_,n)=>({id:`old-${n}`,changes:'СТАРОЕ СОСТОЯНИЕ: герой уже вернулся во дворец. '.repeat(3)}));
+    shot.sceneContinuity=[{character:'Анна',characterId:anna.id,outfit:'СТАРАЯ одежда сцены',props:'СТАРЫЙ владелец письма'}];
+    shot.continuity='УСТАРЕВШИЙ МОНТАЖ: после клипа вернуться в лес';
+    shot.direction.transition={type:'cut',description:'СКЛЕЙКА В ДРУГУЮ ЛОКАЦИЮ: перейти в лес'};
+    text.text=JSON.stringify(data);
+    const styleCard=film.items.find(i=>i.id===style.id);styleCard.variants.find(v=>v.id===styleCard.approvedId).text+='\n\n### Сюжет\n\nДАЛЬНИЙ ФИНАЛ: герой во дворце\n\n### Свет\n\nЛес: посторонняя голубая сцена.\n\nДвор: золотистый свет.';
+    const hero=film.items.find(i=>i.id===anna.id),physical=hero.variants.find(v=>v.id===hero.approvedId).character;
+    physical.locked='РОДИНКА слева. '.repeat(25);physical.appearance+='. РОДИНКА слева.';
+    const compiled=C.compilePrompt(film,target,'fal-minimax-h3-max',{kind:'video',prompt:'',startFrameId:first,endFrameId:end,references:[ids.anna]});
+    for(const unrelated of ['СТАРОЕ СОСТОЯНИЕ','СТАРАЯ одежда','СТАРЫЙ владелец','УСТАРЕВШИЙ МОНТАЖ','СКЛЕЙКА В ДРУГУЮ','ДАЛЬНИЙ ФИНАЛ','посторонняя голубая сцена','Борис вышел в лес','Анна Мария ждёт у ворот'])assert(!compiled.prompt.includes(unrelated),unrelated);
+    for(const required of [shot.description,shot.stateIn,shot.stateOut,shot.direction.startFrame,shot.direction.endFrame,'РОДИНКА слева','золотистый свет','Правило речи и рта'])assert(compiled.prompt.includes(required),required);
+    assert.equal(compiled.prompt.split('РОДИНКА слева').length,2,'Repeated identity locks are transmitted once');
+    assert(compiled.compression.omitted.some(s=>s.key==='prior.old-0'));
+    assert(compiled.budget.originalCharacters>compiled.budget.compiledCharacters);
+    const manual=C.compilePrompt(film,target,'fal-minimax-h3-max',{kind:'video',prompt:'РУЧНОЕ РЕШЕНИЕ: скрыть письмо до последней секунды.',startFrameId:first});
+    assert(manual.criticalText.includes('РУЧНОЕ РЕШЕНИЕ: скрыть письмо до последней секунды.'));
+    const legacy=C.compilePrompt(film,target,'fal-minimax-h3-max',{kind:'video',prompt:'',startFrameId:first,plan:{...shot,stateIn:undefined}});
+    assert(legacy.prompt.includes('СТАРОЕ СОСТОЯНИЕ'),'Legacy shots without an explicit current state retain the continuity needed to resolve props');
+    const secondHero=film.items.find(i=>i.id===boris.id);secondHero.variants.find(v=>v.id===secondHero.approvedId).character.appearance=physical.appearance;
+    const twoHeroes=C.compilePrompt(film,target,'fal-minimax-h3-max',{kind:'video',prompt:'',startFrameId:first,plan:{...shot,cast:['Анна','Борис'],characterIds:[anna.id,boris.id]}});
+    assert(twoHeroes.sections.find(s=>s.key===`hero.${boris.id}`)?.text.includes('РОДИНКА слева'),'Matching traits of two different heroes must not be deduplicated across identities');
+  }
   assert.equal(providerCalls, 0);
   // The only fixture mutation after this snapshot was explicitly creating the legacy target card.
   assert.equal(JSON.stringify({ ...p, items: p.items.filter(i => i.id !== legacyCard.id) }), before, 'Compilation never mutates a project, selection, versions or approvals');

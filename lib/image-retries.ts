@@ -39,7 +39,8 @@ export function enqueueImageRetry(p:Project,job:Job,retryable:boolean):void{
   try{
     const item=getItem(p,job.itemId);
     if(item.removedAt||item.planArchive||!stageReady(p,item.stage)||!jobCurrent(p,item,job))throw Error('Основа изменилась: новая платная попытка не запускалась.');
-    const next:Job={...job,...(useFallback?state.fallback:{}),id:id(),created:now(),started:undefined,status:'queued',actual:null,actualSource:undefined,requestId:undefined,pollingUrl:undefined,output:undefined,usage:undefined,error:undefined,saveFailures:undefined,waitStartedAt:undefined,waitStoppedAt:undefined,waitStopReason:undefined,resumeStatus:undefined,newSeriesAllowedAt:undefined,journalArchivedAt:undefined,
+    const created=now();
+    const next:Job={...job,...(useFallback?state.fallback:{}),id:id(),created,started:undefined,status:'queued',actual:null,actualSource:undefined,requestId:undefined,pollingUrl:undefined,output:undefined,usage:undefined,error:undefined,saveFailures:undefined,waitStartedAt:undefined,waitStoppedAt:undefined,waitStopReason:undefined,resumeStatus:undefined,newSeriesAllowedAt:undefined,journalArchivedAt:undefined,timings:{queuedAt:created},pollRetry:undefined,
       imageRetry:{rootId:state.rootId,attempt:useFallback?1:state.attempt+1,maxAttempts:state.maxAttempts,fallback:useFallback?undefined:state.fallback,fallbackAttempt:useFallback,notBefore:new Date(Date.now()+15000).toISOString()}};
     const hidden=hiddenReferences(p);
     if(next.refs.some(ref=>hidden.has(ref)))throw Error('Референсы были исключены. Проверьте новую серию вручную.');

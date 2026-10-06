@@ -197,6 +197,10 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
 
   const keyframe = input.keyframe ?? 'start';
   const stillPlan = input.kind === 'image' && !!plan;
+  const videoPlan = input.kind === 'video' && !!plan;
+  // Video adapters require a first frame. With an explicit shot entrance it is
+  // the current-state snapshot; replaying an entire scene history can undo it.
+  const currentVideoState = videoPlan && !!plan?.stateIn?.trim();
   const anchoredStill = stillPlan && keyframe !== 'start' && !!(input.startFrameId || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'first-frame'));
   const exclude = (key: string, label: string, text: string | undefined) => {
     if (text?.trim()) omitted.push({key, label, reason: 'irrelevant', characters: text.length});
@@ -238,8 +242,10 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     } else {
       add('action', 'Действие только текущего плана', plan.description ?? plan.story, true);
       add('state-in', 'Начало', plan.stateIn, true); add('state-out', 'Конец', plan.stateOut, true);
+      add('start-frame', 'Начальная композиция', direction?.startFrame, true);
       add('end-frame', 'Конечная композиция', direction?.endFrame, true);
       add('changes', 'Изменения в действии, сохраняющиеся после плана', plan.continuityChanges, true);
+      add('shot-duration', 'Время действия', duration === undefined ? undefined : `Заверши описанное действие за ${duration} сек; затем удерживай итоговую позу до конца клипа. Не добавляй новые события.`, true);
     }
   }
   for (const hero of heroes) {
@@ -249,9 +255,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     add(`hero-source.${hero.item.id}`, item.stage === 1 ? 'Работа с прообразами героя' : `Постоянные указания к образу ${c.name}`, physical.instructions, true);
     add(`hero-locked.${hero.item.id}`, `Нельзя менять у героя ${c.name}`, physical.locked, true);
     const performance = [c.description, c.actorProfile?.mannerisms].filter(Boolean).join('\n\n');
-    if (stillPlan) exclude(`hero-performance.${hero.item.id}`, `Биография и общие манеры ${c.name} — не состояние этого кадра`, performance);
+    if (stillPlan || videoPlan) exclude(`hero-performance.${hero.item.id}`, `Биография и общие манеры ${c.name} — не действие текущего плана`, performance);
     else optional(`hero-performance.${hero.item.id}`, `Характер и манеры ${c.name}`, performance, 65);
-    if (c.actorProfile && !stillPlan) {
+    if (c.actorProfile && !stillPlan && !videoPlan) {
       const actor = c.actorProfile;
       optional(`actor.${hero.item.id}`, `Актёрская задача ${c.name} — без изменения утверждённой внешности`,
         [`Роль: ${actor.role}. Мотив: ${actor.motivation}. Внутреннее противоречие: ${actor.contradiction}.`,
@@ -260,18 +266,19 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   }
   // The pinned image already shows the current costume/props. Replaying the scene's
   // initial ledger and all earlier handovers here can undo the requested end state.
-  const continuity = anchoredStill ? [] : plan?.sceneContinuity ?? scene?.continuity ?? [];
+  const continuity = anchoredStill || currentVideoState ? [] : plan?.sceneContinuity ?? scene?.continuity ?? [];
   if (anchoredStill) add('source-continuity', 'Что сохранить из первого изображения', 'Сохрани идентичность героев, одежду, постоянные предметы, географию, технику рисунка, палитру и свет выбранного первого кадра. Изменяй позы, взгляды, положение предметов и крупность только согласно целевому моменту ниже. Описание конечного состояния важнее начального расположения на референсе.', true);
+  if (currentVideoState) add('source-continuity', 'Текущее состояние по первому кадру', 'Первый кадр задаёт текущую одежду, реквизит, владельцев предметов и локацию. Сохрани их и внешность героев. Начало, конец и действия текущего плана задают только явно описанные изменения; не возвращай прежние состояния, не меняй локацию, не раскрывай скрытых персонажей или предметы раньше указанного момента.', true);
   for (const c of continuity.filter(c => heroes.some(h => c.characterId ? c.characterId === h.item.id : normalized(c.character) === normalized(h.profile.name)) ||
     (plan?.cast ?? []).some(name => name === c.characterId || normalized(name) === normalized(c.character))))
     add(`continuity.${c.characterId ?? c.character}`, `Одежда и предметы ${c.character}`, `Одежда: ${c.outfit}. Предметы, состояние и владелец: ${c.props}. Не меняй их без описанного действия.`, true);
   // History is ordered: take / hand over / take again are distinct transitions,
   // even when two rows have identical text. Never deduplicate these changes.
   for (const change of plan?.previousChanges ?? []) {
-    if (anchoredStill) exclude(`prior.${change.id}`, 'История действий — состояние уже видно в первом кадре', change.changes);
+    if (anchoredStill || currentVideoState) exclude(`prior.${change.id}`, 'История действий — состояние уже задано текущим планом и первым кадром', change.changes);
     else add(`prior.${change.id}`, 'Уже произошедшее изменение — сохранять', change.changes, true);
   }
-  if (!anchoredStill && !continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
+  if (!anchoredStill && !currentVideoState && !continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
   for (const card of locations) {
     const v = approved(card) as WorldVariant | undefined, profile = (item.stage === 3 ? (card as WorldItem).location : undefined) ?? v?.location ?? (card as WorldItem).location;
     if (profile) {
@@ -293,7 +300,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       optional(`portrait-world.${card.id}`, `Среда героя — ${card.title}`, profile ? [profile.identity, profile.permanentProps].filter(Boolean).join('\n\n') : v.text, 70);
     }
   }
-  if (!anchoredStill) add('location-layout', 'Текущее расположение предметов локации', locationState?.layout, true);
+  if (!anchoredStill && !currentVideoState) add('location-layout', 'Текущее расположение предметов локации', locationState?.layout, true);
   add('location-changes', 'Разрешённые изменения локации', locationState?.allowedChanges, true);
   optional('location-state', 'Свет, время, погода и художественное решение сцены', [locationState?.time, locationState?.light, locationState?.weather, locationState?.artDirection].filter(Boolean).join('\n\n'), 80);
   add('mouth', 'Правило речи и рта', input.kind === 'video' ? speechDirection(speech)
@@ -317,7 +324,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       add('camera-movement', 'Движение камеры', direction.cameraMovement && `${direction.cameraMovement.type}: ${direction.cameraMovement.description}${direction.cameraMovement.from ? '. Откуда: ' + direction.cameraMovement.from : ''}${direction.cameraMovement.to ? '. Куда: ' + direction.cameraMovement.to : ''}`, true);
       for (const [n, beat] of (direction.actionBeats ?? []).entries()) add(`beat.${n}`, `Действие ${beat.start}–${beat.end} сек`, beat.action + (beat.emotionalChange ? `. Изменение эмоции: ${beat.emotionalChange}` : ''), true);
       add('timing', 'Ритм плана', direction.timing && `Начальная пауза ${direction.timing.openingHold ?? 0} сек; конечная ${direction.timing.endingHold ?? 0} сек${direction.timing.revealAt !== undefined ? `; раскрытие на ${direction.timing.revealAt} сек` : ''}.`, true);
-      optional('transition', 'Стыковка после плана — не внутренняя склейка', direction.transition?.description, 60);
+      exclude('transition', 'Монтажная склейка находится за пределами генерируемого клипа', direction.transition?.description);
       optional('sound', 'Звуки без собственной речи и пения', [direction.sound?.ambience, ...(direction.sound?.effects ?? []).map(s => `${s.at} сек: ${s.description}`), direction.sound?.silence ? 'Тишина' : undefined].filter(Boolean).join('\n\n'), 55);
     }
     optional('performance', stillPlan ? 'Эмоция в изображаемый момент' : 'Видимые актёрские действия текущего плана', direction.performance?.map(a => stillPlan && keyframe !== 'middle'
@@ -329,20 +336,20 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (anchoredStill) exclude(`style.${style.id}`, 'Общее описание фильма — стиль уже задан первым изображением', approved(style)!.text);
     else {
       const original = approved(style)!.text;
-      const visual = stillPlan ? frameStyleText(original,
+      const visual = stillPlan || videoPlan ? frameStyleText(original,
         locations.flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? '']),
         p.items.filter(card => card.stage === 3 && active(card) && !locations.some(l => l.id === card.id)).flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? ''])) : original;
       optional(`style.${style.id}`, 'Единый визуальный стиль фильма', visual, 95);
       if (visual !== original) omitted.push({key:`style-context.${style.id}`,label:'Сюжетные разделы и другие локации общего описания стиля',reason:'irrelevant',characters:Math.max(0,original.length-visual.length)});
     }
   }
-  if (p.directing && !stillPlan) {
+  if (p.directing && !stillPlan && !videoPlan) {
     const brief = effectiveCreativeBrief(p.directing.brief, scene?.creativeOverrides as CreativeOverrides | undefined);
     optional('creative', 'Творческое задание этой сцены', `Жанр: ${brief.genre}. Подход: ${brief.director}. Приёмы: ${brief.techniques}. Воздействие: ${brief.effect}.`, 75);
     if (brief.strengths) optional('creative-strengths', 'Сила выбранных приёмов', `Шкала 0–10: 0 — не применять приём, 10 — выраженно применять. Утверждённые события, внешность и состояние важнее интенсивности. ${JSON.stringify(brief.strengths)}`, 70);
   }
   const at = plans.findIndex(s => plan?.id ? s.id === plan.id : s.title === plan?.title);
-  if (!stillPlan) {
+  if (!stillPlan && !videoPlan) {
     optional('previous', 'Только для стыковки — выход предыдущего плана', plans[at - 1]?.stateOut, 25);
     optional('next', 'Только для стыковки — вход следующего плана', plans[at + 1]?.stateIn, 25);
   }
@@ -352,7 +359,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const generatedTask = input.kind === 'video' ? videoPrompt(p, item) : item.stage === 5 ? storyboardPrompt(p, item) : '';
   const roleTask = stillPlan && !!input.keyframeInstruction?.trim() && taskWithoutSeries === input.keyframeInstruction.trim();
   const automaticStartTask = stillPlan && keyframe !== 'start' && !!generatedTask.trim() && taskWithoutSeries === generatedTask.trim();
-  if (roleTask || automaticStartTask) {
+  const defaultVideoWrapper = videoPlan && !((sourcePlan as PromptPlan & {videoPrompt?:string})?.videoPrompt) && taskWithoutSeries === generatedTask.trim();
+  if (roleTask || automaticStartTask || defaultVideoWrapper) {
     omitted.push({key: 'task', label: roleTask ? 'Повтор назначения ключевого кадра' : 'Автоматический промпт первого кадра — не относится к этому моменту', reason: roleTask ? 'duplicate' : 'irrelevant', characters: taskWithoutSeries.length});
     add('series', 'Вариант', input.prompt.match(/Создай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/)?.[0], true);
   } else if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) {
@@ -447,18 +455,35 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   if (capability.adapter.nativeAudio === 'possible') warnings.push('Модель может создать свой звук. Утверждённая озвучка накладывается отдельно; промпт запрещает самостоятельную речь и пение.');
   if (capability.duration?.variableResult) warnings.push('Фактическая длительность результата может отличаться от запрошенной; проверьте файл перед озвучкой и монтажом.');
 
-  const mandatory = sections.filter(s => s.required), criticalText = render(mandatory);
+  // Deduplicate static facts across their approved sources, not action beats:
+  // taking / returning / taking an object again must remain distinct actions.
+  const originalCharacters=render(sections).length,staticFacts = new Set<string>();
+  for (const section of sections) {
+    if (!/^(?:hero\.|hero-source\.|hero-locked\.|continuity\.|location-identity\.|location-geography\.|style\.|design$)/.test(section.key)) continue;
+    const original=section.text;
+    const heroScope=section.key.match(/^(?:hero|hero-source|hero-locked|continuity)\.(.+)$/)?.[1];
+    const locationScope=section.key.match(/^location-(?:identity|geography)\.([^.]+)/)?.[1];
+    const scope=heroScope?`hero:${heroScope}`:locationScope?`location:${locationScope}`:'visual';
+    section.text=compactPromptText(original).split(/(?<=[.!?])\s+(?=[А-ЯA-Z«“])|\n\s*\n/gu).filter(fact=>{
+      const value=fact.trim().replace(/\s+/g,' '),key=scope+'\n'+value;
+      if(!value||staticFacts.has(key))return false;
+      staticFacts.add(key);return true;
+    }).join(' ');
+    if(section.text!==original)omitted.push({key:`duplicate.${section.key}`,label:section.label,reason:'duplicate',characters:original.length-section.text.length});
+  }
   const seenTexts=new Set<string>();
   const included=sections.filter(section=>{
+    if(!section.text)return false;
     if(!section.required&&seenTexts.has(section.text)){omitted.push({key:section.key,label:section.label,reason:'duplicate',characters:section.text.length});return false;}
     seenTexts.add(section.text);return true;
   });
+  const criticalText = render(included.filter(s => s.required));
   const prompt=render(included),used=promptSize(prompt,{unit:capability.promptUnit}),needsOptimization=!fitsPrompt(prompt,{...promptCapacity(modelId,input.kind),limit});
   if(needsOptimization)warnings.push(capability.promptUnit==='tokens'
     ? 'Перед отправкой сервер проверит токены. LLM сократит промпт только при превышении лимита. Если API не поддерживает подсчёт, используется консервативная верхняя граница по UTF-8.'
     : 'Промпт превышает лимит. Перед генерацией подключённая текстовая LLM сократит его, сохранив обязательные детали. Это отдельный платный запрос в журнале.');
   return {prompt,references,criticalText,capability,sections:included,
     budget:{limit,unit:capability.promptUnit,used,needsOptimization,source:input.providerPromptLimit!==undefined?'Проверенный лимит каталога API':capability.limitSource,
-      criticalCharacters:criticalText.length,originalCharacters:render(sections).length,compiledCharacters:prompt.length,remaining:limit-used},
-    compression:{shortened:prompt.length<render(sections).length,omitted,includedKeys:included.map(s=>s.key)},warnings:[...new Set(warnings)]};
+      criticalCharacters:criticalText.length,originalCharacters,compiledCharacters:prompt.length,remaining:limit-used},
+    compression:{shortened:prompt.length<originalCharacters,omitted,includedKeys:included.map(s=>s.key)},warnings:[...new Set(warnings)]};
 }

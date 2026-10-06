@@ -1,4 +1,5 @@
 import { planCharacterIds } from './plan-references';
+import {unresolvedJobBlocks} from './job-wait';
 import { id, isApproved, excludedShot, type Item, type Project } from './domain';
 import { parseShots } from './shots';
 import { MODELS } from './models';
@@ -18,7 +19,7 @@ export function selectedVideoModel(p: Project, item: Item) {
 export function remainingVideoPlans(p: Project) {
   return p.items.filter(i => i.stage === 7 && videoShot(p, i) &&
     !i.variants.some(v => v.kind === 'video' && v.assetId) &&
-    !p.jobs.some(j => j.itemId === i.id && ['queued', 'dispatching', 'pending', 'saving', 'unknown'].includes(j.status)));
+    !p.jobs.some(j => j.itemId === i.id && (['queued', 'dispatching', 'pending', 'saving'].includes(j.status)||unresolvedJobBlocks(j))));
 }
 
 // A common application limit; MiniMax's video API accepts at most 2000 characters.

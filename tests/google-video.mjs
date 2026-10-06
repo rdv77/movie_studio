@@ -74,6 +74,13 @@ try {
  globalThis.state=structuredClone(p);await single(req({...body,batchId:D.id(),models:[M.GOOGLE_OMNI],estimates:{}}),ctx);
  const oj=state.jobs[0],oc={params:Promise.resolve({id:p.id,jobId:oj.id})};posts=0;
  mock((url,o)=>{if(o.method==='POST'){posts++;return Response.json({id:'v1_test',status:'in_progress'});}return Response.json({id:'v1_test',status:'completed',steps:[{type:'model_output',content:[{type:'video',data:'AAEC'}]}]});});
- await tick(req({}),oc);globalThis.storageFailure=true;await tick(req({}),oc);assert.equal(state.jobs[0].status,'pending');globalThis.storageFailure=false;await tick(req({}),oc);assert.equal(state.jobs[0].status,'done');assert.equal(posts,1);assert(!JSON.stringify(state).includes('AAEC'));
+ await tick(req({}),oc);globalThis.storageFailure=true;await tick(req({}),oc);assert.equal(state.jobs[0].status,'pending');
+ // A failed inline-file save resumes the same interaction after the durable
+ // read backoff. An immediate UI tick must not bypass that pause.
+ globalThis.storageFailure=false;const pausedCalls=calls.length,nextPollAt=Date.parse(state.jobs[0].pollRetry.nextPollAt);assert(nextPollAt>Date.now());
+ await tick(req({}),oc);assert.equal(state.jobs[0].status,'pending');assert.equal(calls.length,pausedCalls,'No provider read before nextPollAt');
+ const realNow=Date.now;Date.now=()=>nextPollAt;
+ try{await tick(req({}),oc);}finally{Date.now=realNow;}
+ assert.equal(state.jobs[0].status,'done');assert.equal(state.jobs[0].pollRetry,undefined);assert.equal(posts,1);assert(!JSON.stringify(state).includes('AAEC'));
  console.log('PASS Google video: 3 model contracts, duration and budget on both APIs, background polling, credential-isolated downloads, worker storage retries without duplicate POST, inline media never persisted to D1. All requests mocked.');
 }finally{globalThis.fetch=previous;}

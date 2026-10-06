@@ -2,7 +2,7 @@ import {build} from 'esbuild';
 import assert from 'node:assert/strict';
 await build({stdin:{resolveDir:process.cwd(),contents:`export * from './lib/prompt-optimization-runner';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/prompt-optimization.mjs',plugins:[{name:'mock-storage',setup(b){
  b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'test'}));
- b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`export async function getKey(_,provider){globalThis.keyReads++;if(provider!=='xai')throw Error('Missing key');return 'test-secret'};export async function mutate(_,__,fn){const copy=structuredClone(globalThis.film);fn(copy);globalThis.film=copy;return structuredClone(copy);}`}));
+ b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`export async function loadProject(){return structuredClone(globalThis.film)};export async function getKey(_,provider){globalThis.keyReads++;if(provider!=='xai')throw Error('Missing key');return 'test-secret'};export async function mutate(_,__,fn){const copy=structuredClone(globalThis.film);fn(copy);globalThis.film=copy;return structuredClone(copy);}`}));
 }}]});
 const {prepareMediaPrompt}=await import('../work/tests/prompt-optimization.mjs');
 const original=globalThis.fetch;globalThis.keyReads=0;

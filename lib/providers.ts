@@ -3,7 +3,7 @@ import {decodeMediaBase64} from './media-base64';
 import { imageSettingsSchema, LEGACY_IMAGE_SETTINGS } from './image-quality';
 import { generateFal, pollFal } from './fal-provider';
 import { generateGoogle, pollGoogle } from './google-provider';
-import { call, json, ProviderError } from './provider-http';
+import { call, json, ProviderError, providerDetail } from './provider-http';
 export { ProviderError } from './provider-http';
 import { generateZen, pollZen } from './zencreator-provider';
 import type { Job } from './domain';
@@ -182,6 +182,7 @@ export async function generate(
           ],
           stream: false,
           max_tokens: j.purpose==='prompt-optimization'?6000:7000,
+          ...(j.purpose==='prompt-optimization'&&m.provider==='xai'?{reasoning_effort:'low'}:{}),
         },
         j.purpose==='prompt-optimization'?120000:180000,
       ),
@@ -329,7 +330,10 @@ export async function poll(j: Job, key: string): Promise<Result> {
     if(!task||task.id!==j.requestId)throw new ProviderError('MiniMax H3 вернул ответ для неизвестной задачи. Новая генерация не запускается.');
     if(['queued','running'].includes(task.status))return {pending:true,actual:null};
     const receipt={requestId:task.id,usage:task.usage,actual:null};
-    if(['failed','cancelled'].includes(task.status))return {...receipt,error:`MiniMax H3: ${task.status==='cancelled'?'задача отменена':'генерация не выполнена'}. Проверьте задачу ${task.id} в кабинете провайдера.`};
+    if(['failed','cancelled'].includes(task.status)){
+      const detail=providerDetail(task.error?.message??task.error??task.failure_reason??task.message,key);
+      return {...receipt,error:`MiniMax H3: ${task.status==='cancelled'?'задача отменена':'генерация не выполнена'}.${detail?' '+detail:''} Проверьте задачу ${task.id} в кабинете провайдера.`};
+    }
     if(task.status!=='succeeded')throw new ProviderError('MiniMax H3 вернул неизвестный статус. Проверьте задачу в кабинете; новая генерация не запускается.');
     const url=task.content?.url;
     return {...receipt,...(typeof url==='string'&&url?{url,mime:'video/mp4'}:{error:'MiniMax H3 завершил задачу без ссылки на видео. Проверьте результат в кабинете.'})};

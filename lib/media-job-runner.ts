@@ -1,4 +1,7 @@
 import {prepareMediaPrompt,recoverPromptPreparation} from '@/lib/prompt-optimization-runner';
+import type {MediaWorkScope} from './media-work-slot';
+import {pendingReceiptUnchanged,pollRetryState,pollDeferred} from './media-reliability';
+import {GOOGLE_OMNI} from './google-models';
 import {enqueueImageRetry} from '@/lib/image-retries';
 import {imageBlobs} from '@/lib/image-inputs';
 import {isOpenAIImage} from '@/lib/openai-image';
@@ -47,7 +50,7 @@ import {
   type Result,
 } from '@/lib/providers';
 /** Trusted executor: callers supply a database-verified owner; public HTTP still authorizes separately. */
-export async function executeMediaJob(user:string,id:string,jobId:string,recoveryAction?:unknown):Promise<Project> {
+export async function executeMediaJob(user:string,id:string,jobId:string,recoveryAction?:unknown,scope?:MediaWorkScope):Promise<Project> {
   let p = await loadProject(user, id);
   let j = p.jobs.find((j) => j.id === jobId);
   if (!j) throw new Error('Попытка не найдена.');
@@ -58,18 +61,23 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     catch(e){diagnostic=e instanceof Error?e.message:'Не удалось уточнить ошибку.';}
     return mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;job.providerDiagnostic=diagnostic;});
   }
-  if(recoveryAction==='recover-image-file'){
-    if(j.kind!=='image'||j.purpose)throw new Error('Восстановление доступно для сохранённого изображения. Новая генерация не запускалась.');
+  if(recoveryAction==='recover-image-file'||recoveryAction==='recover-media-file'||j.status==='saving'&&!j.purpose&&!j.lipsync){
+    if(!['image','audio','video'].includes(j.kind)||j.purpose)throw new Error('Восстановление доступно для сохранённого медиафайла. Новая генерация не запускалась.');
     if(j.status==='done')return p;
     if(!['unknown','dispatching','saving'].includes(j.status))throw new Error('Эта попытка не ожидает восстановления файла.');
-    const saved=await asset(user,jobId,p).catch(()=>null),stored=saved?await runtime.FILES.head(jobId):null;
-    if(!saved||saved.project_id!==id||!['image/png','image/jpeg','image/webp'].includes(saved.mime)||!stored||stored.size!==saved.size)
-      throw new Error('Сохранённое изображение не найдено. Новая генерация не запускалась. Проверьте исход и списание в кабинете провайдера.');
-    return mutate(user,id,p=>{
+    const saved=await asset(user,jobId,p).catch(()=>null),stored=saved?.project_id===id&&saved.mime.startsWith(j.kind+'/')?await runtime.FILES.head(jobId):null;
+    if(saved&&saved.project_id===id&&saved.mime.startsWith(j.kind+'/')&&stored&&stored.size===saved.size)return mutate(user,id,p=>{
       const job=p.jobs.find(j=>j.id===jobId);
-      if(!job||job.kind!=='image'||job.purpose||!['unknown','dispatching','saving','done'].includes(job.status))throw new Error('Статус попытки изменился. Обновите данные.');
+      if(!job||job.purpose||!['unknown','dispatching','saving','done'].includes(job.status))throw new Error('Статус попытки изменился. Обновите данные.');
       finishItemMediaJob(p,job,jobId);
+      job.timings={...job.timings,finishedAt:now()};
     });
+    if(recoveryAction==='recover-image-file'||recoveryAction==='recover-media-file'){
+      if(!j.output?.url)throw new Error('Сохранённый файл или ссылка не найдены. Новая генерация не запускалась. Проверьте исход и списание в кабинете провайдера.');
+      p=undefined!;
+      p=await mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;if(!job.output?.url)throw Error('Ссылка больше недоступна.');job.status='saving';job.waitStoppedAt=undefined;job.waitStopReason=undefined;job.resumeStatus=undefined;job.saveFailures=0;job.error=undefined;});
+      j=p.jobs.find(x=>x.id===jobId)!;
+    }
   }
   if(j.purpose==='directing')return p;
   if(j.waitStoppedAt&&j.status==='unknown'&&recoveryAction==='resume-wait'){
@@ -117,6 +125,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   if (j.status === 'dispatching') {
     return p;
   }
+  if(pollDeferred(j)&&recoveryAction!=='resume-wait')return p;
   const saving = j.status === 'saving';
   const refreshZen = saving && model(j.model).provider === 'zencreator';
   const key = saving && !refreshZen && model(j.model).provider!=='google' ? '' : await getKey(user, model(j.model).provider);
@@ -161,16 +170,19 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         job.status = 'dispatching';
         job.transportVersion = 2;
         job.started = now();
+        job.timings={...job.timings,queuedAt:job.timings?.queuedAt??job.created};
       }
     });
     j = p.jobs.find((x) => x.id === jobId)!;
     if (j.status === 'cancelled'||j.status === 'queued') return p;
   }
+  let received:Result|undefined,providerResponseAt:string|undefined;
   try {
     if(!polling&&!saving&&!j.lipsync&&!j.purpose&&['image','video'].includes(j.kind)){
       p=undefined!;
-      const prepared=await prepareMediaPrompt(user,id,j,key);
-      if(prepared)return prepared;
+      const prepare=async()=>!!(await prepareMediaPrompt(user,id,j!,key,scope?.withState));
+      const prepared=scope?await scope.outside(prepare):await prepare();
+      if(prepared)return loadProject(user,id);
       p=await loadProject(user,id);
     }
     const directImages=!polling&&!saving&&!j.lipsync&&j.kind==='image'&&isOpenAIImage(j.model);
@@ -184,11 +196,16 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     const format=p.format;
     // All ownership/source checks finished. Provider I/O needs only this job.
     // Lipsync still reads its project-scoped inputs below before releasing it.
-    if(!j.lipsync)p=undefined!;
+    if(!j.lipsync||polling||saving)p=undefined!;
+    if(!polling&&!saving){j.timings={...j.timings,providerSubmittedAt:now()};}
     const directed=polling||saving||j.kind!=='audio'?undefined:await generateDirectedSpeech(j,key,model(j.model).provider as 'minimax'|'elevenlabs');
-    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await poll(j, key) : saving
+    const readProvider=async()=>{const result=await (j!.lipsync?pollSync(j!,key):poll(j!,key));providerResponseAt=now();return result;};
+    // Gemini Omni can return inline video bytes, so its poll stays in the
+    // binary slot. Other installed adapters return only small JSON receipts.
+    const read=()=>scope&&j!.model!==GOOGLE_OMNI?scope.outside(readProvider):readProvider();
+    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await read() : saving
       ? j.output!
-      : j.lipsync ? await (polling ? pollSync(j, key) : (async () => {
+      : j.lipsync ? await (polling ? read() : (async () => {
           // Transfer private files directly; never grant public access to the asset library.
           let video: Blob, audio: Blob;
           try {
@@ -200,11 +217,25 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
             video = new Blob([await v.arrayBuffer()], {type: va.mime}); audio = new Blob([await a.arrayBuffer()], {type: aa.mime});
           } catch { throw new ProviderError('Не удалось загрузить файлы синхронизации. Запрос не отправлен.', true, true); }
           return generateSync(j, key, video, audio);
-        })()) : await (polling ? poll(j, key) : generate(j, key, refs, format, characterRefs,endFrame,binaryRefs)));
+        })()) : await (polling ? read() : generate(j, key, refs, format, characterRefs,endFrame,binaryRefs)));
+    received=result;
+    providerResponseAt??=now();
     // Do not keep large reference strings across project snapshot writes.
     refs.length=0;characterRefs.length=0;endFrame=undefined;if(binaryRefs)binaryRefs.length=0;p=undefined!;
-    await mutate(user, id, (p) => {
+    if(result.pending){
+      p=await loadProject(user,id);
+      const current=p.jobs.find(x=>x.id===jobId)!;
+      if(current.status==='done'||pendingReceiptUnchanged(current,result))return p;
+      p=undefined!;
+    }
+    p=await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
+      if(job.status==='done')return;
+      job.timings={...job.timings,...(j!.timings?.providerSubmittedAt?{providerSubmittedAt:j!.timings.providerSubmittedAt}:{}),
+        ...(!polling&&!saving&&result.requestId?{providerAcceptedAt:providerResponseAt}:{}),
+        ...(!result.pending&&!result.error?{providerCompletedAt:job.timings?.providerCompletedAt??providerResponseAt}:{}),
+        ...(!result.pending&&(result.url||result.bytes)?{savingStartedAt:job.timings?.savingStartedAt??now()}:{}),};
+      if(polling&&!result.error){job.pollRetry=undefined;job.error=undefined;}
       if (result.actual != null) {
         job.actual = result.actual;
         job.actualSource = 'Ответ API';
@@ -224,8 +255,9 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         if(job.waitStoppedAt)job.resumeStatus='pending';else job.status = 'pending';
       }
     });
-    if (result.error) throw new ProviderError(result.error, true, false, j.kind==='image' && !/(content|moderation|recognis|public figure|safety|blocked|filter|nsfw|отклон|запрещ|содержим|баланс|ключ)/i.test(result.error));
-    if (result.pending) return await loadProject(user, id);
+    if (result.error) {p=undefined!;throw new ProviderError(result.error, true, false, j.kind==='image' && !/(content|moderation|recognis|public figure|safety|blocked|filter|nsfw|отклон|запрещ|содержим|баланс|ключ)/i.test(result.error));}
+    if (result.pending) return p;
+    p=undefined!;
     let assetId: string | undefined;
     if (j.kind !== 'text') {
       let bytes = result.bytes;
@@ -256,6 +288,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     }
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
+      job.timings={...job.timings,finishedAt:now()};
       // A late, valid result is still retained after stopping local waiting.
       job.waitStoppedAt=undefined;job.waitStopReason=undefined;job.resumeStatus=undefined;
       if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review)throw Error('Проверка не найдена.');try{review.result=parseMediaReview(result.text??job.output?.text??'');}catch(e){throw new ProviderError(e instanceof Error?e.message:'Некорректный ответ визуального редактора.',true);}job.status='done';job.error=undefined;return;}
@@ -278,12 +311,24 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
       finishItemMediaJob(p,job,assetId,result.text);
     });
   } catch (e) {
+    p=undefined!;
     p = await mutate(user, id, (p) => {
       const job = p.jobs.find((x) => x.id === jobId)!;
       if (job.status === 'done') return;
       job.error = e instanceof Error ? e.message : 'Ошибка обработки.';
+      if(j!.timings?.providerSubmittedAt)job.timings={...job.timings,providerSubmittedAt:j!.timings.providerSubmittedAt};
+      // A persistence failure after a provider receipt is not an unknown
+      // generation. Retain the receipt/link and resume only its read/save.
+      if(received?.requestId)job.requestId=received.requestId;
+      if(received?.pollingUrl)job.pollingUrl=received.pollingUrl;
+      if(received?.actual!=null){job.actual=received.actual;job.actualSource='Ответ API';}
+      if(received?.usage)job.usage=received.usage;
+      if(received?.requestId&&!polling&&!saving)job.timings={...job.timings,providerAcceptedAt:providerResponseAt};
+      if(received?.url&&!received.error){job.output={url:received.url,mime:received.mime};job.timings={...job.timings,providerCompletedAt:job.timings?.providerCompletedAt??providerResponseAt,savingStartedAt:job.timings?.savingStartedAt??now()};}
       if(e instanceof VoiceSpeechResponseError){job.requestId=e.receipt.requestId??job.requestId;job.actual=e.receipt.actual??null;job.usage=e.receipt.usage;}
-      if(job.waitStoppedAt){job.status='unknown';return;}
+      if(job.waitStoppedAt){job.status='unknown';if(received?.url&&!received.error)job.resumeStatus='saving';else if(received?.pending&&job.requestId)job.resumeStatus='pending';return;}
+      if(received?.url&&!received.error)job.status='saving';
+      else if(received?.pending&&!received.error){job.status='pending';job.pollRetry=pollRetryState(job.pollRetry,job.error);return;}
       if (!polling && e instanceof ProviderError && e.notSent) {
         job.actual = '0';
         job.actualSource = 'Запрос не отправлен';
@@ -295,9 +340,11 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
       }
       if (polling && (!(e instanceof ProviderError && e.definite)||e.httpStatus===429)) {
         job.status = 'pending';
+        job.pollRetry=pollRetryState(job.pollRetry,job.error);
       } else
         job.status =
           e instanceof ProviderError && e.definite ? 'failed' : 'unknown';
+      if(['failed','unknown'].includes(job.status))job.timings={...job.timings,finishedAt:now()};
       enqueueImageRetry(p,job,e instanceof ProviderError&&e.retryable&&!e.notSent);
     });
   }

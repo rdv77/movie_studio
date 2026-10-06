@@ -2,6 +2,8 @@
 import {ImageRetrySettings} from './image-retry-settings';
 import type {ImageRetryOptions} from '@/lib/image-retries';
 import {request,ApiResponseError} from '@/lib/client-request';
+import {generationBasis} from '@/lib/generation-basis';
+import {isUnchangedJobProgress,jobTimingRows,jobPhase,formatJobSeconds} from '@/lib/job-progress';
 import {StoryboardCharacterBindings} from './storyboard-character-bindings';
 import {AudioQcEditor} from './audio-qc-editor';
 import {BatchScopeSelector} from './batch-scope-selector';
@@ -465,17 +467,20 @@ function Workspace() {
       if(directorFlights<2&&current.directing?.runs.some(directorRunActive)){directorFlights++;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);void qc.invalidateQueries({queryKey:['project',projectId]},{cancelRefetch:false});}).finally(()=>{directorFlights--;});}
       for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
         checkingWait.add(job.id);
-        void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait'})
-          .then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next)))
+        void request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{action:'check-wait',compact:true,revision:current.revision})
+          .then(next=>{if(!isUnchangedJobProgress(next))qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next));})
           .catch(()=>{}).finally(()=>checkingWait.delete(job.id));
       }
       for(const job of runnableJobs(current,flights,attempts)) {
         flights.add(job.id);attempts.set(job.id,Date.now());
         void (async()=>{
           try {
-            const next=await request(`/api/projects/${projectId}/jobs/${job.id}`,'POST');
+            const next=await request(`/api/projects/${projectId}/jobs/${job.id}`,'POST',{compact:true,revision:current.revision});
+            // No partial merge: an unchanged response cannot advance revision
+            // past unseen card writes or overwrite a newer completed result.
+            if(isUnchangedJobProgress(next))return;
             qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next));
-            qc.invalidateQueries({queryKey:['assets',projectId]});
+            if(next.jobs.some((j:Job)=>j.status==='done'&&current.jobs.find(old=>old.id===j.id)?.status!=='done'))qc.invalidateQueries({queryKey:['assets',projectId]});
           } catch(e) {
             // Local capacity refusal happens before loading/claiming the job.
             // Keep this same queued ID for the next tick, without error churn.
@@ -523,6 +528,7 @@ function Workspace() {
       execute:()=>{
         const film=qc.getQueryData<Project>(['project',projectId]);
         return film?{id:film.id,revision:film.revision,jobs:film.jobs.slice(-40).map(j=>({id:j.id,model:j.model,status:j.status,purpose:j.purpose,requestId:j.requestId,error:j.error,warning:j.warning,created:j.created,
+          itemId:j.itemId,plan:film.items.find(i=>i.id===j.itemId)?.title,phase:jobPhase(j),timings:j.timings,durations:jobTimingRows(j),pollRetry:j.pollRetry,actual:j.actual,estimate:j.estimate,
           promptCharacters:Array.from(j.prompt).length,promptUtf8Bytes:new TextEncoder().encode(j.prompt).length,
           optimization:j.promptOptimization?{state:j.promptOptimization.state,auditIds:j.promptOptimization.auditIds??[j.promptOptimization.auditId],triedModels:j.promptOptimization.triedModels}:undefined}))}:{error:'Проект не открыт'};
       }
@@ -879,6 +885,7 @@ function Workspace() {
                   <span>
                     В очереди осталось {active.length} попыток. Состояние сохраняется;
                     готовые результаты появятся после обработки.
+                    <small className="block">{[...new Set(active.filter(j=>j.purpose!=='prompt-optimization').map(jobPhase))].filter(Boolean).map(phase=>`${phase}: ${active.filter(j=>j.purpose!=='prompt-optimization'&&jobPhase(j)===phase).length}`).join(' · ')}</small>
                     {[1,2,3,5,7].includes(step)&&` Для изображений и видеопланов — до ${queueSettings(p).concurrency} генераций одновременно. Можно открыть другую карточку и запустить «Создать с ИИ», не дожидаясь текущего результата.`}
                   </span>
                   <Button variant="ghost" onClick={() => setPanel('budget')}>
@@ -1992,6 +1999,7 @@ function GenerateDialog({
   const [imageSettings, setImageSettings] = useState<ImageSettings>(FINAL_IMAGE_SETTINGS);
   const [imageRetry,setImageRetry]=useState<ImageRetryOptions>({maxAttempts:3});
   const [batch, setBatch] = useState('');
+  const [basis,setBasis]=useState('');
   const queueIssue=[1,2,3].includes(item.stage)&&kind==='image'?conceptImageAdmissionIssue(p,item.id):item.stage===5&&kind==='image'?storyboardAdmissionIssue(p,item.id):item.stage===7&&kind==='video'?videoAdmissionIssue(p,item.id):queueAdmissionIssue(p,item.id);
   const unresolved=p.jobs.filter((j:Job)=>j.itemId===item.id&&unresolvedJobBlocks(j));
   const allScriptAudio = scriptSpeech(p);
@@ -2047,6 +2055,7 @@ function GenerateDialog({
       setEstimates({});
       setImageSettings(first?sourceImageSettings(first)??FINAL_IMAGE_SETTINGS:FINAL_IMAGE_SETTINGS);
       setBatch(crypto.randomUUID());
+      setBasis(generationBasis(p,item.id));
     }
   }, [open, p.id, item.id]);
   const source = chosen(item);
@@ -2397,6 +2406,7 @@ function GenerateDialog({
                 );
                 await submit({
                   revision: p.revision,
+                  basis,
                   batchId: batch,
                   itemId: item.id,
                   ...(frameRole?{keyframe:frameRole}:{}),
@@ -2515,7 +2525,7 @@ function RemainingVideoDialog({ p, item, assets, upload, busy, perform, close, s
         <DialogFooter><Button variant="outline" onClick={close}>Закрыть</Button>
           <Button disabled={busy || !included.length || incomplete || !!costError} onClick={() => perform(async () => {
             await submit({ revision: snapshot.revision, batchId: batch, sourceItemId: source.id, sourceVariantId: chosen(source)!.id,
-              estimate: perAttempt, characterIds, mode:'all', basis:dependencies(snapshot,7), plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt })) });
+              estimate: perAttempt, characterIds, mode:'all', basis:dependencies(snapshot,7),sourceBasis:generationBasis(snapshot,source.id), plans: included.map(({ itemId, ref, prompt }) => ({ itemId, ref, prompt,basis:generationBasis(snapshot,itemId) })) });
             close();
           })}><Sparkles />Запустить {included.length} планов</Button></DialogFooter>
       </DialogContent>
@@ -3064,6 +3074,9 @@ function Budget({ p, action, perform, replace }: any) {
   const [recovering,setRecovering] = useState('');
   const [showArchive,setShowArchive] = useState(false);
   const [archiving,setArchiving] = useState(false);
+  const [clock,setClock]=useState(Date.now());
+  const active=p.jobs.some((j:Job)=>['queued','dispatching','pending','saving'].includes(j.status));
+  useEffect(()=>{if(!active)return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[active]);
   const sorted=newestJobs(p.jobs),archived=sorted.filter(journalArchived);
   const visible=sorted.filter(j=>showArchive?journalArchived(j):!journalArchived(j));
   const clearable=sorted.filter(j=>canArchiveJob(j)&&!journalArchived(j)).length;
@@ -3173,11 +3186,16 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.imageRetry?.haltReason&&<small>{j.imageRetry.haltReason}</small>}
                   {j.model===GROK_IMAGE_MODEL&&<small>{imageSettingsLabel(j.imageSettings??LEGACY_IMAGE_SETTINGS)}</small>}
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
+                  {p.items.find((i:Item)=>i.id===j.itemId)?.title&&<small>{p.items.find((i:Item)=>i.id===j.itemId)?.title}</small>}
+                  {jobTimingRows(j,clock).map(row=><small key={row.label}>{row.label}: {formatJobSeconds(row.seconds!)}{row.running?' · идёт':''}</small>)}
                 </TableCell>
                 <TableCell>
                   {j.optimizationRecovered?'Предупреждение · помогла резервная LLM':j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
                   {j.warning&&<small className="warning-text">{j.warning}</small>}
                   {j.providerDiagnostic&&<small>Уточнение провайдера: {j.providerDiagnostic}</small>}
+                  {jobPhase(j)&&<small>{jobPhase(j)}</small>}
+                  {j.pollRetry?.nextPollAt&&<small>Следующая проверка: {new Date(j.pollRetry.nextPollAt).toLocaleTimeString('ru-RU')}. Проверяем прежний запрос без новой оплаты генерации.</small>}
+                  {j.pollRetry?.lastError&&<small>Последняя ошибка проверки: {j.pollRetry.lastError}</small>}
                   {['dispatching','pending','saving'].includes(j.status)&&<small>Начало: {new Date(j.waitStartedAt??j.started??j.created).toLocaleTimeString('ru-RU')} · автоостановка через {waitLimitMs(j)/60000} мин ожидания</small>}
                   {j.waitStoppedAt&&<small>Очередь освобождена. Остановка ожидания не отменяет запрос и возможное списание у провайдера.</small>}
                   {j.status==='unknown'&&j.newSeriesAllowedAt&&!j.optimizationRecovered&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
@@ -3219,7 +3237,7 @@ function Budget({ p, action, perform, replace }: any) {
                   )}
                   {['dispatching','pending','saving'].includes(j.status)&&<Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(()=>action('stopJobWait',{jobId:j.id}))}>Остановить ожидание</Button>}
                   {j.status==='unknown'&&j.waitStoppedAt&&j.resumeStatus&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'resume-wait'}));}finally{setRecovering('');}})}>Проверить готовый результат</Button><small>Без повторной генерации: загрузка сохранённой ссылки или проверка прежнего запроса.</small></>}
-                  {j.kind==='image'&&!j.purpose&&['unknown','dispatching','saving'].includes(j.status)&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'recover-image-file'}));}finally{setRecovering('');}})}>Восстановить сохранённую картинку</Button><small>Проверяет файл на сервере и возвращает его в карточку. Модель повторно не вызывается.</small></>}
+                  {['image','audio','video'].includes(j.kind)&&!j.purpose&&!j.lipsync&&['unknown','dispatching','saving'].includes(j.status)&&<><Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'recover-media-file'}));}finally{setRecovering('');}})}>Восстановить сохранённый файл</Button><small>Проверяет файл или прежнюю ссылку результата и возвращает материал в карточку. Модель повторно не вызывается.</small></>}
                 </TableCell>
               </TableRow>
             ))}
@@ -3237,6 +3255,7 @@ function Budget({ p, action, perform, replace }: any) {
         )}
       </div>
       <div className="note">
+        Время провайдера включает отправку запроса, его очередь и ожидание ответа; это не отдельный замер работы модели. Для прежних попыток подробные времена могут отсутствовать.
         Провайдеры не всегда возвращают стоимость в ответе API. Неизвестное
         списание можно сверить с кабинетом и внести вручную. Тарифы оценки Grok:
         снимок от 08.09.2026; актуальный счет имеет приоритет.

@@ -2,6 +2,7 @@ import {z} from 'zod';
 import type {Project,Job} from './domain';
 import {model,PROVIDERS} from './models';
 import {unresolvedJobBlocks,waitExpired} from './job-wait';
+import {pollDeferred} from './media-reliability';
 
 export const DEFAULT_QUEUE_CONCURRENCY=3;
 const limit=z.number().int().min(1).max(8);
@@ -70,7 +71,7 @@ export function queueRunnableJobs(p:QueueProject,inputFlights:ReadonlySet<string
     (j.purpose!=='prompt-optimization'||waitExpired(j,time)));
   const flights=new Set([...inputFlights].filter(id=>active.some(j=>j.id===id)));
   const slots=Math.max(0,settings.concurrency-flights.size),picked:Job[]=[],claimed=new Set(flights);
-  const candidates=active.filter(j=>!flights.has(j.id)&&(j.status!=='dispatching'||waitExpired(j,time)));
+  const candidates=active.filter(j=>!flights.has(j.id)&&!pollDeferred(j,time)&&(j.status!=='dispatching'||waitExpired(j,time)));
   while(picked.length<slots){
     const eligible=candidates.filter(j=>j.status!=='queued'||!queueSlotIssue(p,j,claimed))
       .sort((a,b)=>(attempted.get(a.id)??0)-(attempted.get(b.id)??0)||

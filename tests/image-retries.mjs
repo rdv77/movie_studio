@@ -24,7 +24,17 @@ globalThis.outcomes=['429'];await start();state.limit='100';await runLatest();as
 globalThis.outcomes=['failed'];await start();D.addVariant(state,state.items.find(i=>i.stage===0).id,{text:'Changed basis'});D.approve(state,state.items.find(i=>i.stage===0).id);await runLatest();assert.equal(calls.length,0);assert.equal(state.jobs.length,1);assert.equal(state.jobs[0].status,'cancelled');
 await start();const j=state.jobs[0];j.status='failed';R.enqueueImageRetry(state,j,true);const length=state.jobs.length;R.enqueueImageRetry(state,j,true);assert.equal(state.jobs.length,length,'CAS-safe next pointer');
 await start();state.jobs[0].status='failed';state.jobs[0].status='cancelled';R.enqueueImageRetry(state,state.jobs[0],true);assert.equal(state.jobs.length,1,'Cancelled chain not restarted');
-globalThis.outcomes=['pending'];await start();await runLatest();globalThis.pollOutcome='429';await runLatest();assert.equal(state.jobs[0].status,'pending');assert.equal(state.jobs.length,1);assert.equal(calls.length,1,'Polling 429 must not resend accepted generation');globalThis.pollOutcome='failed';await runLatest();assert.equal(state.jobs.length,2,'Terminal provider failure may retry');
+globalThis.outcomes=['pending'];await start();await runLatest();globalThis.pollOutcome='429';await runLatest();assert.equal(state.jobs[0].status,'pending');assert.equal(state.jobs.length,1);assert.equal(calls.length,1,'Polling 429 must not resend accepted generation');
+const pollsBeforeRetry=polls,nextPollAt=Date.parse(state.jobs[0].pollRetry.nextPollAt);
+assert(nextPollAt>Date.now());globalThis.pollOutcome='failed';await runLatest();
+assert.equal(polls,pollsBeforeRetry,'A durable read pause must not poll the provider early');
+assert.equal(state.jobs.length,1);
+const realNow=Date.now;Date.now=()=>nextPollAt;
+try{await runLatest();}finally{Date.now=realNow;}
+assert.equal(state.jobs.length,2,'Confirmed terminal provider failure may create the next permitted image attempt');
+assert.equal(calls.length,1,'Polling the existing task must not resend its paid POST');
+assert.equal(state.jobs[1].pollRetry,undefined,'A new attempt must not inherit the old polling pause');
+assert.deepEqual(state.jobs[1].timings,{queuedAt:state.jobs[1].created},'Each paid attempt owns its own timing history');
 // Validate error classification at the real HTTP boundary without contacting any service.
 globalThis.fetch=async()=>new Response('{}',{status:429});await assert.rejects(()=>H.call('https://test.invalid',{},{}),e=>e.retryable&&e.httpStatus===429&&e.definite);
 for(const status of [400,401,402,403,422,500]){fetch=async()=>new Response('{}',{status});await assert.rejects(()=>H.call('https://test.invalid',{},{}),e=>!e.retryable&&e.definite===(status<500));}
