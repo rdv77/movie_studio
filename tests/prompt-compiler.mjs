@@ -200,7 +200,8 @@ try {
   const explicitAlternate = C.compilePrompt(p, video, 'MiniMax-H3', { kind: 'video', prompt: 'Движение.', references: [end] });
   assert.equal(explicitAlternate.references[0].assetId, end, 'An explicitly chosen current-plan frame wins over automatic approval');
   const withSpeech = C.compilePrompt(p, video, 'MiniMax-H3', { kind: 'video', prompt: '', startFrameId: first, plan: { ...current, speechType: 'character', speaker: 'Анна' } });
-  assert(withSpeech.criticalText.includes('Только этот герой естественно двигает губами'));
+  assert(withSpeech.criticalText.includes('Только этот герой артикулирует речь'));
+  assert(withSpeech.criticalText.includes('улыбка с закрытым ртом'));
   assert(withSpeech.criticalText.includes('У всех остальных персонажей рты закрыты'));
   assert(withSpeech.criticalText.includes('Я вернусь.'));
   assert.throws(() => C.compilePrompt(p, video, 'MiniMax-H3', { kind: 'video', prompt: '', startFrameId: first, plan: { ...current, speechType: 'character', speaker: 'Борис' } }), e => e.code === 'speaker');

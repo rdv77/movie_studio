@@ -3,8 +3,8 @@ import {z} from 'zod';
 import {id,type Project} from './domain';
 import {recordCreativeVersion} from './creative-versions';
 import {runtimeMode} from './runtime-policy';
-import {directingShotSchema,dialogueSchema,ensureDirecting,editorBasis,directorBasis,type EditorIssue,type EditorPatch,type DirectingState,type Scene} from './directing';
-import {shotDirectionSchema,montageOperationSchema,applyMontageOperations,scenePlanBasis,shotContentBasis,validateScenePlan,type MontageOperation} from './shot-direction';
+import {directingShotSchema,dialogueSchema,ensureDirecting,editorBasis,directorApprovalBasis,type EditorIssue,type EditorPatch,type DirectingState,type Scene} from './directing';
+import {shotDirectionSchema,preserveShotFacialExpression,montageOperationSchema,applyMontageOperations,scenePlanBasis,shotContentBasis,validateScenePlan,type MontageOperation} from './shot-direction';
 
 export type EditorMontageOperation=MontageOperation&{applied?:boolean;relatedIssueIds?:string[];beforeTitles?:{id:string;title:string;duration:number}[]};
 export type SceneExpressiveReview={sceneId:string;basis:string;foundation?:string;issues:EditorIssue[];patches:PreparedReview['patches'];montageOperations:EditorMontageOperation[]};
@@ -36,7 +36,7 @@ export function prepareDirectorReview(p:Project,result:unknown,sceneId?:string):
     const shot=shots.find(s=>s.id===v.shotId);if(!shot)throw Error('Редактор указал неизвестный план.');
     if(v.issueId&&!links.has(v.issueId))throw Error('Правка ссылается на неизвестное замечание.');
     const key=v.shotId+':'+v.section;if(fields.has(key))throw Error('Редактор предложил несовместимые повторные правки одного поля.');fields.add(key);
-    if(v.section==='direction'){const raw=JSON.parse(v.after);if(raw!==null)shotDirectionSchema.parse(raw);}
+    if(v.section==='direction'){const raw=JSON.parse(v.after);v.after=JSON.stringify(preserveShotFacialExpression(raw===null?undefined:shotDirectionSchema.parse(raw),shot.direction)??null);}
     return {...v,issueId:v.issueId?links.get(v.issueId):undefined,id:id(),before:patchValue(shot,v.section)} as ExtendedPatch;
   });
   const montageOperations=(data.montageOperations??[]).map(raw=>{
@@ -45,17 +45,18 @@ export function prepareDirectorReview(p:Project,result:unknown,sceneId?:string):
     const shot=scene.shots.find(s=>s.id===raw.shotId),shotIds=Array.isArray(raw.shotIds)?raw.shotIds as string[]:[];
     const before=raw.type==='duration'?shot?.duration:raw.type==='remove'?shot&&shotContentBasis(shot):raw.type==='reorder'?scene.shots.map(s=>s.id):shotIds.map(shotId=>{const s=scene.shots.find(s=>s.id===shotId);if(!s)throw Error('Объединяемый план не найден.');return {shotId,basis:shotContentBasis(s)};});
     const op=montageOperationSchema.parse({...raw,id:id(),sceneId:scene.id,basis:scenePlanBasis(scene),before,issueId:raw.issueId?links.get(String(raw.issueId)):undefined});
+    if(op.type==='merge'){const direction=preserveShotFacialExpression(op.after.direction,scene.shots.find(s=>s.id===op.keepShotId)?.direction);if(direction)op.after.direction=direction;else delete op.after.direction;}
     return {...op,beforeTitles:scene.shots.filter(s=>op.type==='duration'||op.type==='remove'?s.id===op.shotId:op.type==='merge'?op.shotIds.includes(s.id):true).map(s=>({id:s.id,title:s.title,duration:s.duration}))};
   });
   for(const scene of scenes)for(const conflict of validateScenePlan(scene).filter(i=>i.severity==='conflict'))
     issues.push({id:id(),sceneId:scene.id,shotId:conflict.shotId,severity:'conflict',category:'other',message:conflict.message,solution:'Исправьте структурированную постановку или примените подходящее решение редактора. Речь и действие не ускоряются автоматически.'});
   return {issues,patches,montageOperations};
 }
-export function currentSceneReviews(p:Project){const d=state(p);return (d.sceneReviews??[]).filter(v=>{const scene=d.scenes.find(s=>s.id===v.sceneId);return scene&&v.basis===scenePlanBasis(scene)&&(!v.foundation||v.foundation===directorBasis(p));});}
+export function currentSceneReviews(p:Project){const d=state(p);return (d.sceneReviews??[]).filter(v=>{const scene=d.scenes.find(s=>s.id===v.sceneId);return scene&&v.basis===scenePlanBasis(scene)&&(!v.foundation||v.foundation===directorApprovalBasis(p));});}
 export function storeSceneReview(p:Project,sceneId:string,review:PreparedReview){
   const d=state(p),scene=d.scenes.find(s=>s.id===sceneId);if(!scene)throw Error('Сцена больше не существует.');
   const old=d.sceneReviews?.find(v=>v.sceneId===sceneId),oldIssues=new Set(old?.issues.map(v=>v.id)),oldPatches=new Set(old?.patches.map(v=>v.id)),oldOps=new Set(old?.montageOperations.map(v=>v.id));
-  d.sceneReviews=[...(d.sceneReviews??[]).filter(v=>v.sceneId!==sceneId),{sceneId,basis:scenePlanBasis(scene),foundation:directorBasis(p),...review}];
+  d.sceneReviews=[...(d.sceneReviews??[]).filter(v=>v.sceneId!==sceneId),{sceneId,basis:scenePlanBasis(scene),foundation:directorApprovalBasis(p),...review}];
   d.issues=[...d.issues.filter(v=>!oldIssues.has(v.id)),...review.issues];d.patches=[...d.patches.filter(v=>!oldPatches.has(v.id)),...review.patches] as EditorPatch[];
   d.montageOperations=[...(d.montageOperations??[]).filter(v=>!oldOps.has(v.id)),...review.montageOperations];d.editorBasis=undefined;d.patchesBasis=editorBasis(p);
 }
@@ -102,7 +103,7 @@ export function applyEditorSolutions(p:Project,patchIds:string[],operationIds:st
     const shot=d.scenes.flatMap(s=>s.shots).find(s=>s.id===patch.shotId);if(!shot)throw Error('Монтаж удаляет план с выбранной текстовой правкой. Примените решения отдельными пакетами.');
     if(patchValue(shot,patch.section)!==patch.before)throw Error('Монтаж и текстовая правка меняют один раздел. Выберите одно решение или проверьте их отдельно.');
     if(patch.section==='dialogue')shot.dialogue=dialogueSchema.parse(JSON.parse(patch.after));
-    else if(patch.section==='direction'){const raw=JSON.parse(patch.after);(shot as Scene['shots'][number]&{direction?:z.infer<typeof shotDirectionSchema>}).direction=raw===null?undefined:shotDirectionSchema.parse(raw);}
+    else if(patch.section==='direction'){const raw=JSON.parse(patch.after);shot.direction=preserveShotFacialExpression(raw===null?undefined:shotDirectionSchema.parse(raw),shot.direction);}
     else (shot as unknown as Record<string,unknown>)[patch.section]=patch.after;
     directingShotSchema.parse(shot);assertDialogue(shot);shot.approved=undefined;patch.applied=true;
   }

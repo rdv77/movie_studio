@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {facialExpressionSchema,FACIAL_EXPRESSION_LABELS} from './facial-expression';
 
 const idSchema = z.string().trim().min(1).max(100);
 const note = z.string().max(3000);
@@ -12,6 +13,7 @@ export const FRAMING_NAMES: Record<typeof FRAMINGS[number], string> = {
 
 /** Optional as a whole on both DirectingShot and a flat ScriptPlan. No legacy defaults. */
 export const shotDirectionSchema = z.object({
+  facialExpression: facialExpressionSchema.optional(),
   framingStart: z.enum(FRAMINGS).optional(),
   framingEnd: z.enum(FRAMINGS).optional(),
   angle: z.object({
@@ -48,6 +50,13 @@ export const shotDirectionSchema = z.object({
   startFrame: note.optional(), endFrame: note.optional(),
 }).strict();
 export type ShotDirection = z.infer<typeof shotDirectionSchema>;
+/** Agent suggestions may develop staging but cannot replace a director's
+ * explicit acting preference. Manual shot edits deliberately bypass this. */
+export function preserveShotFacialExpression(next:ShotDirection|undefined,previous:ShotDirection|undefined):ShotDirection|undefined {
+  if(!next&&!previous?.facialExpression)return undefined;
+  const {facialExpression,...direction}=next??{};
+  return {...direction,...(previous?.facialExpression!==undefined?{facialExpression:previous.facialExpression}:{})};
+}
 export type MontageShot = { id: string; duration: number; direction?: ShotDirection };
 export type ScenePlan = { id: string; shots: MontageShot[] };
 export type DirectionIssue = {
@@ -57,6 +66,7 @@ export type DirectionIssue = {
 export function readableShotDirection(d?:ShotDirection):string {
   if(!d)return '';
   return [
+    d.facialExpression!==undefined?`Мимика: ${FACIAL_EXPRESSION_LABELS[d.facialExpression]}`:'',
     d.framingStart||d.framingEnd?`Крупность: ${d.framingStart?FRAMING_NAMES[d.framingStart]:'не задана'} → ${d.framingEnd?FRAMING_NAMES[d.framingEnd]:'не задана'}`:'',
     d.startFrame?`Начальный ключевой кадр: ${d.startFrame}`:'',d.endFrame?`Конечный ключевой кадр: ${d.endFrame}`:'',
     d.angle?`Ракурс: ${d.angle.type}${d.angle.description?' · '+d.angle.description:''}`:'',d.composition?`Композиция: ${d.composition}`:'',
@@ -211,7 +221,9 @@ export function applyMontageOperations<S extends ScenePlan>(scene: S, values: re
       if (op.before.length !== op.shotIds.length || new Set(op.before.map(s => s.shotId)).size !== op.before.length ||
         op.before.some(s => !op.shotIds.includes(s.shotId) || shotContentBasis(requireShot(s.shotId)) !== s.basis))
         throw Error('Содержимое объединяемых планов уже изменилось.');
-      const candidate = structuredClone(content(op.after));
+      const candidate = structuredClone(content(op.after)) as Shot;
+      const direction=preserveShotFacialExpression(candidate.direction,requireShot(op.keepShotId).direction);
+      if(direction)candidate.direction=direction;else delete candidate.direction;
       // Without an application validator, a generic caller must supply a complete replacement.
       if (!options.validateShot && Object.keys(content(requireShot(op.keepShotId)) as object).some(key =>
         (candidate as Record<string, unknown>)[key] === undefined)) throw Error('Для объединения нужен полный новый план, а не отдельные поля.');

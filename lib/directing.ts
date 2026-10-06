@@ -20,6 +20,8 @@ import {compactSpecialistContext,taskModel,type DirectorExecution} from './direc
 import {PREPARED_PROMPT_LIMIT,PROMPT_EDITOR_RESPONSE_LIMIT} from './prompt-limits';
 import {compactPromptText,uniquePromptFacts} from './prompt-text';
 import {boundCharacterId} from './character-bindings';
+import {facialExpressionSchema,effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
+import {creativeFoundationBrief} from './creative-foundation';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -36,7 +38,7 @@ export const creativeBriefSchema=z.object({
   genre:z.string().max(200),effect:z.string().max(1000),audience:z.string().max(300),
   director:z.string().max(100),techniques:z.string().max(3000),locked:z.string().max(5000),
   factual:z.boolean(),targetSeconds:z.number().min(10).max(3600),
-  strengths:creativeStrengthsSchema.optional(),promptNotes:z.string().max(6000).optional(),
+  strengths:creativeStrengthsSchema.optional(),promptNotes:z.string().max(6000).optional(),facialExpression:facialExpressionSchema.optional(),
 });
 export const DEFAULT_BRIEF={genre:'Приключение',effect:'Увлечь и вызвать сопереживание',audience:'Широкая аудитория',director:'Без особого стиля',techniques:DIRECTOR_PRESETS['Без особого стиля'],locked:'',factual:false,targetSeconds:120};
 const text=z.string().max(6000);
@@ -70,7 +72,7 @@ export const stable=(value:unknown):string=>Array.isArray(value)?'['+value.map(s
 export function signature(value:unknown){let a=2166136261,b=5381;for(const c of stable(value)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}return (a>>>0).toString(16)+(b>>>0).toString(16);}
 export function ensureDirecting(p:Project){return p.directing??={brief:{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)},scenes:[],runs:[],issues:[],patches:[]};}
 export function sceneOutline(s:Scene){const {shots,...rest}=s;return rest;}
-export function scenesBasis(p:Project){return signature({scenes:p.directing?.scenes.map(sceneOutline)??[],script:foundation(p).filter(i=>i.stage===0),brief:p.directing?.brief});}
+export function scenesBasis(p:Project){return signature({scenes:p.directing?.scenes.map(sceneOutline)??[],script:foundation(p).filter(i=>i.stage===0),brief:creativeFoundationBrief(p.directing?.brief)});}
 export function precedingChanges(s:Scene,shot:DirectingShot){return s.shots.slice(0,Math.max(0,s.shots.findIndex(v=>v.id===shot.id))).filter(v=>v.continuityChanges.trim()).map(v=>({id:v.id,changes:v.continuityChanges}));}
 function relevantContinuity(s:Scene,shot:DirectingShot){return s.continuity.filter(c=>shot.characterIds?.includes(c.characterId??'')||shot.cast.some(name=>name===c.characterId||normalizedName(name)===normalizedName(c.character)));}
 export function relevantPrecedingChanges(s:Scene,shot:DirectingShot){
@@ -85,15 +87,18 @@ export function shotApproval(s:Scene,shot:DirectingShot){
   return signature({scene:sceneOutline(s),previousChanges:precedingChanges(s,shot),shot:data});
 }
 export function shotFoundationBasis(p:Project,s:Scene,shot:DirectingShot){
-  const {targetSeconds,...brief}=p.directing?.brief??{};
+  const {targetSeconds,...brief}=creativeFoundationBrief(p.directing?.brief)??{};
   const material=(i:typeof p.items[number])=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,text:v?.character?undefined:v?.text,character:v?.character?{appearance:v.character.appearance,description:v.character.description,instructions:v.character.instructions,...(v.character.locked?{locked:v.character.locked}:{}),...(v.character.actorProfile?{actorProfile:v.character.actorProfile}:{})}:undefined,assetId:v?.assetId,...(v?.location?{location:v.location}:{})};};
   return signature({version:2,format:p.format,brief,heroes:relevantHeroItems(p,shot).map(material),style:p.items.filter(i=>i.stage===2&&!i.removedAt&&!i.planArchive).map(material),locations:relevantLocationItems(p,s,shot).map(material),...(s.locationState?{locationState:s.locationState}:{})});
 }
-export function shotApproved(s:Scene,shot:DirectingShot,p?:Project){return !!shot.approved&&shot.approved===shotApproval(s,shot)&&(!p||shot.approvedFoundation===(shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorBasis(p)));}
-export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return signature([shotApproval(s,shot),shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorBasis(p)]);}
+export function shotApproved(s:Scene,shot:DirectingShot,p?:Project){return !!shot.approved&&shot.approved===shotApproval(s,shot)&&(!p||shot.approvedFoundation===(shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorApprovalBasis(p)));}
+export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return signature([shotApproval(s,shot),shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorApprovalBasis(p)]);}
 export function foundation(p:Project){return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId};});}
 export function directorBasis(p:Project){return signature({brief:p.directing?.brief,foundation:foundation(p)});}
-export function editorBasis(p:Project){return signature([directorBasis(p),p.directing?.scenes.map(s=>[sceneOutline(s),s.shots.map(shot=>shotApproval(s,shot))])]);}
+// Running work still uses directorBasis: changed generation preferences reject
+// late answers. Existing approvals retain their independently reviewed content.
+export function directorApprovalBasis(p:Project){return signature({brief:creativeFoundationBrief(p.directing?.brief),foundation:foundation(p)});}
+export function editorBasis(p:Project){return signature([directorApprovalBasis(p),p.directing?.scenes.map(s=>[sceneOutline(s),s.shots.map(shot=>shotApproval(s,shot))])]);}
 // Hash the persisted shape: JSON storage removes optional undefined fields.
 // Keep the general signature unchanged so existing material approvals remain valid.
 export function characterRunInputBasis(input:NonNullable<DirectorRun['characterInput']>){return signature(JSON.parse(JSON.stringify(input)));}
@@ -156,8 +161,12 @@ export function newDirectorRun(p:Project,model:string,mode:DirectorRun['mode'],s
 export function taskReady(run:DirectorRun,t:DirectorTask){return !run.stopped&&!t.jobId&&!t.result&&!t.error&&t.requires.every(id=>!!run.tasks.find(x=>x.id===id)?.applied);}
 function context(p:Project,run:DirectorRun,t:DirectorTask){
   const d=ensureDirecting(p),index=d.scenes.findIndex(s=>s.id===t.sceneId);
+  const filmExpression=effectiveFacialExpression(d.brief.facialExpression);
+  const expressionShots=(t.sceneId?d.scenes.filter(s=>s.id===t.sceneId):d.scenes).flatMap(s=>s.shots).filter(s=>!t.shotIds&&!t.shotId||t.shotIds?.includes(s.id)||s.id===t.shotId);
+  const expressionModes=expressionShots.map(s=>({shotId:s.id,mode:effectiveFacialExpression(d.brief.facialExpression,s.direction?.facialExpression)}));
+  const facialActing={filmMode:filmExpression,filmInstruction:facialExpressionPrompt(filmExpression),instructions:Object.fromEntries([...new Set(expressionModes.map(s=>s.mode))].filter(mode=>mode!==filmExpression).map(mode=>[mode,facialExpressionPrompt(mode)])),shots:expressionModes};
   const script=p.items.find(i=>i.stage===0),currentScenario=t.role==='critic'?script&&chosen(script)?.text:script?.variants.find(v=>v.id===script.approvedId)?.text;
-  return compactSpecialistContext(p,t,{film:p.title,brief:effectiveCreativeBrief(d.brief,d.scenes[index]?.creativeOverrides),runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
+  return compactSpecialistContext(p,t,{film:p.title,brief:effectiveCreativeBrief(d.brief,d.scenes[index]?.creativeOverrides),facialActing,runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
     ...(['editor','scene-expressive-reviewer'].includes(t.role)?{sceneReviews:currentSceneReviews(p),montageContext:d.scenes.filter(s=>!t.sceneId||s.id===t.sceneId).map(s=>({sceneId:s.id,basis:scenePlanBasis(s),shots:s.shots.map(v=>({id:v.id,title:v.title,duration:v.duration}))}))}:{}),
     ...(t.sceneId?{previous:d.scenes[index-1],scene:d.scenes[index],sceneWorld:d.scenes[index]?sceneLocationContext(p,d.scenes[index]):undefined,next:d.scenes[index+1]}:{scenes:d.scenes}),shotId:t.shotId,...(t.shotIds?{requestedShotIds:t.shotIds}:{}),...(run.selection?{requestedSceneIds:run.sceneIds}:{} )});
 }
@@ -181,11 +190,12 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
   schemas.story+=' Если переданы requestedShotIds, сохрани их порядок, duration, состав героев, вид речи и утверждённые события. Новые планы, объединения и удаления только отдельным предложением редактора. Подробно развивай видимое действие в существующих планах, не меняя монтажный набор.';
   schemas.camera+=' Все screenDirection только из перечисления: left-to-right, right-to-left, toward-camera, away-from-camera, static, custom. Свободное описание — в start/end, не в enum. Необязательное поле без значения пропусти: null недопустим. revealAt только число, если раскрытие есть. Опиши каждый запрошенный ID кратко, без повторения общей основы. Не более 1200 слов на три плана.';
   for(const role of SCENE_SPECIALIST_ROLES)schemas[role]+=' Верни ровно requestedShotIds, по одному объекту на ID. contextOnlyNeighbours, previous/next и sceneBoundaryNeighbours — контекст, никогда не включай их в shots.';
+  const facialGuide=' Мимика задана режиссёром в facialActing: для каждого плана используй его разрешённую интенсивность, а для новых планов — filmInstruction. Свяжи выражение лица с характером, жанром и происходящим действием. Не меняй и не возвращай direction.facialExpression: это настройка пользователя, а не решение агента. Закрытый рот не означает неподвижное лицо: допустимы мимика глаз и бровей, улыбка с закрытым ртом; речевая артикуляция только у указанного говорящего. Не меняй узнаваемые черты лица.\n';
   const reviewGuide=' Дополнительно разрешены patches section="direction": after — полный JSON структурированной постановки (или "null" для удаления). Также верни необязательный массив montageOperations. Форматы: {"type":"duration","sceneId":"ID","shotId":"ID","after":4,"reason":"почему","issueId":"ID замечания"}; {"type":"remove","sceneId":"ID","shotId":"ID","reason":"почему"}; {"type":"reorder","sceneId":"ID","after":["ID в новом порядке"],"reason":"почему"}; {"type":"merge","sceneId":"ID","shotIds":["соседние ID в текущем порядке"],"keepShotId":"один из них","after":{полный новый план со всеми обязательными полями, прежним keepShotId и числовым duration, при наличии direction},"reason":"почему"}. before и basis программа зафиксирует по реально проверенной сцене. Объединять можно только соседние планы, сохраняй события, полные реплики и необходимые реакции. Не предлагай несовместимые операции для одного плана; перестановку и изменение состава одной сцены оформляй как отдельные альтернативы, требующие выбора. Согласуй duration с actionBeats, timing и звуковыми отметками; для обычной текстовой правки нельзя исправлять числовое время только в cinematography. Длительность, объединение, исключение и перестановка — предложения, никогда автоматическая правка. Готовые предложения sceneReviews учти и уточни, не повторяй один и тот же патч или монтажную операцию дважды.';
   schemas.editor+=reviewGuide;
   schemas['scene-expressive-reviewer']='Ты отдельный рецензент выразительности только текущей сцены. Проверь каждый план на банальность и однообразие: точка зрения героя, видимый эмоциональный поворот, подтекст, визуальное раскрытие, работа с деталью, крупности, пауза, мотивированная камера и стык. Соотнеси с выбранными жанром, приёмами режиссёра и локальными настройками. Не требуй крупный план, движение камеры или драму формально в каждой сцене: статичный кадр может быть выразительным. Для каждого недостатка объясни эффект на зрителя и предложи конкретное решение с готовыми patches, как редактор фильма. Не меняй костюм, сюжет и постоянные признаки без задания. Верни {"issues":[{"id":"issue-1","sceneId":"текущая сцена","shotId":"существующий ID","severity":"note|conflict","message":"конкретная проблема","solution":"как исправить"}],"patches":[{"issueId":"issue-1","shotId":"ID","section":"story|cinematography|productionDesign|dialogue|stateIn|stateOut|continuityChanges|direction","after":"полное новое значение","reason":"почему"}],"montageOperations":[]}. Творческое улучшение — note; обязательная неисправность — conflict. Пользователь выбирает предложения; сам ничего не утверждай.'+reviewGuide;
   schemas.compress+=' Если direction задан, начальное/конечное изображения и крупности, действия по времени, поворот внимания, позиции, актёрское поведение и переход имеют приоритет над общими эпитетами. Не описывай конечное действие как уже произошедшее в imagePrompt. Для videoPrompt сохрани движение и конечное состояние.';
-  return base+timing+renderCreativeInstructions(p.directing!.brief,p.directing!.scenes.find(s=>s.id===t.sceneId)?.creativeOverrides,t.sceneId?'scene':'scenario')+'\n'+(p.directing!.brief.promptNotes?`Дополнительное задание режиссёра: ${JSON.stringify(p.directing!.brief.promptNotes)}\n`:'')+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
+  return base+timing+facialGuide+renderCreativeInstructions(p.directing!.brief,p.directing!.scenes.find(s=>s.id===t.sceneId)?.creativeOverrides,t.sceneId?'scene':'scenario')+'\n'+(p.directing!.brief.promptNotes?`Дополнительное задание режиссёра: ${JSON.stringify(p.directing!.brief.promptNotes)}\n`:'')+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
 }
 export function parseDirectorJSON(value:string){return JSON.parse(value.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));}
 function validateDialogue(s:DirectingShot){if(s.dialogue.speechType==='none'&&s.dialogue.text.trim())throw Error('У плана без речи заполнена реплика.');if(s.dialogue.speechType==='character'&&(!s.dialogue.speaker||!s.cast.includes(s.dialogue.speaker)))throw Error('Говорящий герой должен присутствовать в составе плана.');}
@@ -237,7 +247,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
       if(d.shotPlanning)for(const value of data.shots){const old=scene.shots.find(s=>s.id===value.id);if(!old||old.duration!==value.duration||JSON.stringify(old.cast)!==JSON.stringify(value.cast)||old.dialogue.speechType!==value.dialogue.speechType)throw Error('Режиссёр не может менять утверждённый монтажный набор, длительность, участников и вид речи. Предложите изменение отдельно.');}
       if(!requested&&d.scenes.filter(s=>s.id!==scene.id).reduce((n,s)=>n+s.shots.length,0)+data.shots.length>120)throw Error('В фильме максимум 120 планов.');
       const ids=new Map(data.shots.map(s=>[s.id,scene.shots.find(old=>old.id===s.id)?.id??id()]));
-      const shots=data.shots.map(s=>{validateDialogue(s);const next={...s,id:ids.get(s.id)!};if(next.direction?.transition?.toShotId)next.direction={...next.direction,transition:{...next.direction.transition,toShotId:ids.get(next.direction.transition.toShotId)??next.direction.transition.toShotId}};return next;});
+      const shots=data.shots.map(s=>{validateDialogue(s);const next={...s,id:ids.get(s.id)!};const expression=scene.shots.find(old=>old.id===s.id)?.direction?.facialExpression;if(next.direction)delete next.direction.facialExpression;if(expression!==undefined)next.direction={...next.direction,facialExpression:expression};if(next.direction?.transition?.toShotId)next.direction={...next.direction,transition:{...next.direction.transition,toShotId:ids.get(next.direction.transition.toShotId)??next.direction.transition.toShotId}};return next;});
       const merged=requested?scene.shots.map(shot=>shots.find(value=>value.id===shot.id)??shot):shots;
       const conflict=validateScenePlan({...scene,shots:merged}).find(i=>i.severity==='conflict'&&(!requested||!i.shotId||requested.includes(i.shotId)));if(conflict)throw Error(conflict.message);scene.shots=merged;
     }else{

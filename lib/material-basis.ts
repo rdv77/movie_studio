@@ -1,6 +1,7 @@
 import type { Project,Item,Variant } from './domain';
 import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import type { VersionSource } from './creative-versions';
+import {creativeFoundationBrief} from './creative-foundation';
 // Semantic dependencies are used only for newly created production materials.
 // Existing snapshots keep their original approval behaviour until reviewed.
 function stable(v:any):string{return Array.isArray(v)?'['+v.map(stable).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}':JSON.stringify(v)??'null';}
@@ -71,7 +72,7 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
   const priorChanges=shot.previousChanges??(scene&&sceneShot?scene.shots.slice(0,scene.shots.indexOf(sceneShot)).filter(s=>s.continuityChanges.trim()&&(
     !s.characterIds?.length||s.characterIds.some(id=>castIds.includes(id))||s.cast.some(name=>castItems.some(i=>name===i.id||normalize(name)===normalize(approved(i)?.character?.name??i.character?.name??i.title)))
   )).map(s=>({id:s.id,changes:s.continuityChanges})):[]);
-  const {targetSeconds,...brief}=p.directing?.brief??{};
+  const {targetSeconds,...brief}=creativeFoundationBrief(p.directing?.brief)??{};
   const timeline=shotTimeline(p,shots),at=timeline.findIndex(s=>s.id?shot.id===s.id:shot.title===s.title);
   const previous=timeline[at-1],next=timeline[at+1];
   const boundary=(s:any,side:'in'|'out')=>s?{id:s.id??s.title,sceneId:s.sceneId,state:side==='in'?s.stateIn:s.stateOut,

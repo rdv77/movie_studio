@@ -15,6 +15,7 @@ import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
 import {compactPromptText,preparedPromptBody,frameStyleText} from './prompt-text';
 import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import {keyframeRoleInstruction} from './keyframes';
+import {effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -198,6 +199,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const keyframe = input.keyframe ?? 'start';
   const stillPlan = input.kind === 'image' && !!plan;
   const videoPlan = input.kind === 'video' && !!plan;
+  const visibleFaces=!!plan&&(heroes.length>0||!!plan.cast?.length||!!plan.characterIds?.length||plan.cast===undefined&&plan.characterIds===undefined);
   // Video adapters require a first frame. With an explicit shot entrance it is
   // the current-state snapshot; replaying an entire scene history can undo it.
   const currentVideoState = videoPlan && !!plan?.stateIn?.trim();
@@ -304,7 +306,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   add('location-changes', 'Разрешённые изменения локации', locationState?.allowedChanges, true);
   optional('location-state', 'Свет, время, погода и художественное решение сцены', [locationState?.time, locationState?.light, locationState?.weather, locationState?.artDirection].filter(Boolean).join('\n\n'), 80);
   add('mouth', 'Правило речи и рта', input.kind === 'video' ? speechDirection(speech)
-    : 'В этом неподвижном ключевом кадре рты всех персонажей закрыты; эмоции передаются глазами, взглядом и позой. Не изображай текст речи.', true);
+    : 'В этом неподвижном ключевом кадре рты всех персонажей закрыты; допустимы выразительные глаза, взгляд, брови, улыбка с закрытым ртом и поза. Закрытый рот не означает неподвижное лицо. Не изображай текст речи.', true);
   if (input.kind === 'video' && speech.speechType === 'character') add('spoken-text', `Текст для артикуляции ${speech.speaker}`, typeof plan?.dialogue === 'object' ? plan.dialogue.text : plan?.dialogue, true);
   if (speech.speechType === 'character' && (plan?.cast !== undefined || plan?.characterIds !== undefined) && !(plan?.cast ?? heroes.map(h => h.profile.name)).some(name => name === speech.speaker || normalized(name) === normalized(speech.speaker)))
     throw new PromptCompilationError('speaker', 'Говорящий герой не входит в состав текущего плана. Исправьте участника или выберите закадровый голос.');
@@ -327,9 +329,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       exclude('transition', 'Монтажная склейка находится за пределами генерируемого клипа', direction.transition?.description);
       optional('sound', 'Звуки без собственной речи и пения', [direction.sound?.ambience, ...(direction.sound?.effects ?? []).map(s => `${s.at} сек: ${s.description}`), direction.sound?.silence ? 'Тишина' : undefined].filter(Boolean).join('\n\n'), 55);
     }
-    optional('performance', stillPlan ? 'Эмоция в изображаемый момент' : 'Видимые актёрские действия текущего плана', direction.performance?.map(a => stillPlan && keyframe !== 'middle'
-      ? `${a.character}: ${keyframe === 'end' ? a.emotionEnd : a.emotionStart}`
-      : `${a.character}: ${a.visibleAction}. ${a.emotionStart} → ${a.emotionEnd}`).join('\n\n'), 90);
+    for(const [n,a] of (direction.performance??[]).entries())add(`performance.${n}`,stillPlan?'Эмоция в изображаемый момент':'Видимые актёрские действия текущего плана',stillPlan&&keyframe!=='middle'
+      ? `${a.character}: ${keyframe==='end'?a.emotionEnd:a.emotionStart}`
+      : `${a.character}: ${a.visibleAction}. ${a.emotionStart} → ${a.emotionEnd}`,true,90);
   } else if (!(stillPlan && keyframe === 'end' && plan?.stateOut)) add('camera-legacy', input.kind === 'image' ? 'Ракурс ключевого кадра' : 'Камера', plan?.camera ?? plan?.cinematography, true);
   optional('design', 'Художественное решение текущего плана', plan?.productionDesign, 90);
   for (const style of p.items.filter(i => i.stage === 2 && active(i) && approved(i))) {
@@ -375,6 +377,10 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   }
   else if (plan) add('task', 'Задача и правки режиссёра', input.prompt, true);
   else add('task', 'Задача', input.prompt, true);
+  // The current film/approved shot setting is compiled for every new request,
+  // including legacy shots with an older prepared prompt. Never read unapproved
+  // shot edits or rewrite an already queued job to obtain this preference.
+  if(visibleFaces)add('facial-expression','Актуальная выразительность мимики',facialExpressionPrompt(effectiveFacialExpression(p.directing?.brief.facialExpression,direction?.facialExpression)),true);
 
   const knownOwners = new Map<string, Item>();
   for (const card of p.items) for (const assetId of [...(card.character?.refs ?? []), ...card.variants.flatMap(v => v.assetId ? [v.assetId] : []),

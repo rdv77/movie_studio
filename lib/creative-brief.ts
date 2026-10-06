@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import type {FacialExpressionMode} from './facial-expression';
 
 export const CREATIVE_STRENGTH_KEYS=['style','genre','surprise','conflict','drama','pace','plotFreedom'] as const;
 export type CreativeStrengthKey=typeof CREATIVE_STRENGTH_KEYS[number];
@@ -16,7 +17,7 @@ export const creativeOverridesSchema=z.object({
 export type CreativeOverrides=z.infer<typeof creativeOverridesSchema>;
 export type CreativeBrief={
   genre:string;effect:string;audience:string;director:string;techniques:string;locked:string;
-  factual:boolean;targetSeconds:number;strengths?:CreativeStrengths;
+  factual:boolean;targetSeconds:number;strengths?:CreativeStrengths;facialExpression?:FacialExpressionMode;
 };
 export const GENRE_OPTIONS=['Приключение','Сказка','Комедия','Драма','Триллер','Хоррор','Фэнтези','Научная фантастика','Боевик','Блокбастер','Детектив','Мелодрама','Сатира','Историческое кино','Неигровое кино','Музыкальный фильм'] as const;
 export const CREATIVE_STRENGTH_LABELS:Record<CreativeStrengthKey,string>={

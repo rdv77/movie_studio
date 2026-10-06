@@ -20,6 +20,17 @@ A(UI.directionEditorIssues({...direction,timing:{revealAt:-1}},5).some(i=>i.mess
 let calls=0;const onChange=()=>{calls++;throw Error('Rendering never edits or pays');};
 const legacyHtml=renderToString(React.createElement(UI.ShotDirectionEditor,{duration:5,onChange}));A(legacyHtml.includes('Начальный ключевой кадр'));A(legacyHtml.includes('Конечный ключевой кадр'));A(legacyHtml.includes('Не задано'));A(!legacyHtml.includes('Убрать структурированные поля'));A(!legacyHtml.includes('Проверьте постановку'));
 const fullHtml=renderToString(React.createElement(UI.ShotDirectionEditor,{direction,duration:5,onChange,disabled:true}));A(fullHtml.includes('<fieldset disabled=""'));for(const text of ['Ракурс, композиция и внимание зрителя','Движение камеры','Действия и время','Паузы и момент раскрытия','Положения героев и предметов','Склейка со следующим планом','Атмосфера, звуковые события и музыка','Актёрские задачи','Добавить действие','Удалить действие','Добавить звуковое событие','Удалить звук'])A(fullHtml.includes(text),text);A(fullHtml.includes('value="0"'));A(fullHtml.includes('Убрать структурированные поля'));
+const inheritedHtml=renderToString(React.createElement(UI.ShotDirectionEditor,{duration:5,inheritedFacialExpression:'cartoon',onChange}));
+A(inheritedHtml.includes('Мимика этого плана'));A(inheritedHtml.includes('Как в фильме · Мультяшно'));
+A(inheritedHtml.includes('value="" selected=""'));
+for(const text of ['По жанру и характеру','Сдержанно','Естественно','Мультяшно','Гипертрофированно'])A(inheritedHtml.includes(text),text);
+const explicitAuto=UI.patchShotDirection(direction,{facialExpression:'auto'});
+const autoHtml=renderToString(React.createElement(UI.ShotDirectionEditor,{direction:explicitAuto,duration:5,inheritedFacialExpression:'cartoon',onChange}));
+A(autoHtml.includes('value="auto" selected=""'),'Explicit auto is distinct from inheriting cartoon');
+A.equal(UI.patchShotDirection(explicitAuto,{facialExpression:undefined}).facialExpression,undefined);
+A(!Object.hasOwn(direction,'facialExpression'),'Displaying inheritance does not migrate the saved plan');
+const filmHtml=renderToString(React.createElement(DE.DirectingEditor,{p:D.newProject('Мимика'),stage:0,busy:false,submit:onChange,open:onChange}));
+A(filmHtml.includes('Мимика героев · для фильма'));A(filmHtml.includes('value="auto" selected=""'));
 const summaryHtml=renderToString(React.createElement(UI.ShotDirectionSummary,{direction,duration:5}));for(const text of ['Общий','Крупный','Начальный кадр','Конечный кадр','Камыш отклоняется','пауза в начале 0 сек','Мальчик','Склейка по соответствию','Шелест камыша','Тихий колокольчик','Флейта','Недоверие','Принятие'])A(summaryHtml.includes(text),text);
 const invalidHtml=renderToString(React.createElement(UI.ShotDirectionEditor,{direction:invalid,duration:5,onChange}));A(invalidHtml.includes('role="alert"'));A(invalidHtml.includes('Действие выходит за длительность плана'));
 const legacySummary=renderToString(React.createElement(UI.ShotDirectionSummary,{}));A(legacySummary.includes('Используются текстовые описания плана'));A.equal(calls,0);A.deepEqual(direction,frozen,'Rendering preserves the stored direction');

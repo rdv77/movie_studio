@@ -4,6 +4,8 @@ import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {FRAMING_NAMES,validateShotDirection,type ShotDirection,type DirectionIssue} from '@/lib/shot-direction';
+import {FacialExpressionControl} from './facial-expression-control';
+import {FACIAL_EXPRESSION_LABELS,type FacialExpressionMode} from '@/lib/facial-expression';
 
 const ANGLE_NAMES={ 'eye-level':'На уровне глаз',low:'Снизу',high:'Сверху',overhead:'Вертикально сверху',dutch:'Наклонённый горизонт','point-of-view':'Взгляд героя',custom:'Свой ракурс'} as const;
 const MOVEMENT_NAMES={static:'Статичная камера',pan:'Панорама по горизонтали',tilt:'Наклон камеры', 'push-in':'Наезд','pull-out':'Отъезд',dolly:'Перемещение камеры',tracking:'Сопровождение',orbit:'Обход вокруг',handheld:'Ручная камера',crane:'Подъём или спуск',zoom:'Изменение фокусного расстояния',custom:'Свое движение'} as const;
@@ -11,7 +13,7 @@ const TRANSITION_NAMES={cut:'Прямая склейка','match-cut':'Скле�
 const SCREEN_NAMES={'left-to-right':'Слева направо','right-to-left':'Справа налево','toward-camera':'К камере','away-from-camera':'От камеры',static:'Без перемещения',custom:'Своё направление'} as const;
 const Field=({label,children}:{label:string;children:ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
 const Group=({label,children}:{label:string;children:ReactNode})=><details className="border rounded p-3 space-y-3"><summary className="cursor-pointer font-medium">{label}</summary><div className="space-y-3 pt-2">{children}</div></details>;
-type EditorProps={direction?:ShotDirection;duration:number;onChange:(direction:ShotDirection|undefined)=>void;disabled?:boolean};
+type EditorProps={direction?:ShotDirection;duration:number;inheritedFacialExpression?:FacialExpressionMode;onChange:(direction:ShotDirection|undefined)=>void;disabled?:boolean};
 
 /** No hydration migration or implicit camera choice; only an explicit edit emits a change. */
 export function patchShotDirection(direction:ShotDirection|undefined,patch:Partial<ShotDirection>):ShotDirection|undefined {
@@ -39,7 +41,7 @@ export function directionEditorIssues(direction:ShotDirection|undefined,duration
   });
 }
 
-export function ShotDirectionEditor({direction,duration,onChange,disabled=false}:EditorProps){
+export function ShotDirectionEditor({direction,duration,inheritedFacialExpression,onChange,disabled=false}:EditorProps){
   const uid=useId(),d=direction??{};
   const change=<K extends keyof ShotDirection>(key:K,value:ShotDirection[K])=>onChange(patchShotDirection(direction,{[key]:value} as Partial<ShotDirection>));
   const text=<K extends keyof ShotDirection>(key:K,value:string)=>change(key,(value===''?undefined:value) as ShotDirection[K]);
@@ -49,6 +51,8 @@ export function ShotDirectionEditor({direction,duration,onChange,disabled=false}
   return <section className="space-y-4" aria-label="Структурированная постановка плана"><h4>Постановка плана · {Number.isFinite(duration)?duration:'—'} сек</h4>
     <p className="text-sm text-muted-foreground">Можно описать только ключевые кадры. Дополнительные поля раскройте при необходимости. Всё сохраняется вместе с четырьмя частями плана и утверждается одной кнопкой.</p>
     <fieldset disabled={disabled} className="space-y-4">
+      <FacialExpressionControl shot value={d.facialExpression} inherited={inheritedFacialExpression} disabled={disabled} onChange={value=>change('facialExpression',value)}/>
+      <p className="text-sm text-muted-foreground">После изменения сохраните и утвердите план, затем примените подробный сценарий. Новые кадры и видео получат эту настройку; уже созданные файлы не меняются.</p>
       <div className="grid gap-3 md:grid-cols-2">
         {select('Начальная крупность',d.framingStart,FRAMING_NAMES,value=>change('framingStart',value))}
         {select('Конечная крупность',d.framingEnd,FRAMING_NAMES,value=>change('framingEnd',value))}
@@ -102,6 +106,7 @@ export function ShotDirectionSummary({direction,duration}:{direction?:ShotDirect
   if(!direction)return <p className="text-sm text-muted-foreground">Структурированная постановка не задана. Используются текстовые описания плана.</p>;
   const d=direction,conflicts=duration===undefined?[]:directionEditorIssues(d,duration).filter(i=>i.severity==='conflict');
   return <div className="space-y-2 text-sm" aria-label="Постановка и ключевые кадры">
+    {d.facialExpression&&<p><b>Мимика:</b> {FACIAL_EXPRESSION_LABELS[d.facialExpression]}</p>}
     {(d.framingStart||d.framingEnd)&&<p><b>Крупность:</b> {d.framingStart?FRAMING_NAMES[d.framingStart]:'не задана'} → {d.framingEnd?FRAMING_NAMES[d.framingEnd]:'не задана'}</p>}
     {d.startFrame&&<p className="whitespace-pre-wrap"><b>Начальный кадр:</b> {d.startFrame}</p>}{d.endFrame&&<p className="whitespace-pre-wrap"><b>Конечный кадр:</b> {d.endFrame}</p>}
     {d.angle&&<p><b>Ракурс:</b> {ANGLE_NAMES[d.angle.type]}{d.angle.description&&' · '+d.angle.description}</p>}{d.composition&&<p><b>Композиция:</b> {d.composition}</p>}

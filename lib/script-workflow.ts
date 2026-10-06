@@ -4,6 +4,7 @@ import type {VersionInfo} from './creative-versions';
 import type {CreativeBrief} from './creative-brief';
 import {renderCreativeInstructions,creativeStrengthsSchema} from './creative-brief';
 import {CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE,type CinemaMethodId} from './cinema-methods';
+import {facialExpressionSchema} from './facial-expression';
 
 export {CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE} from './cinema-methods';
 export const SCRIPT_ROLES=['script-adaptation','script-critic','script-dramaturg','script-producer','script-control'] as const;
@@ -16,7 +17,7 @@ export const SCRIPT_ROLE_NAMES:Record<ScriptRole,string>={
 export const scriptRoleSchema=z.enum(SCRIPT_ROLES);
 const briefSchema=z.object({genre:z.string().max(200),effect:z.string().max(1000),audience:z.string().max(300),
   director:z.string().max(100),techniques:z.string().max(3000),locked:z.string().max(5000),
-  factual:z.boolean(),targetSeconds:z.number().min(10).max(3600),strengths:creativeStrengthsSchema.optional(),promptNotes:z.string().max(6000).optional()}).strict();
+  factual:z.boolean(),targetSeconds:z.number().min(10).max(3600),strengths:creativeStrengthsSchema.optional(),promptNotes:z.string().max(6000).optional(),facialExpression:facialExpressionSchema.optional()}).strict();
 const versionInfoSchema=z.object({parentVariantId:z.string().optional(),created:z.string(),reason:z.string().optional(),
   sources:z.array(z.object({role:z.enum(['script','hero','style','location','frame','audio','reference']),itemId:z.string().optional(),variantId:z.string().optional(),assetId:z.string().optional(),followApproval:z.boolean().optional()})),settings:z.unknown().optional()});
 const override=z.string().max(6000).optional();
