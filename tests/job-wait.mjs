@@ -34,4 +34,8 @@ assert.equal(state.jobs[0].status,'unknown');assert.equal(state.jobs[0].actual,p
 await permit();assert.equal(state.jobs.length,1);assert.equal(generated,0);
 const unacknowledged={...state.jobs[0],id:D.id(),newSeriesAllowedAt:undefined};state.jobs.push(unacknowledged);assert(Q.conceptImageAdmissionIssue(state,prior.itemId));state.jobs.pop();
 W.resumeJobWait(state.jobs[0]);assert(!state.jobs[0].newSeriesAllowedAt);assert(Q.conceptImageAdmissionIssue(state,prior.itemId));
-console.log('PASS job waiting: HTTPS-only MiniMax recovery, blocked unsafe URLs, ownership/revision, manual stop, timeout, bounded save failures, preserved billing, safe result-only resume, released in-flight slot and late-response race. No paid generation.');
+state=fixture('failed');Object.assign(state.jobs[0],{model:'fal-wan-2.2-a14b',kind:'video',requestId:D.id(),error:'Old opaque error'});
+let inspected=0;providerPoll=async j=>{inspected++;assert.equal(j.requestId,state.jobs[0].requestId);throw Error('body.prompt: String should have at most 5000 characters');};
+await run('inspect-provider-error');assert.equal(inspected,1);assert.equal(state.jobs[0].status,'failed');assert.equal(state.jobs[0].error,'Old opaque error');assert.match(state.jobs[0].providerDiagnostic,/body.prompt/);assert.equal(generated,0);
+state.jobs[0].model='MiniMax-H3';await assert.rejects(()=>run('inspect-provider-error'),/fal/);assert.equal(inspected,1);
+console.log('PASS job waiting: HTTPS-only MiniMax recovery, blocked unsafe URLs, ownership/revision, manual stop, timeout, bounded save failures, preserved billing, safe result-only resume, released in-flight slot, late-response race and fal diagnostics without generation.');

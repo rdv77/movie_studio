@@ -13,14 +13,14 @@ function requestUrl(model:string, id:string, suffix='') {
   const root = FAL_ENDPOINTS[model].split('/').slice(0,2).join('/');
   return `https://queue.fal.run/${root}/requests/${id}${suffix}`;
 }
-// Accept only this endpoint's result paths. Never forward credentials to a
-// response/status URL supplied by an arbitrary upstream host or redirect.
-function resultUrl(model:string, id:string, supplied:unknown) {
-  const base = requestUrl(model,id);
-  if (supplied === undefined) return base;
-  if (supplied !== base && supplied !== `${base}/response`)
-    throw new ProviderError('fal.ai: неожиданный адрес результата. Повторная генерация не запускается.', true);
-  return supplied;
+// Only exact routes for this installed endpoint and owned receipt can receive
+// credentials. fal also returns the documented full inference /response path.
+function resultUrl(model:string,id:string,supplied:unknown){
+  const base=requestUrl(model,id),full=`https://queue.fal.run/${FAL_ENDPOINTS[model]}/requests/${id}`;
+  return [base,`${base}/response`,full,`${full}/response`].includes(supplied as string)?String(supplied):base;
+}
+function safeStatusError(message:string,key:string){
+  return message.split(key).join('[скрыто]').replace(/https?:\/\/\S+|data:\S+/g,'[адрес]').replace(/[\r\n\t]+/g,' ').slice(0,500);
 }
 export async function generateFal(j:Job,key:string,refs:string[],format:string,endFrame?:string):Promise<Result> {
   validateEndFrameData(j,endFrame);
@@ -64,7 +64,15 @@ export async function pollFal(j:Job,key:string):Promise<Result> {
   if (status.status !== 'COMPLETED') throw new ProviderError('fal.ai: неизвестный статус запроса. Проверьте кабинет; новая генерация не запускается.');
   // The result endpoint also reports validation/moderation failures as HTTP
   // errors. Do not store raw logs, prompts, or response bodies in the project.
-  const d=await json(await call(resultUrl(j.model,id,status.response_url),h));
+  if(typeof status.error==='string'&&status.error.trim())return {error:`fal.ai: ${safeStatusError(status.error,key)}`,actual:null,requestId:id};
+  const responseUrl=resultUrl(j.model,id,status.response_url);
+  let response:Response;
+  try{response=await call(responseUrl,h);}catch(e){
+    const full=`https://queue.fal.run/${FAL_ENDPOINTS[j.model]}/requests/${id}/response`;
+    if(!(e instanceof ProviderError)||e.httpStatus!==404||responseUrl===full)throw e;
+    response=await call(full,h); // Read-only compatibility route; never resubmit.
+  }
+  const d=await json(response);
   if (d.has_nsfw_concepts?.[0]) return {error:'fal.ai: изображение отклонено проверкой содержимого.',actual:null};
   const video=isFalVideo(j.model),img=video?d.video:d.images?.[0];
   let url:URL;

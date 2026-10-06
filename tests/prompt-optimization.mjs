@@ -19,7 +19,7 @@ globalThis.fetch=async(url,init)=>{
 try{
  let j=reset({prompt:'Short prompt.'});assert.equal(await prepareMediaPrompt('owner','film',j,'media-key'),undefined);assert.equal(calls,0);assert.equal(globalThis.keyReads,0);
  for(const model of ['grok-imagine-video-1.5','grok-imagine-video-1.5-1080p']){
-   const before=calls;j=reset({model,prompt:'я'.repeat(4096)});assert.equal(await prepareMediaPrompt('owner','film',j,'media-key'),undefined);assert.equal(calls,before);
+   const before=calls;j=reset({model,prompt:'a'.repeat(4096)});assert.equal(await prepareMediaPrompt('owner','film',j,'media-key'),undefined);assert.equal(calls,before);
    responseMode='whole';j=reset({model,prompt:'я'.repeat(4097),promptSections:undefined,compilation:{budget:{limit:60000,needsOptimization:false},compression:{shortened:false}}});
    const repaired=await prepareMediaPrompt('owner','film',j,'media-key');assert.equal(calls,before+1);assert.equal(repaired.jobs[0].status,'queued');assert(repaired.jobs[0].prompt.length<=4096);assert.equal(repaired.jobs[1].status,'done');
    await prepareMediaPrompt('owner','film',repaired.jobs[0],'media-key');assert.equal(calls,before+1,'Existing queued Grok job is optimized once despite obsolete snapshot');

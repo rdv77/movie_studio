@@ -25,9 +25,9 @@ const profiles: Profile[] = [
   {native:'seedance_2_0',kind:'video',title:'Seedance 2.0',credits:19,seconds:6},
   {native:'seedance_2_0_fast',kind:'video',title:'Seedance 2.0 Fast',credits:15,seconds:6},
   {native:'seedance_2_0_mini',kind:'video',title:'Seedance 2.0 Mini',credits:15,seconds:6},
-  {native:'wan@2.6-flash',kind:'video',title:'Wan 2.6 Flash',credits:3,seconds:6},
+  {native:'wan@2.6-flash',kind:'video',title:'Wan 2.6 Flash',credits:5,seconds:10,note:'5 или 10 сек; оценка для 10 сек'},
   {native:'wan@2.7',kind:'video',title:'Wan 2.7',credits:20,seconds:10},
-  {native:'wan@3.0',kind:'video',title:'Wan 3.0',credits:29,seconds:6,note:'Очередь может занимать 15–55 минут'},
+  {native:'wan@3.0',kind:'video',title:'Wan 3.0',credits:48,seconds:10,note:'5 или 10 сек; оценка для 10 сек; очередь может занимать 15–55 минут'},
 ];
 export const ZEN_MODELS = profiles.map(p=>({
   id:`zencreator:${p.kind}:${p.native}`, name:`ZenCreator · ${p.title}`,provider:'zencreator',kind:p.kind,estimate:null,
@@ -35,6 +35,12 @@ export const ZEN_MODELS = profiles.map(p=>({
     `Ориентир ${p.credits}${p.editCredits!==undefined&&p.editCredits!==p.credits?` / ${p.editCredits} с референсами`:''} кредитов`,p.note].filter(Boolean).join(' · '),
 }));
 export function zenProfile(id: string) { return profiles.find(p=>`zencreator:${p.kind}:${p.native}`===id); }
+/** 6s is advertised in the catalog but was rejected by both Wan backends.
+ * Use their shared 5/10 grid, never round below the director's duration. */
+export function zenVideoSeconds(id:string,seconds:number){
+  const p=zenProfile(id);if(!p||p.kind!=='video'||!Number.isFinite(seconds)||seconds<=0||seconds>p.seconds!)throw Error('ZenCreator: неподдерживаемая длительность плана.');
+  return ['wan@2.6-flash','wan@3.0'].includes(p.native)?seconds<=5?5:10:p.seconds!;
+}
 // Several image backends reject >5000 even when /tools omits maxLength.
 export const ZEN_IMAGE_PROMPT_LIMIT=5000;
 export function isZenCreatorImage(id:string) { return zenProfile(id)?.kind==='image'; }
@@ -49,6 +55,7 @@ export function prepareZenJobs(jobs: Job[], assets: {mime:string;size:number}[] 
     if(!admission&&p.kind==='image'&&j.prompt.length>ZEN_IMAGE_PROMPT_LIMIT)throw new Error('ZenCreator: полный промпт изображения длиннее 5000 символов. Откройте новое окно генерации для подготовки компактного запроса. Запрос не отправлен.');
     if(p.kind==='text'&&j.refs.length)throw new Error('ZenCreator: текстовые модели в студии принимают только текст; уберите референсы.');
     if(p.kind==='video'&&(j.refs.length!==1||!Number.isFinite(j.duration)||j.duration<=0||j.duration>generationSeconds(j.model)))throw new Error(`ZenCreator: выберите один первый кадр и план до ${generationSeconds(j.model)} секунд.`);
+    if(p.kind==='video')j.providerDuration=zenVideoSeconds(j.model,j.duration);
     if(j.refs.length>8||assets.some(a=>!['image/png','image/jpeg','image/webp'].includes(a.mime)||a.size>10*1024*1024)||assets.reduce((s,a)=>s+a.size,0)>20*1024*1024)
       throw new Error('ZenCreator: до 8 референсов PNG/JPEG/WebP, до 10 МБ каждый и до 20 МБ суммарно. Запрос не отправлен.');
     j.zenCreditsEstimate??=zenCredits(j.model,j.refs.length);

@@ -25,7 +25,8 @@ try{
    const before=requests.length;
    await assert.rejects(()=>P.generate({...job,model,prompt:'я'.repeat(4097)},'test',[ref],'16:9'),e=>e.notSent);
    assert.equal(requests.length,before,'Oversized Grok prompt never reaches video API');
-   await P.generate({...job,model,prompt:'я'.repeat(4096)},'test',[ref],'16:9');assert.equal(requests.length,before+1);
+   await assert.rejects(()=>P.generate({...job,model,prompt:'я'.repeat(2049)},'test',[ref],'16:9'),e=>e.notSent);
+   await P.generate({...job,model,prompt:'a'.repeat(4096)},'test',[ref],'16:9');assert.equal(requests.length,before+1);
  }
  assert(M.fitsPrompt('я'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')));
  assert(M.fitsPrompt('😀'.repeat(2500),M.promptCapacity(M.KLING_VIDEO,'video')),'API maxLength counts Unicode characters, not JS UTF-16 units');

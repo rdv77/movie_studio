@@ -9,7 +9,7 @@ try {
   const job={model,kind:'video',prompt:'A slow camera push. Keep the mouth closed.',duration:6,refs:['frame']};
   const endpoint='https://queue.fal.run/'+M.FAL_ENDPOINTS[model];
   const queue='https://queue.fal.run/'+M.FAL_ENDPOINTS[model].split('/').slice(0,2).join('/')+'/requests/'+id;
-  let calls=[],state='IN_QUEUE',resultUrl=queue,mode='ok',missingVideo=false;
+  let calls=[],state='IN_QUEUE',resultUrl=queue,mode='ok',missingVideo=false,statusError;
   globalThis.fetch=async(url,init)=>{
    calls.push({url,method:init.method});
    assert.equal(init.headers.Authorization,'Key '+key);assert.equal(init.redirect,'manual');
@@ -23,8 +23,9 @@ try {
     return Response.json({request_id:mode==='missing'?undefined:id,status_url:queue+'/status'});
    }
    assert.equal(init.method,'GET');
-   if(url===queue+'/status')return Response.json({status:state,response_url:resultUrl});
-   if(url===queue)return Response.json(missingVideo?{}:{video:{url:'https://v3.fal.media/test.mp4'},seed:42});
+   if(url===queue+'/status')return Response.json({status:state,response_url:resultUrl,error:statusError});
+   if(url===queue&&mode==='legacy404')return Response.json({detail:'not found'},{status:404});
+   if(url===queue||url===endpoint+'/requests/'+id+'/response')return Response.json(missingVideo?{}:{video:{url:'https://v3.fal.media/test.mp4'},seed:42});
    throw Error('Unexpected URL '+url);
   };
   const result=await P.generate(job,key,[ref],'9:16');assert(result.pending);assert.equal(result.requestId,id);assert.equal(result.actual,null);
@@ -36,9 +37,12 @@ try {
   const polling={...job,requestId:id};
   for(const status of ['IN_QUEUE','IN_PROGRESS']){state=status;assert((await P.poll(polling,key)).pending);}
   state='COMPLETED';const video=await P.poll(polling,key);assert.equal(video.mime,'video/mp4');assert.equal(video.url,'https://v3.fal.media/test.mp4');assert.equal(video.actual,null);
-  for(const hostile of ['https://evil.test/steal',queue+'?key=exfiltrate',queue.replace('/requests/'+id,'/requests/ffffffff-ffff-ffff-ffff-ffffffffffff')]) {
-   resultUrl=hostile;const n=calls.length;await assert.rejects(()=>P.poll(polling,key),/адрес/);assert.equal(calls.length,n+1);
+  for(const hostile of [null,'https://evil.test/steal',queue+'?key=exfiltrate',queue.replace('/requests/'+id,'/requests/ffffffff-ffff-ffff-ffff-ffffffffffff')]) {
+   resultUrl=hostile;const n=calls.length;assert.equal((await P.poll(polling,key)).mime,'video/mp4');assert.equal(calls.length,n+2);assert.equal(calls.at(-1).url,queue,'Only the canonical owned receipt is read');
   }
+  resultUrl=endpoint+'/requests/'+id+'/response';await P.poll(polling,key);assert.equal(calls.at(-1).url,resultUrl);
+  resultUrl=null;mode='legacy404';await P.poll(polling,key);assert.equal(calls.at(-1).url,endpoint+'/requests/'+id+'/response');mode='ok';
+  statusError='Invalid prompt '+key;const n=calls.length;const rejected=await P.poll(polling,key);assert.match(rejected.error,/Invalid prompt/);assert(!rejected.error.includes(key));assert.equal(calls.length,n+1);statusError=undefined;
   resultUrl=queue;missingVideo=true;await assert.rejects(()=>P.poll(polling,key),/не содержит видео/);missingVideo=false;
   state='UNKNOWN';await assert.rejects(()=>P.poll(polling,key),/статус/);
   assert.equal(calls.filter(c=>c.method==='POST').length,1,'Polling never submits a new generation');

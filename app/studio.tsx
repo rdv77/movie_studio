@@ -346,6 +346,8 @@ function Workspace() {
   const aq = useQuery<Asset[]>({
     queryKey: ['assets', projectId],
     queryFn: () => request('/api/assets?projectId=' + encodeURIComponent(projectId)),
+    // Older snapshots may need a guarded membership read. Do not allocate
+    // that film concurrently with the initial project load after a reload.
     enabled: !!projectId && p?.id === projectId && !pq.isFetching,
   });
   const cq = useQuery<any>({
@@ -514,6 +516,18 @@ function Workspace() {
         },
     });
     register({
+      name:'read_generation_diagnostics',title:'Краткая диагностика генераций',
+      description:'Последние 40 попыток: статусы, ошибки и размеры промптов. Без ключей, фотографий и полного сценария.',
+      inputSchema:{type:'object',properties:{},additionalProperties:false},
+      annotations:{readOnlyHint:true,untrustedContentHint:true},
+      execute:()=>{
+        const film=qc.getQueryData<Project>(['project',projectId]);
+        return film?{id:film.id,revision:film.revision,jobs:film.jobs.slice(-40).map(j=>({id:j.id,model:j.model,status:j.status,purpose:j.purpose,requestId:j.requestId,error:j.error,warning:j.warning,created:j.created,
+          promptCharacters:Array.from(j.prompt).length,promptUtf8Bytes:new TextEncoder().encode(j.prompt).length,
+          optimization:j.promptOptimization?{state:j.promptOptimization.state,auditIds:j.promptOptimization.auditIds??[j.promptOptimization.auditId],triedModels:j.promptOptimization.triedModels}:undefined}))}:{error:'Проект не открыт'};
+      }
+    });
+    register({
       name: 'open_film_stage',
       title: 'Открыть этап фильма',
       description:
@@ -605,7 +619,7 @@ function Workspace() {
     }
   }
   const failures =
-    p?.jobs.filter((j) => ['unknown', 'failed'].includes(j.status)&&!journalArchived(j)) ?? [];
+    p?.jobs.filter((j) => ['unknown', 'failed'].includes(j.status)&&!j.optimizationRecovered&&!journalArchived(j)) ?? [];
   const active =
     p?.jobs.filter((j) =>
       ['queued', 'dispatching', 'pending', 'saving'].includes(j.status),
@@ -3151,7 +3165,7 @@ function Budget({ p, action, perform, replace }: any) {
                   <strong>
                     {[...MODELS, ...SYNC_MODELS,...MUSIC_MODELS].find((m) => m.id === j.model)?.name ?? j.model}
                   </strong>
-                  {j.purpose==='prompt-optimization'&&<small>{j.brief}</small>}{j.promptOptimization&&<small>Подготовка промпта: {j.promptOptimization.state==='done'?'готово':j.promptOptimization.state==='running'?'LLM сокращает текст':'нужна проверка журнала'}</small>}
+                  {j.purpose==='prompt-optimization'&&<small>{j.brief}</small>}{j.promptOptimization&&<small>Подготовка промпта: {j.promptOptimization.state==='done'?'готово':j.promptOptimization.state==='running'?'LLM сокращает текст':j.promptOptimization.state==='retrying'?'переключение на резервную LLM':'нужна проверка журнала'}</small>}
                   {j.purpose==='voice-test'&&<small>Проба голоса · {j.voiceName||j.voiceId}</small>}
                   {(j.purpose==='music'||j.purpose==='music-ideas')&&<small>{j.purpose==='music'?'Музыкальное сопровождение':'Музыкальные направления по сценарию'}</small>}
                   <small>{new Date(j.created).toLocaleString('ru-RU')}</small>
@@ -3161,11 +3175,14 @@ function Budget({ p, action, perform, replace }: any) {
                   {j.requestId && <small>Запрос: {j.requestId}</small>}
                 </TableCell>
                 <TableCell>
-                  {j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
+                  {j.optimizationRecovered?'Предупреждение · помогла резервная LLM':j.waitStoppedAt&&j.status==='unknown'?'Ожидание остановлено':statuses[j.status]}
+                  {j.warning&&<small className="warning-text">{j.warning}</small>}
+                  {j.providerDiagnostic&&<small>Уточнение провайдера: {j.providerDiagnostic}</small>}
                   {['dispatching','pending','saving'].includes(j.status)&&<small>Начало: {new Date(j.waitStartedAt??j.started??j.created).toLocaleTimeString('ru-RU')} · автоостановка через {waitLimitMs(j)/60000} мин ожидания</small>}
                   {j.waitStoppedAt&&<small>Очередь освобождена. Остановка ожидания не отменяет запрос и возможное списание у провайдера.</small>}
-                  {j.status==='unknown'&&j.newSeriesAllowedAt&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
+                  {j.status==='unknown'&&j.newSeriesAllowedAt&&!j.optimizationRecovered&&<small>Новая серия разрешена пользователем. Исход и списание прежнего запроса остаются неизвестными.</small>}
                   {j.error && <small className="warning-text">{j.error}</small>}
+                  {j.optimizationRecovered&&<small>Подготовка продолжена другой моделью. Исход и стоимость этой отдельной попытки: {statuses[j.status]} / {money(j.actual)}.</small>}
                 </TableCell>
                 <TableCell>{money(j.estimate)}{j.zenCreditsEstimate!==undefined&&<small>≈ {j.zenCreditsEstimate} кредитов ZenCreator</small>}</TableCell>
                 <TableCell>
@@ -3178,6 +3195,7 @@ function Budget({ p, action, perform, replace }: any) {
                   <Button size="sm" variant="outline" onClick={() => setJob(j)}>
                     Сверить
                   </Button>
+                  {j.requestId&&j.model.startsWith('fal-')&&['failed','unknown'].includes(j.status)&&<Button size="sm" variant="outline" disabled={!!recovering} onClick={()=>perform(async()=>{setRecovering(j.id);try{replace(await request(`/api/projects/${p.id}/jobs/${j.id}`,'POST',{action:'inspect-provider-error'}));}finally{setRecovering('');}})}>Уточнить ошибку провайдера</Button>}
                   {j.status === 'failed' && j.lipsync && j.requestId && <>
                     <Button size="sm" variant="outline" disabled={!!recovering}
                       aria-label={`Получить результат повторно — ${j.requestId}`}

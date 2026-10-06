@@ -107,7 +107,11 @@ export type Item = {
 export type Job = {
   promptSections?: import('./prompt-compiler').PromptSection[];
   promptTokenCount?: {text:string;count:number;method:'api'|'utf8-upper-bound'};
-  promptOptimization?: {auditId:string;state:'running'|'done'|'failed';original:string;limit:number;unit:'characters'|'tokens'};
+  promptOptimization?: {auditId:string;auditIds?:string[];triedModels?:string[];warnings?:string[];state:'running'|'retrying'|'done'|'failed';original:string;limit:number;unit:'characters'|'tokens'};
+  optimizationParentId?:string;
+  optimizationRecovered?:boolean;
+  warning?:string;
+  providerDiagnostic?:string;
   imageRetry?: import('./image-retries').ImageRetryState;
   soundInput?:{layerId:string;generation:SoundGeneration;late?:boolean};
   providerDuration?:number;

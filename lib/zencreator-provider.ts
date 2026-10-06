@@ -2,7 +2,7 @@ import type { Job } from './domain';
 import {decodeMediaBase64} from './media-base64';
 import type { Result } from './providers';
 import { call, json, ProviderError } from './provider-http';
-import { ZEN_MODELS, zenProfile, zenTool, prepareZenJobs, generationSeconds } from './zencreator-models';
+import { ZEN_MODELS, zenProfile, zenTool, prepareZenJobs, zenVideoSeconds } from './zencreator-models';
 
 const BASE='https://api.zencreator.pro/api/public/v1';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,6 +70,14 @@ export async function generateZen(j:Job,key:string,refs:string[],format:string):
     if(typeof cap==='number'&&j.prompt.length>cap)throw new Error(`ZenCreator: промпт длиннее ${cap} символов, разрешённых текущим API.`);
     const maxRefs=schemaNode(schema,props.image_assets).maxItems;
     if(typeof maxRefs==='number'&&refs.length>maxRefs)throw new Error(`ZenCreator: API разрешает не более ${maxRefs} референсов.`);
+    if(p.kind==='video'){
+      const seconds=zenVideoSeconds(j.model,j.duration);
+      for(const [field,value] of Object.entries({duration:seconds,resolution:'720p',ratio:format,generate_audio:false,prompt_extend:false})){
+        const values=enumValues(schema,props[field]);
+        if(values.length&&!values.includes(value))throw new Error(`ZenCreator: поле ${field}=${value} не поддерживается текущей схемой модели.`);
+      }
+      if(['wan@2.6-flash','wan@3.0'].includes(p.native)&&seconds===10&&(j.zenCreditsEstimate??0)<p.credits)throw new Error('ZenCreator: для этого плана нужен 10-секундный клип. Откройте новую серию для обновлённой оценки стоимости.');
+    }
   } catch(e) { throw new ProviderError(`${e instanceof Error?e.message:'ZenCreator: ошибка проверки.'} Генерация не отправлена.`,true,true); }
   const assets:string[]=[];
   // Private references are uploaded directly, in order; no publicly shared URLs.
@@ -83,9 +91,10 @@ export async function generateZen(j:Job,key:string,refs:string[],format:string):
       assets.push(out.asset_id);
     }
   } catch(e) { throw new ProviderError(`${e instanceof Error?e.message:'Ошибка загрузки референсов.'} Платная генерация не отправлена.`,true,true); }
-  const prompt=p.kind==='video'?j.prompt.replace(/до конца 6-секундного клипа/g,`до конца ${generationSeconds(j.model)}-секундного клипа`):j.prompt;
+  const seconds=p.kind==='video'?zenVideoSeconds(j.model,j.duration):undefined;
+  const prompt=p.kind==='video'?j.prompt.replace(/до конца 6-секундного клипа/g,`до конца ${seconds}-секундного клипа`):j.prompt;
   const input=p.kind==='text'?{model:p.native,prompt,max_tokens:4096,system_prompt:''}
-    :p.kind==='video'?{model:p.native,prompt,ref_asset:assets[0],duration:p.seconds,resolution:'720p',ratio:format,generate_audio:false,prompt_extend:false}
+    :p.kind==='video'?{model:p.native,prompt,ref_asset:assets[0],duration:seconds,resolution:'720p',ratio:format,generate_audio:false,prompt_extend:false}
     :assets.length?{model:p.native,prompt,image_assets:assets,ratio:format,tier:'2K',batch_mode:false,number_of_images:1,sequential_generation:false,rewrite_prompt:false}
     :{model:p.native,positive_prompt:prompt,ratio:format,tier:'2K',mode:'fast',batch_size:1,rewrite_prompt:false};
   const out=await json(await call(`${BASE}/generations`,{...auth(key),'content-type':'application/json','Idempotency-Key':j.id},{tool:tool.name,input}));

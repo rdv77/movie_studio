@@ -1,12 +1,12 @@
 import type { CharacterBrief, Item, Project } from './domain';
 import { model } from './models';
-import { availableForDirecting, promptCapacity, promptSize, GROK_VIDEO_1080, KLING_VIDEO } from './model-capabilities';
+import { availableForDirecting, promptCapacity, promptSize, fitsPrompt, GROK_VIDEO_1080, KLING_VIDEO } from './model-capabilities';
 import { selectedReferences } from './reference-selection';
 import { speechDirection, speechInfo, type SpeechType } from './speech-mode';
 import { effectiveCreativeBrief, type CreativeOverrides } from './creative-brief';
 import { FRAMING_NAMES, shotDirectionSchema, validateShotDirection, type ShotDirection } from './shot-direction';
 import { googleSeconds } from './google-models';
-import { zenProfile } from './zencreator-models';
+import { zenProfile,zenVideoSeconds } from './zencreator-models';
 import type { ActorProfile, LocationProfile, LocationState } from './world-assets';
 import { videoPrompt } from './video';
 import { planFields, storyboardPrompt } from './storyboard';
@@ -153,7 +153,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const duration = input.duration ?? plan?.duration;
   if (input.kind === 'video' && duration !== undefined) {
     const modern = !!(input.endFrameId || item.videoPreparation || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'last-frame'));
-    try { const timing=videoRequestTiming(modelId,duration,modern,capability.duration!.requestedSeconds); capability.duration={...capability.duration!,requestedSeconds:timing.requestedSeconds,planMaxSeconds:timing.planMaxSeconds}; }
+    try { const timing=videoRequestTiming(modelId,duration,modern,capability.duration!.requestedSeconds); capability.duration={...capability.duration!,requestedSeconds:zenProfile(modelId)?.kind==='video'?zenVideoSeconds(modelId,duration):timing.requestedSeconds,planMaxSeconds:timing.planMaxSeconds}; }
     catch(e) { throw new PromptCompilationError('duration_fit',(e as Error).message); }
   }
   if (input.kind === 'video' && direction && duration !== undefined) {
@@ -453,7 +453,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if(!section.required&&seenTexts.has(section.text)){omitted.push({key:section.key,label:section.label,reason:'duplicate',characters:section.text.length});return false;}
     seenTexts.add(section.text);return true;
   });
-  const prompt=render(included),used=promptSize(prompt,{unit:capability.promptUnit}),needsOptimization=used>limit;
+  const prompt=render(included),used=promptSize(prompt,{unit:capability.promptUnit}),needsOptimization=!fitsPrompt(prompt,{...promptCapacity(modelId,input.kind),limit});
   if(needsOptimization)warnings.push(capability.promptUnit==='tokens'
     ? 'Перед отправкой сервер проверит токены. LLM сократит промпт только при превышении лимита. Если API не поддерживает подсчёт, используется консервативная верхняя граница по UTF-8.'
     : 'Промпт превышает лимит. Перед генерацией подключённая текстовая LLM сократит его, сохранив обязательные детали. Это отдельный платный запрос в журнале.');

@@ -1,4 +1,4 @@
-import {prepareMediaPrompt} from '@/lib/prompt-optimization-runner';
+import {prepareMediaPrompt,recoverPromptPreparation} from '@/lib/prompt-optimization-runner';
 import {enqueueImageRetry} from '@/lib/image-retries';
 import {imageBlobs} from '@/lib/image-inputs';
 import {isOpenAIImage} from '@/lib/openai-image';
@@ -51,6 +51,13 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   let p = await loadProject(user, id);
   let j = p.jobs.find((j) => j.id === jobId);
   if (!j) throw new Error('Попытка не найдена.');
+  if(recoveryAction==='inspect-provider-error'){
+    if(model(j.model).provider!=='fal'||!j.requestId||!['failed','unknown'].includes(j.status))throw Error('Проверка доступна для завершённой попытки fal с номером запроса.');
+    let diagnostic='';
+    try{const result=await poll(j,await getKey(user,'fal'));diagnostic=result.error??(result.pending?'Провайдер ещё обрабатывает прежний запрос.':'Провайдер вернул результат прежнего запроса.');}
+    catch(e){diagnostic=e instanceof Error?e.message:'Не удалось уточнить ошибку.';}
+    return mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;job.providerDiagnostic=diagnostic;});
+  }
   if(recoveryAction==='recover-image-file'){
     if(j.kind!=='image'||j.purpose)throw new Error('Восстановление доступно для сохранённого изображения. Новая генерация не запускалась.');
     if(j.status==='done')return p;
@@ -70,7 +77,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     j=p.jobs.find(x=>x.id===jobId)!;
   }
   if(waitExpired(j)){
-    p=await mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;if(waitExpired(job))stopJobWait(job,'timeout');});
+    p=await mutate(user,id,p=>{const job=p.jobs.find(x=>x.id===jobId)!;if(waitExpired(job)&&!recoverPromptPreparation(p,job))stopJobWait(job,'timeout');});
     return p;
   }
   // A watchdog may run while the original HTTP request is still in flight.

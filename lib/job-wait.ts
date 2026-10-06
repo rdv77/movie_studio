@@ -1,6 +1,6 @@
 import type {Job} from './domain';
 
-export const waitLimitMs=(j:Job)=>(j.kind==='video'?45:15)*60*1000;
+export const waitLimitMs=(j:Job)=>(j.purpose==='prompt-optimization'||j.promptOptimization?.state==='running'?3:j.kind==='video'?45:15)*60*1000;
 export const unresolvedJobBlocks=(j:Job)=>j.status==='unknown'&&!j.newSeriesAllowedAt;
 export function allowNewSeries(j:Job) {
   if(j.status!=='unknown')throw Error('Разрешить новую серию можно только для запроса с неизвестным исходом.');

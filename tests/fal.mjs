@@ -31,7 +31,7 @@ try {
  mode='ok';const pollJob={...job,requestId},posts=requests.filter(r=>r.method==='POST').length;
  for(const s of ['IN_QUEUE','IN_PROGRESS']){state=s;assert((await P.poll(pollJob,key)).pending);}
  state='COMPLETED';for(const url of [undefined,root+'/requests/'+requestId,root+'/requests/'+requestId+'/response']){resultUrl=url;const out=await P.poll(pollJob,key);assert.equal(out.url,'https://v3.fal.media/test.png');assert.equal(out.actual,null);assert.equal(out.usage.seed,123);}
- resultUrl='https://evil.test/steal';before=requests.length;await assert.rejects(()=>P.poll(pollJob,key),/адрес/);assert.equal(requests.length,before+1);
+ resultUrl='https://evil.test/steal';before=requests.length;await P.poll(pollJob,key);assert.equal(requests.length,before+2);assert.equal(requests.at(-1).url,root+'/requests/'+requestId);
  before=requests.length;await assert.rejects(()=>P.poll({...job,requestId:'../x'},key),e=>e.notSent);assert.equal(requests.length,before);
  resultUrl=undefined;mode='blocked';assert((await P.poll(pollJob,key)).error);
  assert.equal(requests.filter(r=>r.method==='POST').length,posts);

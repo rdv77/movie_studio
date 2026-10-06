@@ -9,14 +9,14 @@ export class ProviderError extends Error {
     super(message);
   }
 }
-export async function call(url: string, h: Record<string, string>, body?: unknown) {
+export async function call(url: string, h: Record<string, string>, body?: unknown, timeoutMs=180000) {
   let options: RequestInit;
   try {
     options = {
       method: body ? 'POST' : 'GET',
       headers: h,
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(180000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'manual',
     };
     // Validate locally before distinguishing a transport failure from a sent request.
@@ -29,9 +29,9 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
   let r: Response;
   try {
     r = await fetch(url, options);
-  } catch {
+  } catch (e) {
     throw new ProviderError(
-      'Связь с провайдером прервалась. Исход запроса неизвестен; автоматического повтора не будет.',
+      (e instanceof Error&&/Timeout|Abort/.test(e.name)?`Провайдер не ответил за ${timeoutMs/1000} сек. `:'Связь с провайдером прервалась. ')+ 'Исход запроса неизвестен; этот запрос автоматически не повторяется.',
     );
   }
   if (r.status >= 300 && r.status < 400)
@@ -47,13 +47,27 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
         while (size < 8192) {
           const next = await reader.read();
           if (next.done) break;
-          size += next.value.length;
-          if (size > 8192) break;
-          chunks.push(next.value);
+          const chunk=next.value.subarray(0,8192-size);
+          chunks.push(chunk);size+=chunk.length;
         }
         await reader.cancel();
-        const data = JSON.parse(await new Blob(chunks as BlobPart[]).text());
-        const message = [data.error?.message,data.error,data.message,data.detail].find(value=>typeof value==='string');
+        const prefix=await new Blob(chunks as BlobPart[]).text();
+        let data:any;
+        try{data=JSON.parse(prefix);}catch{
+          // A validation error may echo megabytes of input after loc/msg.
+          // Recover only complete JSON string messages from the bounded prefix.
+          const messages=[...prefix.matchAll(/"msg"\s*:\s*("(?:[^"\\]|\\.)*")/g)].slice(0,5).map(m=>JSON.parse(m[1]));
+          const location=/"loc"\s*:\s*(\[[^\]]{0,500}\])/.exec(prefix);
+          data={detail:messages.map(msg=>({msg,loc:location?JSON.parse(location[1]):[]}))};
+        }
+        const issues=Array.isArray(data.detail)?data.detail:Array.isArray(data.error?.details)?data.error.details:[];
+        // FastAPI/fal validation bodies contain loc/msg/type plus a potentially
+        // enormous private input. Retain only the field and bounded message.
+        const fields=issues.slice(0,5).map((v:any)=>{
+          const loc=Array.isArray(v?.loc)?v.loc.filter((x:any)=>typeof x==='string'||typeof x==='number').join('.'):'';
+          return typeof v?.msg==='string'?`${loc?loc+': ':''}${v.msg.slice(0,250)}`:'';
+        }).filter(Boolean).join('; ');
+        const message = [data.error?.message,data.error,data.message,fields||undefined,data.detail].find(value=>typeof value==='string');
         if (typeof message === 'string') detail = message;
       }
       for (const value of Object.values(h)) {
@@ -61,7 +75,7 @@ export async function call(url: string, h: Record<string, string>, body?: unknow
         if (key.length >= 8) detail = detail.split(key).join('[скрыто]');
       }
       detail = detail.replace(/Bearer\s+\S+/gi, 'Bearer [скрыто]')
-        .replace(/data:[^\s]+/gi, '[изображение]').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
+        .replace(/data:[^\s]+/gi, '[изображение]').replace(/https?:\/\/[^\s]+/gi,'[адрес]').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
     } catch { /* A malformed error must not obscure the HTTP status. */ }
     if (![400,403,422].includes(r.status)) detail = '';
     const xai=new URL(url).hostname==='api.x.ai';

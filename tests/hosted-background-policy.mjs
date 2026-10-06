@@ -13,7 +13,7 @@ assert(!P.hostedQueuedDispatchEligible({...allowed[0],kind:'text'}));assert(!P.h
 for(const model of ['grok-imagine-video-1.5','grok-imagine-video-1.5-1080p']){
  const legacy=job(model,'video','queued',{prompt:'я'.repeat(4097),compilation:{budget:{limit:60000,needsOptimization:false}}});
  assert(!P.hostedQueuedDispatchEligible(legacy),'Old queued oversized Grok request must optimize in foreground');
- assert(P.hostedQueuedDispatchEligible({...legacy,prompt:'я'.repeat(4096)}),'Fitting Grok requests keep async background dispatch');
+ assert(P.hostedQueuedDispatchEligible({...legacy,prompt:'a'.repeat(4096)}),'Fitting Grok requests keep async background dispatch');
 }
 const p=D.newProject('Hosted time window');p.queueSettings={concurrency:8,providerLimits:{xai:8,openai:8,minimax:8,fal:8,elevenlabs:8}};
 const continued=[job('gpt-image-2.5-flare','image','pending',{requestId:'known-receipt'}),job('grok-imagine-image-2.0','image','saving',{output:{url:'https://mock.test/image.png'}}),job('eleven_v3','audio','saving',{purpose:'voice-design',voiceWorkflow:{provider:'elevenlabs'}}),job('eleven_v3','audio','saving',{soundInput:{layerId:'layer'}})];

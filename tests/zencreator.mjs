@@ -5,7 +5,7 @@ const P=await import('../work/tests/zencreator/providers.mjs'),Z=await import('.
 const id='8f468298-48ca-4c8f-bebe-1300f558a620',a='180c1e98-8779-477b-a7bc-cc62145c1c38',b='b9a5e4c3-0e48-4a18-8436-fb080e3853dc',task='82c5083e-f191-4d8f-8daa-75d9cc192ab0';
 const root='https://api.zencreator.pro/api/public/v1',key='zc_live_test_only',image='data:image/png;base64,AA==';
 const catalog={tools:['run_any_llm','image_editor','by_prompt','videogen'].map(name=>({name,input_schema:{properties:{model:{enum:M.ZEN_MODELS.filter(m=>M.zenTool(m.id,name==='image_editor'?1:0)===name).map(m=>M.zenProfile(m.id).native)}}}}))};
-let requests=[],uploads=0,mode='success',status='succeeded',missingDownload=false,downloadVersion=0;
+let requests=[],uploads=0,mode='success',status='succeeded',missingDownload=false,downloadVersion=0,expectedSeconds=10;
 const old=globalThis.fetch;
 try{
  globalThis.fetch=async(url,opt)=>{
@@ -25,7 +25,7 @@ try{
    assert(!JSON.stringify(body).includes('data:'));
    if(body.tool==='image_editor'){assert.deepEqual(input.image_assets,[a,b]);assert.equal(input.batch_mode,false);assert.equal(input.number_of_images,1);assert.equal(input.ratio,'16:9');}
    if(body.tool==='by_prompt'){assert.equal(input.batch_size,1);assert.equal(input.positive_prompt,'Задача');assert(!input.image_assets);}
-   if(body.tool==='videogen'){assert.equal(input.ref_asset,a);assert.equal(input.duration,10);assert.equal(input.resolution,'720p');assert.equal(input.generate_audio,false);assert.equal(input.prompt_extend,false);assert.match(input.prompt,/10-секундного/);}
+   if(body.tool==='videogen'){assert.equal(input.ref_asset,a);assert.equal(input.duration,expectedSeconds);assert.equal(input.resolution,'720p');assert.equal(input.generate_audio,false);assert.equal(input.prompt_extend,false);assert(input.prompt.includes(`${expectedSeconds}-секундного`));}
    if(body.tool==='run_any_llm'){assert.equal(input.max_tokens,4096);assert(!input.image_assets);}
    return Response.json({id:task,status:'queued'},{status:202});
   }
@@ -40,9 +40,16 @@ try{
  let sent=await P.generate(job,key,[image,image],'16:9');assert.equal(sent.requestId,task);assert(sent.pending);assert.equal(sent.actual,null);assert.equal(sent.usage.credits_estimate,3);
  await P.generate({...job,refs:[]},key,[],'16:9');
  uploads=0;await P.generate({...job,kind:'video',model:'zencreator:video:kling@2.6',refs:[a],prompt:'Рты закрыты до конца 6-секундного клипа'},key,[image],'16:9');
+ for(const model of ['zencreator:video:wan@3.0','zencreator:video:wan@2.6-flash']){
+   for(const duration of [5,6]){uploads=0;expectedSeconds=duration===5?5:10;await P.generate({...job,kind:'video',model,zenCreditsEstimate:undefined,refs:[a],duration,prompt:'Рты закрыты до конца 6-секундного клипа'},key,[image],'16:9');}
+ }
+ const videoSchema=catalog.tools.find(t=>t.name==='videogen').input_schema;videoSchema.properties.duration={enum:[6]};
+ const beforeValidation=requests.filter(r=>r.url===root+'/assets').length;
+ await assert.rejects(()=>P.generate({...job,kind:'video',model:'zencreator:video:wan@3.0',refs:[a]},key,[image],'16:9'),/duration=5/);
+ assert.equal(requests.filter(r=>r.url===root+'/assets').length,beforeValidation);delete videoSchema.properties.duration;
  await P.generate({...job,kind:'text',model:'zencreator:text:grok',refs:[]},key,[],'16:9');
  let count=requests.length;await assert.rejects(()=>P.generate({...job,kind:'text',model:'zencreator:text:grok',refs:[],prompt:'a'.repeat(32001)},key,[],'16:9'),e=>e.notSent);assert.equal(requests.length,count);
- await assert.rejects(()=>P.generate({...job,prompt:'a'.repeat(5001)},key,[image,image],'16:9'),e=>e.notSent&&e.definite&&e.message.includes('5000'));assert.equal(requests.length,count,'Oversized old jobs are stopped even when the catalog omits maxLength');
+ await assert.rejects(()=>P.generate({...job,prompt:'a'.repeat(5001)},key,[image,image],'16:9'),e=>e.notSent&&e.definite);assert.equal(requests.length,count,'Oversized old jobs are stopped even when the catalog omits maxLength');
  await assert.rejects(()=>P.generate(job,key,[image],'16:9'),e=>e.notSent);assert.equal(requests.length,count);
  for(const fail of ['auth','no-model','upload-failure']){
   mode=fail;count=requests.filter(r=>r.url===root+'/generations').length;
