@@ -55,7 +55,9 @@ export type ScriptWorkflowInput=z.infer<typeof scriptWorkflowInputSchema>;
 export const scriptWorkflowResultSchema=z.object({title:z.string().trim().min(1).max(200),text:z.string().min(1).max(50000),
   emotionalArcs:emotionalArcsSchema.optional(),
   changes:z.array(z.string().max(2000)).max(50),findings:z.array(z.object({methodologyId:z.enum(CINEMA_METHOD_IDS as [CinemaMethodId,...CinemaMethodId[]]).optional(),
-    severity:z.enum(['note','conflict']),evidence:z.string().trim().min(1).max(2000),proposal:z.string().trim().min(1).max(2000),requiresDirectorChoice:z.boolean(),
+    // An omitted review flag keeps the finding for a director's decision. It
+    // never authorizes an automatic change; explicit false stays false.
+    severity:z.enum(['note','conflict']),evidence:z.string().trim().min(1).max(2000),proposal:z.string().trim().min(1).max(2000),requiresDirectorChoice:z.boolean().default(true),
   }).strict()).max(40),
 }).strict().refine(v=>!!v.text.trim(),'В ответе отсутствует полный текст сценария.');
 export type ScriptWorkflowResult=z.infer<typeof scriptWorkflowResultSchema>;
@@ -201,7 +203,7 @@ export function applyScriptWorkflowResult(_p:Project,run:ScriptWorkflowRun,task:
       data.emotionalArcs=structuredClone(currentArcs);
     }else if(data.emotionalArcs===undefined)throw Error('В ответе потеряна эмоциональная линия героя. Верните emotionalArcs, согласованный с полным текстом сценария.');
   }
-  if(task.applied){if(stable(task.result)!==stable(data))throw Error('Результат уже сохранён. Для другой версии создайте новый запуск.');return scriptWorkflowResultSchema.parse(task.result);}
+  if(task.applied){if(stable(scriptWorkflowResultSchema.parse(task.result))!==stable(data))throw Error('Результат уже сохранён. Для другой версии создайте новый запуск.');return scriptWorkflowResultSchema.parse(task.result);}
   task.result=structuredClone(data);
   if(run.stopped)task.lateResult=true;
   task.applied=true;task.error=undefined;return data;
