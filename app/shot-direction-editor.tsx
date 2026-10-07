@@ -8,6 +8,7 @@ import {FacialExpressionControl} from './facial-expression-control';
 import {FACIAL_EXPRESSION_LABELS,type FacialExpressionMode} from '@/lib/facial-expression';
 import {StagingModeControl} from './staging-policy-controls';
 import {STAGING_MODE_LABELS,type StagingMode} from '@/lib/staging-policy';
+import {NarrativeBeatEditor,NarrativeBeatSummary} from './emotional-causality-editor';
 
 const ANGLE_NAMES={ 'eye-level':'На уровне глаз',low:'Снизу',high:'Сверху',overhead:'Вертикально сверху',dutch:'Наклонённый горизонт','point-of-view':'Взгляд героя',custom:'Свой ракурс'} as const;
 const MOVEMENT_NAMES={static:'Статичная камера',pan:'Панорама по горизонтали',tilt:'Наклон камеры', 'push-in':'Наезд','pull-out':'Отъезд',dolly:'Перемещение камеры',tracking:'Сопровождение',orbit:'Обход вокруг',handheld:'Ручная камера',crane:'Подъём или спуск',zoom:'Изменение фокусного расстояния',custom:'Свое движение'} as const;
@@ -102,6 +103,7 @@ export function ShotDirectionEditor({direction,duration,inheritedFacialExpressio
         {(d.sound?.effects??[]).map((effect,n)=><article className="rounded border p-3 space-y-3" key={n}>{seconds(`Звук ${n+1} · момент, сек`,effect.at,value=>change('sound',{...d.sound,effects:d.sound!.effects!.map((e,j)=>j===n?{...e,at:value??0}:e)}),true)}<Field label="Описание звука"><Textarea value={effect.description} maxLength={3000} onChange={e=>change('sound',{...d.sound,effects:d.sound!.effects!.map((s,j)=>j===n?{...s,description:e.target.value}:s)})}/></Field><Button type="button" variant="ghost" onClick={()=>{const rows=d.sound!.effects!.filter((_,j)=>j!==n);change('sound',withoutEmpty({...d.sound,effects:rows.length?rows:undefined}));}}>Удалить звук</Button></article>)}
         <Button type="button" variant="outline" disabled={(d.sound?.effects?.length??0)>=30} onClick={()=>change('sound',{...d.sound,effects:[...d.sound?.effects??[],{at:0,description:''}]})}>Добавить звуковое событие</Button>
       </Group>
+      <NarrativeBeatEditor value={d.narrativeBeat} disabled={disabled} onChange={value=>change('narrativeBeat',value)}/>
       <Group label={`Актёрские задачи · ${d.performance?.length??0}`}>
         <p className="text-sm text-muted-foreground">Опишите, чего герой добивается, что для него означает событие и как меняется его переживание. В наблюдаемом действии свяжите причину перемены со взглядом, лицом и позой: начало → событие → реакция → состояние в конце. Подтекст объясняет игру, но не становится репликой или закадровым голосом. Все пять полей передаются в видеопромпт.</p>
         {(d.performance??[]).map((performance,n)=><article className="rounded border p-3 space-y-3" key={performance.characterId??n}><Field label="Герой"><Input value={performance.character} maxLength={100} onChange={e=>change('performance',d.performance!.map((p,j)=>j===n?{...p,character:e.target.value}:p))}/></Field>{(['objective','subtext','visibleAction','emotionStart','emotionEnd'] as const).map((key,j)=><Field key={key} label={['Чего добивается','Подтекст','Наблюдаемое действие','Эмоция в начале','Эмоция в конце'][j]}><Textarea value={performance[key]} maxLength={3000} onChange={e=>change('performance',d.performance!.map((p,j)=>j===n?{...p,[key]:e.target.value}:p))}/></Field>)}<details><summary>Идентификатор героя</summary><Input maxLength={100} value={performance.characterId??''} onChange={e=>change('performance',d.performance!.map((p,j)=>j===n?{...p,characterId:e.target.value||undefined}:p))}/></details><Button type="button" variant="ghost" onClick={()=>{const rows=d.performance!.filter((_,j)=>j!==n);change('performance',rows.length?rows:undefined);}}>Удалить актёрскую задачу</Button></article>)}
@@ -118,6 +120,7 @@ export function ShotDirectionSummary({direction,duration}:{direction?:ShotDirect
   if(!direction)return <p className="text-sm text-muted-foreground">Структурированная постановка не задана. Используются текстовые описания плана.</p>;
   const d=direction,conflicts=duration===undefined?[]:directionEditorIssues(d,duration).filter(i=>i.severity==='conflict');
   return <div className="space-y-2 text-sm" aria-label="Постановка и ключевые кадры">
+    <NarrativeBeatSummary value={d.narrativeBeat}/>
     {d.stagingMode&&<p><b>Постановка:</b> {STAGING_MODE_LABELS[d.stagingMode]}</p>}
     {d.requiresEndFrame!==undefined&&<p><b>Точная конечная композиция:</b> {d.requiresEndFrame?'нужен конечный кадр':'достаточно описания действия'}</p>}
     {d.facialExpression&&<p><b>Мимика:</b> {FACIAL_EXPRESSION_LABELS[d.facialExpression]}</p>}

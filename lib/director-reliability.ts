@@ -21,7 +21,7 @@ export function prepareDirectorRetry(p:Project,run:DirectorRun,t:DirectorTask){c
   }else{t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;}
   run.stopped=false;
 }
-const optionalDirectionKeys=new Set(['stagingMode','requiresEndFrame','framingStart','framingEnd','angle','description','composition','attention','cameraMovement','from','to','purpose','speed','keepInFrame','actionBeats','timing','openingHold','endingHold','revealAt','positions','screenDirection','subjectId','performance','characterId','transition','toShotId','sound','ambience','effects','music','silence','startFrame','endFrame','id','emotionalChange']);
+const optionalDirectionKeys=new Set(['narrativeBeat','stagingMode','requiresEndFrame','framingStart','framingEnd','angle','description','composition','attention','cameraMovement','from','to','purpose','speed','keepInFrame','actionBeats','timing','openingHold','endingHold','revealAt','positions','screenDirection','subjectId','performance','characterId','transition','toShotId','sound','ambience','effects','music','silence','startFrame','endFrame','id','emotionalChange']);
 function cleanDirection(value:any):any{
   if(Array.isArray(value))return value.map(cleanDirection);if(!value||typeof value!=='object')return value;
   const copy:any={};
@@ -46,7 +46,7 @@ export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:stri
   return copy;
 }
 export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!t.sceneId||!['story','camera','art','dialogue','performance','compress','shot-planner'].includes(t.role))return base;const scene=p.directing!.scenes.find(s=>s.id===t.sceneId)!;const ids=t.shotIds??(t.shotId?[t.shotId]:scene.shots.map(s=>s.id)),selected=scene.shots.filter(s=>ids.includes(s.id)),index=p.directing!.scenes.indexOf(scene);
-  const summary=(s:any)=>s&&({id:s.id,title:s.title,purpose:s.purpose,location:s.location,stateIn:s.stateIn,stateOut:s.stateOut,turn:s.turn});
+  const summary=(s:any)=>s&&({id:s.id,title:s.title,purpose:s.purpose,location:s.location,stateIn:s.stateIn,stateOut:s.stateOut,turn:s.turn,...(s.causalChain?{causalChain:s.causalChain}:{})});
   const excerpt=(value:string|undefined,max=600)=>value===undefined?undefined:value.length<=max?value:value.slice(0,max)+'… [контекст сокращён]';
   const neighbourCamera=(d:any)=>!d?{}:{
     framingEnd:d.framingEnd,angle:d.angle?{type:d.angle.type,description:excerpt(d.angle.description)}:undefined,
@@ -60,7 +60,7 @@ export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!
     character:v.character,characterId:v.characterId,objective:excerpt(v.objective,300),subtext:excerpt(v.subtext,400),
     emotionStart:excerpt(v.emotionStart,200),emotionEnd:excerpt(v.emotionEnd,200),visibleAction:excerpt(v.visibleAction,600),
   }))};
-  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition,...(['camera','compress'].includes(t.role)?neighbourCamera(s.direction):{}),...(['performance','compress'].includes(t.role)?neighbourPerformance(s.direction):{})});
+  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition,...(s.direction?.narrativeBeat?{narrativeBeat:s.direction.narrativeBeat}:{}),...(['camera','compress'].includes(t.role)?neighbourCamera(s.direction):{}),...(['performance','compress'].includes(t.role)?neighbourPerformance(s.direction):{})});
   const edge=new Set<number>();for(const shot of selected){const n=scene.shots.indexOf(shot);for(const k of [n-1,n+1])if(k>=0&&k<scene.shots.length&&!ids.includes(scene.shots[k].id))edge.add(k);}
   const stripped=(s:any)=>{const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...content}=s;return content;};
   // Scene specialists own only these target rows; adjacent rows are lightweight
@@ -70,10 +70,13 @@ export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!
     // The approved target shots contain the story. Sending the entire film again,
     // plus the same hero JSON in text and profile form, adds no visual information.
     delete result.currentScenario;
+    // The target narrative beat and performance carry the relevant meaning.
+    // A film-wide arc would repeat unrelated future events in media prompts.
+    delete result.emotionalArcs;
     result.outline=[result.previous,summary(scene),result.next].filter(Boolean);
     result.approved=result.approved.map((v:any)=>v.character?{id:v.id,stage:v.stage,title:v.title,character:{name:v.character.name,appearance:v.character.appearance,instructions:v.character.instructions,locked:v.character.locked,actorProfile:v.character.actorProfile?{identity:v.character.actorProfile.identity,mannerisms:v.character.actorProfile.mannerisms}:undefined}}:{...v,text:compactPromptText(v.text)});
     const names=new Set(selected.flatMap(s=>s.cast));
-    result.scene={...result.scene,continuity:scene.continuity.filter(c=>names.has(c.character)||selected.some(s=>s.characterIds?.includes(c.characterId??'')))};
+    result.scene={...result.scene,continuity:scene.continuity.filter(c=>names.has(c.character)||selected.some(s=>s.characterIds?.includes(c.characterId??''))),...(scene.causalChain?{causalChain:scene.causalChain.filter(c=>names.has(c.character))}:{})};
   }
   return result;
 }

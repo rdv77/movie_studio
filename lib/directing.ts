@@ -3,7 +3,7 @@ import {sceneLocationContext,sceneWorldText,assertSceneLocations,actorDraftResul
 import {locationStateSchema} from './world-schemas';
 import type {VersionInfo} from './creative-versions';
 import type {CharacterBrief} from './domain';
-import { isScriptWorkflowRun,scriptWorkflowBasis,scriptWorkflowPrompt,applyScriptWorkflowResult,SCRIPT_ROLE_NAMES,type ScriptRole,type ScriptWorkflowInput } from './script-workflow';
+import { isScriptWorkflowRun,scriptWorkflowBasis,scriptWorkflowPrompt,applyScriptWorkflowResult,SCRIPT_ROLE_NAMES,screenplayEmotionalArcs,type ScriptRole,type ScriptWorkflowInput } from './script-workflow';
 import { creativeStrengthsSchema, creativeOverridesSchema, effectiveCreativeBrief, renderCreativeInstructions } from './creative-brief';
 import { id, now, chosen, makeVariant, dependencies, isApproved, type Project, type Job } from './domain';
 import { speechDirection } from './speech-mode';
@@ -24,6 +24,7 @@ import {stagingModeSchema,framePolicySchema,effectiveStagingMode,stagingInstruct
 import {facialExpressionSchema,effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
 import {creativeFoundationBrief} from './creative-foundation';
 import {cameraPolicySchema,cameraPolicyPrompt} from './camera-policy';
+import {sceneCausalLinkSchema,SCENE_CAUSALITY_INSTRUCTION,SHOT_CAUSALITY_INSTRUCTION,VIEWER_CAUSALITY_REVIEW} from './emotional-dramaturgy';
 
 export const DIRECTOR_PRESETS: Record<string,string> = {
   'Без особого стиля':'Приёмы подчинены истории; ясное действие и мотивированная камера.',
@@ -54,6 +55,7 @@ export const directingShotSchema=z.object({
 });
 export type DirectingShot=z.infer<typeof directingShotSchema>&{approvalVersion?:2;approved?:string;approvedFoundation?:string;imagePrompt?:string;videoPrompt?:string;promptBasis?:string};
 export const sceneSchema=z.object({id:z.string().min(1).max(100),title:z.string().min(1).max(100),purpose:text,location:text,conflict:text,turn:text,
+  causalChain:z.array(sceneCausalLinkSchema).max(20).optional(),
   locationIds:z.array(z.string().min(1).max(100)).max(20).optional(),
   stateIn:text,stateOut:text,locationState:locationStateSchema.optional(),creativeOverrides:creativeOverridesSchema.optional(),
   continuity:z.array(z.object({character:z.string().max(100),characterId:z.string().max(100).optional(),outfit:z.string().max(2000),props:z.string().max(2000)})).max(20),
@@ -95,7 +97,7 @@ export function shotFoundationBasis(p:Project,s:Scene,shot:DirectingShot){
 }
 export function shotApproved(s:Scene,shot:DirectingShot,p?:Project){return !!shot.approved&&shot.approved===shotApproval(s,shot)&&(!p||shot.approvedFoundation===(shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorApprovalBasis(p)));}
 export function shotPromptBasis(p:Project,s:Scene,shot:DirectingShot){return signature([shotApproval(s,shot),shot.approvalVersion===2?shotFoundationBasis(p,s,shot):directorApprovalBasis(p)]);}
-export function foundation(p:Project){return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId};});}
+export function foundation(p:Project){const arcs=screenplayEmotionalArcs(p);return p.items.filter(i=>[0,1,2,3].includes(i.stage)&&!i.removedAt&&!i.planArchive).map(i=>{const v=i.variants.find(v=>v.id===i.approvedId);return {id:i.id,stage:i.stage,title:i.title,text:v?.text??'',character:v?.character,assetId:v?.assetId,...(i.stage===0&&arcs.length?{emotionalArcs:arcs}:{})};});}
 export function directorBasis(p:Project){return signature({brief:p.directing?.brief,foundation:foundation(p)});}
 // Running work still uses directorBasis: changed generation preferences reject
 // late answers. Existing approvals retain their independently reviewed content.
@@ -170,7 +172,7 @@ function context(p:Project,run:DirectorRun,t:DirectorTask){
   const staging={filmMode:d.brief.stagingMode,framePolicy:d.brief.framePolicy,instructions:Object.fromEntries([...new Set(expressionShots.map(s=>effectiveStagingMode(d.brief.stagingMode,s.direction?.stagingMode)))].filter((mode):mode is NonNullable<typeof mode>=>mode!==undefined&&mode!==d.brief.stagingMode).map(mode=>[mode,stagingInstructions({stagingMode:mode})])),shots:expressionShots.map(s=>({shotId:s.id,mode:effectiveStagingMode(d.brief.stagingMode,s.direction?.stagingMode)})).filter(s=>s.mode!==undefined)};
   const script=p.items.find(i=>i.stage===0),currentScenario=t.role==='critic'?script&&chosen(script)?.text:script?.variants.find(v=>v.id===script.approvedId)?.text;
   const cameraPolicy=d.brief.cameraPolicy===undefined?undefined:{mode:d.brief.cameraPolicy,instruction:cameraPolicyPrompt(d.brief.cameraPolicy)};
-  return compactSpecialistContext(p,t,{film:p.title,brief:effectiveCreativeBrief(d.brief,d.scenes[index]?.creativeOverrides),facialActing,staging,...(cameraPolicy?{cameraPolicy}:{}),runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
+  return compactSpecialistContext(p,t,{film:p.title,brief:effectiveCreativeBrief(d.brief,d.scenes[index]?.creativeOverrides),facialActing,staging,...(cameraPolicy?{cameraPolicy}:{}),runtime:{mode:runtimeMode(p),targetSeconds:d.brief.targetSeconds,plannedSeconds:plannedRuntime(p),acceptedSeconds:d.acceptedRuntime?.basis===runtimeAcceptanceBasis(p)?d.acceptedRuntime.seconds:undefined},currentScenario,emotionalArcs:screenplayEmotionalArcs(p),approved:foundation(p),outline:d.scenes.map(sceneOutline),...(t.role==='editor'?{previousUnresolvedIssues:d.issues.filter(i=>!i.resolved).map(i=>({sceneId:i.sceneId,shotId:i.shotId,message:i.message}))}:{}),
     ...(['editor','scene-expressive-reviewer'].includes(t.role)?{sceneReviews:currentSceneReviews(p),montageContext:d.scenes.filter(s=>!t.sceneId||s.id===t.sceneId).map(s=>({sceneId:s.id,basis:scenePlanBasis(s),shots:s.shots.map(v=>({id:v.id,title:v.title,duration:v.duration}))}))}:{}),
     ...(t.sceneId?{previous:d.scenes[index-1],scene:d.scenes[index],sceneWorld:d.scenes[index]?sceneLocationContext(p,d.scenes[index]):undefined,next:d.scenes[index+1]}:{scenes:d.scenes}),shotId:t.shotId,...(t.shotIds?{requestedShotIds:t.shotIds}:{}),...(run.selection?{requestedSceneIds:run.sceneIds}:{} )});
 }
@@ -191,6 +193,8 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
   const timing=`Хронометраж: ${runtimeMode(p)==='free'?'СВОБОДНЫЙ. targetSeconds — пожелание, а не предел. Разница с суммой duration — только note, никогда conflict. Не сокращай действия/паузы автоматически ради ориентира.':'СТРОГИЙ. targetSeconds — верхний предел суммы duration всего фильма. Распределяй время между сценами, не выделяй весь бюджет каждой сцене. Превышение — conflict; предложи монтажное сокращение без ускорения/обрезки речи.'} Актуальный ориентир только brief.targetSeconds. Старые числа секунд в стиле, героях и других документах — устаревшие метаданные, только note; они не требуют изменения художественной основы. Нехватка времени для речи внутри конкретного видео — самостоятельный технический конфликт в обоих режимах. Каждому issues добавь category: runtime_target (только общая длина), runtime_metadata (устаревшее число секунд в документах), speech_fit (реплика не помещается), other (остальное). Не смешивай категории в одном замечании.\n`;
   Object.assign(schemas,SCENE_SPECIALIST_INSTRUCTIONS);
   schemas['shot-planner']=plannerInstruction(run.planPolicyByScene?.[t.sceneId??'']??'balanced');
+  schemas.scenes+=SCENE_CAUSALITY_INSTRUCTION;
+  schemas.story+=SHOT_CAUSALITY_INSTRUCTION+' В ответе narrativeBeat находится внутри direction. Сохрани прежний narrativeBeat, если событие не меняется; уточняй только в соответствии с causalChain. Запиши причину, проживание и решение также в story/stateIn/stateOut, чтобы смысл читался без расшифровки метаданных.';
   schemas.story+=' Если переданы requestedShotIds, сохрани их порядок, duration, состав героев, вид речи и утверждённые события. Новые планы, объединения и удаления только отдельным предложением редактора. Подробно развивай видимое действие в существующих планах, не меняя монтажный набор.';
   schemas.story+=' Если уже есть direction.performance, сохрани актёрскую задачу в возвращаемой direction и согласуй story/stateIn/stateOut с целью, подтекстом, причиной эмоционального поворота и emotionStart/emotionEnd. Не теряй её при переработке других полей. При действительном изменении события явно уточни затронутую игру, не подставляй несовместимую прежнюю реакцию и не заменяй переживание одним механическим жестом.';
   schemas.camera+=' Все screenDirection только из перечисления: left-to-right, right-to-left, toward-camera, away-from-camera, static, custom. Свободное описание — в start/end, не в enum. Необязательное поле без значения пропусти: null недопустим. revealAt только число, если раскрытие есть. Опиши каждый запрошенный ID кратко, без повторения общей основы. Не более 1200 слов на три плана.';
@@ -204,8 +208,10 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
   schemas['scene-expressive-reviewer']+=cameraReview;
   const performanceReview=' Проверь актёрскую дугу каждого присутствующего героя: цель и ожидание, причина/момент осознания, emotionStart → emotionEnd и читаемое изменение лица или тела в visibleAction. Простое моргание, дыхание или расслабление после действия не заменяет обусловленное сюжетом изменение чувства. Для крупного плана проверь, что смысл читается в лице; сдержанная мимика не отменяет поворот. Сверь соседние планы, не повторяй уже сыгранное осознание. Если эмоционального поворота по сюжету нет, не навязывай его. Для недостаточной игры предложи компактный согласованный патч direction.performance и связанных полей. Патч direction содержит полное значение: сохраняй остальные неизменённые поля, включая performance, при правке камеры, времени или композиции. Удаление готовой актёрской задачи не является способом сокращения. Все предложения остаются на выбор режиссёра.';
   schemas.editor+=performanceReview;schemas['scene-expressive-reviewer']+=performanceReview;
+  schemas.editor+=VIEWER_CAUSALITY_REVIEW;schemas['scene-expressive-reviewer']+=VIEWER_CAUSALITY_REVIEW;
   schemas.compress+=' Если direction задан, начальное/конечное изображения и крупности, действия по времени, поворот внимания, позиции, актёрское поведение и переход имеют приоритет над общими эпитетами. Не описывай конечное действие как уже произошедшее в imagePrompt. Для videoPrompt сохрани движение и конечное состояние. Точно перенеси cameraMovement.type/description/from/to, speed, start/end, keepInFrame, framingStart/framingEnd и endFrame, если заданы. Передай наблюдаемую цель purpose кратко, не превращай обоснование в новое действие. Конкретное утверждённое движение важнее общей cameraPolicy; не заменяй его шаблонной статикой или произвольным наездом. В imagePrompt передавай только начальную композицию, не путь движения.';
   schemas.compress+=' Актёрская задача direction.performance — обязательный смысл videoPrompt: сохрани objective, subtext, emotionStart → emotionEnd и причинную последовательность visibleAction. Цель и внутреннее осознание объясняют наблюдаемое поведение и не заменяются общими словами «естественно», «живая мимика» или одним жестом. Это задание на исполнение: не создавай из objective/subtext новые реплики, закадровую речь или надписи. Оставь повод, момент эмоционального перелома и то, как меняются взгляд, лицо или тело; не переноси реакцию раньше её причины и не сглаживай противоположные эмоции в одно нейтральное состояние. Сокращай повторы, а не эмоциональную дугу. Performance соседей — только контекст преемственности, не действие текущего плана. Для imagePrompt передай только соответствующее началу видимое состояние, не всю дугу и не последующее осознание.';
+  schemas.compress+=' narrativeBeat задаёт локальную причинность: для videoPrompt оставь повод → осознание → изменение чувства → решение → видимое поведение. Не копируй всю causalChain сцены или весь emotionalArcs фильма в каждый промпт: только относящийся к текущему плану момент. Если повод показан ранее, реакция опирается на него, а генерация не повторяет предыдущий план. Для imagePrompt — только видимое начальное состояние этого момента, без описания будущей реакции.';
   const stagingGuide=(p.directing?.brief.stagingMode||p.directing?.brief.framePolicy||p.directing?.scenes.some(s=>s.shots.some(shot=>shot.direction?.stagingMode)))?' Постановка задана в staging: режим конкретного плана имеет приоритет над режимом фильма. Не меняй и не возвращай direction.stagingMode — это настройка режиссёра. Для режима readable каждый план содержит одно видимое главное действие и, при необходимости, короткую реакцию. При проверке отмечай непонятную причину/результат, мелкий смысловой предмет и рискованные цепочки физических контактов; предлагай конкретную читаемую постановку, не заменяй утверждённые события автоматически.\n':'';
   return base+timing+facialGuide+stagingGuide+renderCreativeInstructions(p.directing!.brief,p.directing!.scenes.find(s=>s.id===t.sceneId)?.creativeOverrides,t.sceneId?'scene':'scenario')+'\n'+(p.directing!.brief.promptNotes?`Дополнительное задание режиссёра: ${JSON.stringify(p.directing!.brief.promptNotes)}\n`:'')+schemas[t.role]+'\nДанные:\n'+JSON.stringify(context(p,run,t));
 }
@@ -222,6 +228,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
   else if(t.role==='critic')d.critic=z.object({review:text,alternatives:z.array(z.object({title:z.string().max(200),text:z.string().max(30000)})).max(2)}).parse(result);
   else if(t.role==='scenes'){
     const data=z.object({scenes:z.array(sceneSchema).min(1).max(24)}).parse(result);
+    if(screenplayEmotionalArcs(p).length){const missing=data.scenes.find(scene=>scene.causalChain===undefined);if(missing)throw Error(`«${missing.title}»: ответ не содержит causalChain из эмоциональной линии сценария. Добавьте причинную цепочку; для сцены без перспективы героя явно верните [].`);}
     for(const scene of data.scenes)assertSceneLocations(p,scene);
     if(new Set(data.scenes.map(s=>s.id)).size!==data.scenes.length)throw Error('Повторяются ID сцен.');
     // Replacing a reviewed scene map is always explicit in the UI.
@@ -253,6 +260,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
       for(const {shot,...fields} of prepared)Object.assign(shot,fields);
     }else if(t.role==='story'){
       const data=z.object({shots:z.array(directingShotSchema).min(1).max(40)}).parse(result);
+      if(scene.causalChain?.length){const missing=data.shots.find(shot=>!shot.direction?.narrativeBeat);if(missing)throw Error(`«${missing.title}»: ответ потерял direction.narrativeBeat. Укажите роль плана, повод, смысл и видимое действие/реакцию; для перебивки можно выбрать setup или transition без героя.`);}
       if(new Set(data.shots.map(s=>s.id)).size!==data.shots.length)throw Error('Повторяются ID планов.');
       const requested=t.shotIds??(t.shotId?[t.shotId]:undefined);
       if(requested&&(data.shots.length!==requested.length||requested.some(id=>!scene.shots.some(shot=>shot.id===id)||!data.shots.some(shot=>shot.id===id))||data.shots.some(shot=>!requested.includes(shot.id))))throw Error('Верните только выбранные планы с прежними ID.');

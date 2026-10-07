@@ -5,7 +5,7 @@ const {T,D}=await import('../work/tests/browser-film-tools.mjs');
 let current=D.newProject('Фильм'),active=current.id,requests=[],assembled=0;
 const bridge={current:()=>current,activeProjectId:()=>active,replace:p=>current=p,openProject:id=>active=id,run:work=>work(),
   readCurrent:async id=>{A.equal(id,active);return {...current,revision:current.revision+1};},readConnections:async()=>({apiKey:'must-not-leak',providers:[{id:'xai',name:'xAI',configured:true,key:'must-not-leak'}]}),
-  request:async(path,method,body)=>{requests.push({path,method,body});return path==='/api/projects'?D.newProject(body.title):{...current,revision:current.revision+1};},assembleSilent:async()=>{assembled++;}};
+  request:async(path,method,body)=>{requests.push({path,method,body});return path==='/api/projects'?D.newProject(body.title):{...current,revision:current.revision+1};},assembleSilent:async()=>{assembled++;},assembleFinal:async()=>{assembled++;}};
 const tools=T.filmBrowserTools(()=>bridge),tool=name=>tools.find(t=>t.name===name),target=()=>({projectId:current.id,revision:current.revision});
 const rejects=async(name,input)=>{const before=requests.length;await A.rejects(async()=>tool(name).execute(input));A.equal(requests.length,before,'Invalid tool input must not reach the backend');};
 await rejects('edit_current_film',{...target(),operation:'project',action:'deleteVariant',itemId:D.id(),data:{}});
@@ -42,4 +42,12 @@ current.items.find(i=>i.id===empty.id).character=profile;
 const profileSummary=T.filmSummary(current).items.find(i=>i.id===empty.id);A.deepEqual(JSON.parse(JSON.stringify(profileSummary.characterProfile)),profile);A.equal(profileSummary.characterProfileSource,'item');
 const created=await tool('create_film_project').execute({title:'Новый фильм',stagingMode:'readable',framePolicy:'auto'});A.equal(active,created.id);A.equal(current.title,'Новый фильм');
 A.equal(requests.at(-1).path,'/api/projects');A.deepEqual(requests.at(-1).body,{title:'Новый фильм',stagingMode:'readable',framePolicy:'auto'});
+const videoItem=current.items.find(i=>i.stage===7);
+const video={...target(),batchId:D.id(),itemId:videoItem.id,model:'MiniMax-H3',firstFrameId:D.id(),prompt:'Один план',estimate:'4800000000'};
+await tool('generate_film_video').execute(video);A.equal(requests.at(-1).path,`/api/projects/${current.id}/generate`);A.deepEqual(requests.at(-1).body.models,['MiniMax-H3']);A.equal(requests.at(-1).body.count,1);A.deepEqual(requests.at(-1).body.refs,[video.firstFrameId]);
+await rejects('generate_film_video',{...video,...target(),model:'gpt-6-astra'});
+await rejects('generate_film_video',{...video,...target(),estimate:null});
+await rejects('generate_film_video',{...video,...target(),itemId:current.items.find(i=>i.stage===0).id});
+const animaticId=D.id();await tool('prepare_film_videos').execute({...target(),variantId:animaticId});A.equal(requests.at(-1).body.action,'prepare');A.equal(requests.at(-1).body.variantId,animaticId);
+const beforeFinal=assembled;await rejects('assemble_silent_film',target());A.equal(assembled,beforeFinal,'Unapproved video cannot render');
 console.log('PASS browser film tools: allowlisted same-origin actions, current-project revision guard, no identity/keys/URL/budget bypass, one-model storyboard schema, silent assembly guard, compact results. No live requests or paid calls.');

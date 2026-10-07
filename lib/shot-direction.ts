@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {stagingModeSchema,STAGING_MODE_LABELS} from './staging-policy';
 import {facialExpressionSchema,FACIAL_EXPRESSION_LABELS} from './facial-expression';
+import {narrativeBeatSchema,readableNarrativeBeat,type SceneCausalLink} from './emotional-dramaturgy';
 
 const idSchema = z.string().trim().min(1).max(100);
 const note = z.string().max(3000);
@@ -14,6 +15,7 @@ export const FRAMING_NAMES: Record<typeof FRAMINGS[number], string> = {
 
 /** Optional as a whole on both DirectingShot and a flat ScriptPlan. No legacy defaults. */
 export const shotDirectionSchema = z.object({
+  narrativeBeat: narrativeBeatSchema.optional(),
   facialExpression: facialExpressionSchema.optional(),
   stagingMode: stagingModeSchema.optional(),
   requiresEndFrame: z.boolean().optional(),
@@ -62,7 +64,7 @@ export function preserveShotFacialExpression(next:ShotDirection|undefined,previo
   return {...direction,...(previous?.facialExpression!==undefined?{facialExpression:previous.facialExpression}:{}),...(previous?.stagingMode!==undefined?{stagingMode:previous.stagingMode}:{})};
 }
 export type MontageShot = { id: string; duration: number; direction?: ShotDirection };
-export type ScenePlan = { id: string; shots: MontageShot[] };
+export type ScenePlan = { id: string; shots: MontageShot[]; causalChain?:SceneCausalLink[] };
 export type DirectionIssue = {
   severity: 'note' | 'conflict'; code: string; message: string; shotId?: string; field?: string;
 };
@@ -70,6 +72,7 @@ export type DirectionIssue = {
 export function readableShotDirection(d?:ShotDirection):string {
   if(!d)return '';
   return [
+    readableNarrativeBeat(d.narrativeBeat),
     d.stagingMode!==undefined?`Постановка: ${STAGING_MODE_LABELS[d.stagingMode]}`:'',
     d.requiresEndFrame!==undefined?`Точная конечная композиция: ${d.requiresEndFrame?'нужен конечный кадр':'достаточно описания'}`:'',
     d.facialExpression!==undefined?`Мимика: ${FACIAL_EXPRESSION_LABELS[d.facialExpression]}`:'',
@@ -102,6 +105,13 @@ export function validateShotDirection(shot: MontageShot): DirectionIssue[] {
     return issues;
   }
   const d = parsed.data;
+  if(d.narrativeBeat&&['reaction','action-reaction'].includes(d.narrativeBeat.role)){
+    const beat=d.narrativeBeat;
+    if(!beat.character||!beat.trigger.trim()||!beat.meaning.trim()||!beat.emotionStart.trim()||!beat.emotionEnd.trim()||!beat.decision.trim()||!beat.visibleEvidence.trim())
+      add('reaction_causality','Уточните повод, осознание, изменение переживания, решение и видимую реакцию героя.','direction.narrativeBeat','note');
+    if(beat.character&&!d.performance?.some(v=>v.character===beat.character||v.characterId===beat.character))
+      add('reaction_performance','Для указанной реакции пока нет актёрской задачи этого героя.','direction.performance','note');
+  }
   if(d.cameraMovement){
     const {start,end}=d.cameraMovement;
     if(end!==undefined&&end<=(start??0))
@@ -149,6 +159,11 @@ export function validateScenePlan(scene: ScenePlan, nextShotId?: string): Direct
     const to = shot.direction?.transition?.toShotId, actualNext = scene.shots[n + 1]?.id ?? nextShotId;
     if (to && to !== actualNext) issues.push({ severity: 'note', code: 'transition_target', shotId: shot.id,
       field: 'direction.transition.toShotId', message: 'Порядок изменился: проверьте переход к следующему плану.' });
+  }
+  for(const link of scene.causalChain??[]){
+    if(link.emotionStart.trim()===link.emotionEnd.trim())continue;
+    if(!scene.shots.some(s=>s.direction?.narrativeBeat?.character===link.character&&['reaction','action-reaction'].includes(s.direction.narrativeBeat.role)))
+      issues.push({severity:'note',code:'causal_chain_coverage',field:'causalChain',message:`«${link.character}»: проверьте, в каком плане зритель увидит эмоциональный поворот сцены.`});
   }
   return issues;
 }

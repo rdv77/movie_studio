@@ -18,6 +18,7 @@ import {keyframeRoleInstruction} from './keyframes';
 import {effectiveStagingMode,stagingPrompt} from './staging-policy';
 import {effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
 import {cameraPolicyPrompt} from './camera-policy';
+import {readableNarrativeBeat} from './emotional-dramaturgy';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -167,7 +168,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const warnings: string[] = modelId===GROK_VIDEO_1080?['Grok 1080p: передаётся только первый кадр. Конечный кадр и отдельные образы героев исключены; внешний вид задаёт первый кадр.']:[], omitted: PromptExclusion[] = [], sections: PromptSection[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
     if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority,
-      ...(input.kind==='video'&&(['camera-movement','camera-legacy','framing'].includes(key)||key.startsWith('performance.'))?{verbatim:true}:{}) });
+      ...(input.kind==='video'&&(['camera-movement','camera-legacy','framing','narrative-beat'].includes(key)||key.startsWith('performance.'))?{verbatim:true}:{}) });
   };
   const optional = (key: string, label: string, text: string | undefined, priority: number) =>
     paragraphs(text ?? '').forEach((text, n) => add(`${key}.${n}`, label, text, false, priority));
@@ -327,6 +328,11 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     for (const position of direction.positions ?? []) add(`position.${position.subjectId ?? position.subject}`, `Положение ${position.subject}`, middle ? `Одна промежуточная поза между ${position.start} и ${position.end}. Не совмещай несколько поз.` : input.kind === 'image' ? keyframe === 'end' ? position.end : position.start
       : `В начале: ${position.start}. В конце: ${position.end}. Направление на экране: ${position.screenDirection ?? 'сохранить'}.`, true);
     if (input.kind === 'video') {
+      // The performance specialist may express the visible reaction without
+      // repeating why the event matters. Preserve that approved causal meaning
+      // separately; an optimizer must not reduce it to neutral facial motion.
+      if(direction.narrativeBeat)add('narrative-beat','Причина и смысл переживания — показать игрой, без озвучивания мыслей',
+        readableNarrativeBeat(direction.narrativeBeat)+(direction.narrativeBeat.role==='reaction'?'\nЕсли повод уже показан в предыдущем плане, играй только нынешнюю реакцию; не повторяй событие.':''),true);
       const movement=direction.cameraMovement;
       add('camera-movement', 'Движение камеры', movement && [
         `${movement.type}: ${movement.description}`,

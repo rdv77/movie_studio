@@ -505,6 +505,7 @@ function Workspace() {
     request:(path,method,body)=>request(path,method,body),replace,openProject:switchProject,
     run:async work=>{if(browserToolFlight.current||busy||renderAbort.current)throw Error('Дождитесь текущего действия в студии.');browserToolFlight.current=true;const epoch=projectEpoch.current;setBusy(true);setError('');try{return await work();}catch(e){if(projectEpoch.current===epoch)setError(e instanceof Error?e.message:String(e));throw e;}finally{browserToolFlight.current=false;if(projectEpoch.current===epoch)setBusy(false);}},
     assembleSilent:project=>assemble(true,project),
+    assembleFinal:project=>assemble(false,project),
   };
   useEffect(() => {
     const context = (document as any).modelContext;
