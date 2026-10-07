@@ -31,7 +31,7 @@ try{
  const sections=[{key:'action',label:'Действие',text:'Keep the camera still. Notice the crown.',required:true,priority:100},{key:'performance.0',label:'Игра Ивана',text:'Ivan: raised eyebrows, attention turns to curiosity.',required:true,priority:90},block];
  const cap=M.promptCapacity('fal-kling-3.0-pro','video'),job={kind:'video',model:'fal-kling-3.0-pro',prompt:'Long input',promptSections:sections};
  const task=O.optimizationTask(job,cap),reserved=Array.from(block.text+'\n').length;
- assert(task.prompt.includes(`не более ${Math.floor(cap.limit*.8)-reserved} символов`));assert(task.prompt.includes('добавлена программой дословно'));
+ assert(task.prompt.includes(`не более ${Math.floor((cap.limit-reserved)*.8)} символов`));assert(task.prompt.includes('добавлена программой дословно'));
  const editable=sections.filter(s=>s.key!=='facial-expression').map(({key,text})=>({key,text}));
  const response=rows=>JSON.stringify({sections:rows});
  const parsed=O.parseOptimizedPrompt(response(editable),sections,cap);
@@ -45,7 +45,7 @@ try{
  assert.throws(()=>O.parseOptimizedPrompt(response([{key:'action',text:'short'}]),oversized,cap),/Защищённый блок мимики/);
  const utfBlock={...block,text:'я'.repeat(1000)},grok=M.promptCapacity('grok-imagine-video-1.5','video');
  const utfTask=O.optimizationTask({...job,promptSections:[sections[0],utfBlock]},grok);
- assert(utfTask.prompt.includes(`${Math.floor(grok.maxUtf8Bytes*.8)-2001} байт UTF-8`),'Reserve UTF-8 bytes separately from characters');
+ assert(utfTask.prompt.includes(`${Math.floor((grok.maxUtf8Bytes-2001)*.8)} байт UTF-8`),'Reserve UTF-8 bytes separately from characters');
  const changed=[...sections.slice(0,-1),{...block,text:F.facialExpressionPrompt('natural')}];
  assert.notEqual(O.optimizationTask({...job,promptSections:changed},cap).prompt,task.prompt,'A different mode invalidates the persisted optimizer task cache');
  console.log('PASS film/shot facial intensity in legacy prompts and stills, no unapproved override, required acting, verbatim protected compression, precise budget reservation and cache invalidation. No API calls.');

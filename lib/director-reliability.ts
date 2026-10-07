@@ -54,7 +54,13 @@ export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!
     cameraMovement:d.cameraMovement?{...d.cameraMovement,description:excerpt(d.cameraMovement.description),from:excerpt(d.cameraMovement.from),to:excerpt(d.cameraMovement.to),purpose:excerpt(d.cameraMovement.purpose),speed:excerpt(d.cameraMovement.speed,200),keepInFrame:excerpt(d.cameraMovement.keepInFrame)}:undefined,
     positions:d.positions?.slice(0,8).map((v:any)=>({subject:v.subject,subjectId:v.subjectId,start:excerpt(v.start,300),end:excerpt(v.end,300),screenDirection:v.screenDirection})),
   };
-  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition,...(['camera','compress'].includes(t.role)?neighbourCamera(s.direction):{})});
+  // A neighbour's already played realization is part of the acting continuity,
+  // but must not become another action to perform in the requested shot.
+  const neighbourPerformance=(d:any)=>!d?.performance?.length?{}:{performance:d.performance.slice(0,8).map((v:any)=>({
+    character:v.character,characterId:v.characterId,objective:excerpt(v.objective,300),subtext:excerpt(v.subtext,400),
+    emotionStart:excerpt(v.emotionStart,200),emotionEnd:excerpt(v.emotionEnd,200),visibleAction:excerpt(v.visibleAction,600),
+  }))};
+  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition,...(['camera','compress'].includes(t.role)?neighbourCamera(s.direction):{}),...(['performance','compress'].includes(t.role)?neighbourPerformance(s.direction):{})});
   const edge=new Set<number>();for(const shot of selected){const n=scene.shots.indexOf(shot);for(const k of [n-1,n+1])if(k>=0&&k<scene.shots.length&&!ids.includes(scene.shots[k].id))edge.add(k);}
   const stripped=(s:any)=>{const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...content}=s;return content;};
   // Scene specialists own only these target rows; adjacent rows are lightweight

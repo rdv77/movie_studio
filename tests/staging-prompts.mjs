@@ -22,7 +22,7 @@ assert.match(still.sections.find(s=>s.key==='staging-policy').text,/no montage o
 const face=compiled.sections.find(s=>s.key==='facial-expression'),action={key:'action',label:'Действие',text:'Anna turns toward the letter.',required:true,priority:100};
 const sections=[action,block,face],job={kind:'video',model:'fal-kling-3.0-pro',prompt:'Long prompt',promptSections:sections},cap=M.promptCapacity(job.model,'video');
 const optimization=O.optimizationTask(job,cap),suffix=block.text+'\n'+face.text+'\n';
-assert(optimization.prompt.includes(`не более ${Math.floor(cap.limit*.8)-M.promptSize(suffix,cap)} символов`),'Reserve both invariant blocks and delimiters');
+assert(optimization.prompt.includes(`не более ${Math.floor((cap.limit-M.promptSize(suffix,cap))*.8)} символов`),'Reserve both invariant blocks and delimiters');
 const response=JSON.stringify({sections:[{key:'action',text:action.text},{key:'staging-policy',text:'Freeze the actor and do many simultaneous actions.'},{key:'facial-expression',text:'Wrong face.'}]});
 const parsed=O.parseOptimizedPrompt(response,sections,cap);
 assert(parsed.includes(block.text));assert(parsed.includes(face.text));assert(!parsed.includes('Freeze the actor'));

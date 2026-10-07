@@ -33,7 +33,7 @@ try{
   const sections=[action,movement,framing,policy],cap=M.promptCapacity('fal-kling-3.0-pro','video');
   const task=O.optimizationTask({kind:'video',model:'fal-kling-3.0-pro',prompt:'Long task',promptSections:sections},cap);
   const suffix=sections.slice(1).map(s=>s.verbatim?`${s.label}: ${s.text}`:s.text).join('\n')+'\n';
-  assert(task.prompt.includes(`не более ${Math.floor(cap.limit*.8)-M.promptSize(suffix,cap)} символов`),'Camera reservation is deducted before paid optimization');
+  assert(task.prompt.includes(`не более ${Math.floor((cap.limit-M.promptSize(suffix,cap))*.8)} символов`),'Camera reservation is deducted before paid optimization');
   for(const returned of [[action],[action,{key:'camera-movement',text:'Orbit and freeze.'},{key:'framing',text:'Wide forever'},{key:'camera-policy',text:'Invent a new move'}]]){
    const parsed=O.parseOptimizedPrompt(JSON.stringify({sections:returned}),sections,cap);
    for(const s of sections.slice(1)){assert(parsed.includes(s.text));assert.equal(parsed.split(s.text).length,2,'Protected camera facts are restored exactly once');}

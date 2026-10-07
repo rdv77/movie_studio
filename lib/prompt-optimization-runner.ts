@@ -13,7 +13,11 @@ export type PromptStateScope=<T>(work:()=>Promise<T>)=>Promise<T>;
 const directState:PromptStateScope=work=>work();
 
 function applyPrompt(job:Job,prompt:string,cap:PromptCapacity){
-  job.prompt=prompt;job.promptSections=undefined;
+  job.prompt=prompt;
+  // Keep the frozen compiler input when it contains protected shot direction.
+  // A later provider-limit recheck or fallback must reserve and restore acting
+  // and camera again, rather than treating this optimized string as free text.
+  if(!job.promptSections?.some(section=>section.verbatim))job.promptSections=undefined;
   job.promptTokenCount=cap.unit==='tokens'?{text:prompt,count:promptSize(prompt,cap),method:'utf8-upper-bound'}:undefined;
   if(job.compilation){job.compilation.budget={...job.compilation.budget,limit:cap.limit,unit:cap.unit,used:promptSize(prompt,cap),compiledCharacters:prompt.length,remaining:cap.limit-promptSize(prompt,cap),needsOptimization:false};job.compilation.compression.shortened=true;}
   job.timings={...job.timings,preparationFinishedAt:now()};

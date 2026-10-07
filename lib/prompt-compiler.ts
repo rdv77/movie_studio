@@ -167,7 +167,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const warnings: string[] = modelId===GROK_VIDEO_1080?['Grok 1080p: передаётся только первый кадр. Конечный кадр и отдельные образы героев исключены; внешний вид задаёт первый кадр.']:[], omitted: PromptExclusion[] = [], sections: PromptSection[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
     if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority,
-      ...(input.kind==='video'&&['camera-movement','camera-legacy','framing'].includes(key)?{verbatim:true}:{}) });
+      ...(input.kind==='video'&&(['camera-movement','camera-legacy','framing'].includes(key)||key.startsWith('performance.'))?{verbatim:true}:{}) });
   };
   const optional = (key: string, label: string, text: string | undefined, priority: number) =>
     paragraphs(text ?? '').forEach((text, n) => add(`${key}.${n}`, label, text, false, priority));
@@ -340,10 +340,26 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       exclude('transition', 'Монтажная склейка находится за пределами генерируемого клипа', direction.transition?.description);
       optional('sound', 'Звуки без собственной речи и пения', [direction.sound?.ambience, ...(direction.sound?.effects ?? []).map(s => `${s.at} сек: ${s.description}`), direction.sound?.silence ? 'Тишина' : undefined].filter(Boolean).join('\n\n'), 55);
     }
-    for(const [n,a] of (direction.performance??[]).entries())add(`performance.${n}`,stillPlan?'Эмоция в изображаемый момент':'Видимые актёрские действия текущего плана',stillPlan&&keyframe!=='middle'
+    // The approved shot task supplies the motivation as well as its visible arc.
+    // Omitting objective/subtext reduced meaningful reactions to generic movement.
+    // Videos freeze this compact task for optimization; stills retain one instant.
+    for(const [n,a] of (direction.performance??[]).entries())add(`performance.${n}`,stillPlan?'Эмоция в изображаемый момент':'Актёрское задание — передать игрой, без озвучивания мыслей',stillPlan&&keyframe!=='middle'
       ? `${a.character}: ${keyframe==='end'?a.emotionEnd:a.emotionStart}`
+      : videoPlan ? `${a.character}. ${[
+        a.objective&&`Цель: ${a.objective}`,a.subtext&&`Подтекст: ${a.subtext}`,
+        a.emotionStart&&`В начале: ${a.emotionStart}`,a.visibleAction&&`Развитие и видимая реакция: ${a.visibleAction}`,
+        a.emotionEnd&&`В конце: ${a.emotionEnd}`,
+      ].filter(Boolean).join('; ')}`
       : `${a.character}: ${a.visibleAction}. ${a.emotionStart} → ${a.emotionEnd}`,true,90);
   } else if (!(stillPlan && keyframe === 'end' && plan?.stateOut)) add('camera-legacy', input.kind === 'image' ? 'Ракурс ключевого кадра' : 'Камера', plan?.camera ?? plan?.cinematography, true);
+  if(videoPlan){
+    if((plan?.cast?.length||plan?.characterIds?.length||heroes.length)&&!direction?.performance?.length)warnings.push('В утверждённом сценарии этого плана нет отдельного актёрского задания. Общая настройка мимики не заменяет цель, подтекст и смену эмоций. Запустите «Доработать: Актёрская работа», проверьте и утвердите план, затем нажмите «Подготовить промпты и применить сценарий» перед новой видеогенерацией.');
+    for(const actor of direction?.performance??[]){
+      const fields={objective:'цель',subtext:'подтекст',visibleAction:'видимая реакция',emotionStart:'начальная эмоция',emotionEnd:'конечная эмоция'} as const;
+      const missing=Object.entries(fields).filter(([field])=>{const value=actor[field as keyof typeof fields];return typeof value!=='string'||!value.trim();}).map(([,label])=>label);
+      if(missing.length)warnings.push(`В актёрском задании героя «${actor.character}» не заполнены: ${missing.join(', ')}. Компилятор не выдумывает переживания: дополните задание в подробном сценарии и примените его перед новой видеогенерацией.`);
+    }
+  }
   optional('design', 'Художественное решение текущего плана', plan?.productionDesign, 90);
   for (const style of p.items.filter(i => i.stage === 2 && active(i) && approved(i))) {
     if (anchoredStill) exclude(`style.${style.id}`, 'Общее описание фильма — стиль уже задан первым изображением', approved(style)!.text);
