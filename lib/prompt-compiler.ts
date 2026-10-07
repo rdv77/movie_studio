@@ -208,6 +208,11 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   // Video adapters require a first frame. With an explicit shot entrance it is
   // the current-state snapshot; replaying an entire scene history can undo it.
   const currentVideoState = videoPlan && !!plan?.stateIn?.trim();
+  // Modern first-keyframe requests have an explicit approved snapshot. The
+  // scene ledger describes the whole scene, so replaying its prop history can
+  // put objects back or reveal a character before the current shot starts.
+  // Legacy calls without a declared keyframe keep their historical context.
+  const currentStillState = stillPlan && input.keyframe === 'start' && !!plan?.stateIn?.trim() && !!direction?.startFrame?.trim();
   const anchoredStill = stillPlan && keyframe !== 'start' && !!(input.startFrameId || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'first-frame'));
   const exclude = (key: string, label: string, text: string | undefined) => {
     if (text?.trim()) omitted.push({key, label, reason: 'irrelevant', characters: text.length});
@@ -230,7 +235,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     const cast = (plan.cast ?? (visible.length ? visible : speech.speechType === 'character' ? [speech.speaker] : [])).map(name => heroes.find(h => h.item.id === name||boundCharacterId(p,name)===h.item.id)?.profile.name ?? name);
     const bindings=(plan.cast??[]).flatMap(name=>{const hero=heroes.find(h=>boundCharacterId(p,name)===h.item.id);return hero&&normalized(name)!==normalized(hero.profile.name)?[`${name} — это ${hero.profile.name} из утверждённого образа; один персонаж, не два.`]:[];});
     add('hero-bindings','Соответствие имён сценарию',bindings.join(' '),true);
-    add('cast', 'Участники в кадре', cast.length ? `${cast.join(', ')}. Показывай только этих участников; упоминания соседних планов не добавляют героев в кадр.`
+    add('cast', 'Участники в кадре', cast.length ? `${cast.join(', ')}. Показывай только этих участников; упоминания соседних планов не добавляют героев в кадр.${currentStillState?' Состав относится ко всему плану: скрытый в начальном состоянии герой остаётся скрытым, его присутствие в списке или референсах не требует показывать его.':''}`
       : plan.cast !== undefined || plan.characterIds !== undefined ? 'Персонажей нет. Не добавляй людей или героев.'
       : 'Состав не выделен в старом плане. Показывай только персонажей, непосредственно названных в его описании; не добавляй героев из соседних планов или референсов.', true);
     if (input.kind === 'image') {
@@ -276,13 +281,17 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const continuity = anchoredStill || currentVideoState ? [] : plan?.sceneContinuity ?? scene?.continuity ?? [];
   if (anchoredStill) add('source-continuity', 'Что сохранить из первого изображения', 'Сохрани идентичность героев, одежду, постоянные предметы, географию, технику рисунка, палитру и свет выбранного первого кадра. Изменяй позы, взгляды, положение предметов и крупность только согласно целевому моменту ниже. Описание конечного состояния важнее начального расположения на референсе.', true);
   if (currentVideoState) add('source-continuity', 'Текущее состояние по первому кадру', 'Первый кадр задаёт текущую одежду, реквизит, владельцев предметов и локацию. Сохрани их и внешность героев. Начало, конец и действия текущего плана задают только явно описанные изменения; не возвращай прежние состояния, не меняй локацию, не раскрывай скрытых персонажей или предметы раньше указанного момента.', true);
+  if (currentStillState) add('current-still-state', 'Приоритет начального состояния', 'Изобрази только утверждённые «Состояние в начале» и «Начальный ключевой кадр». Они определяют позы, эмоцию, видимость героев, положение и владельцев предметов. Общие описания сцены, художественного решения и образцы внешности не отменяют этот момент. Не показывай результат будущего действия и не возвращай прежнее положение реквизита.', true);
   for (const c of continuity.filter(c => heroes.some(h => c.characterId ? c.characterId === h.item.id : normalized(c.character) === normalized(h.profile.name)) ||
     (plan?.cast ?? []).some(name => name === c.characterId || normalized(name) === normalized(c.character))))
-    add(`continuity.${c.characterId ?? c.character}`, `Одежда и предметы ${c.character}`, `Одежда: ${c.outfit}. Предметы, состояние и владелец: ${c.props}. Не меняй их без описанного действия.`, true);
+    {
+      add(`continuity.${c.characterId ?? c.character}`, currentStillState?`Постоянная одежда ${c.character}`:`Одежда и предметы ${c.character}`, currentStillState?`Одежда: ${c.outfit}. Текущее положение героя и предметов задано начальным кадром.`:`Одежда: ${c.outfit}. Предметы, состояние и владелец: ${c.props}. Не меняй их без описанного действия.`, true);
+      if(currentStillState)exclude(`scene-props.${c.characterId??c.character}`,'История предметов сцены — начальное состояние уже задано',c.props);
+    }
   // History is ordered: take / hand over / take again are distinct transitions,
   // even when two rows have identical text. Never deduplicate these changes.
   for (const change of plan?.previousChanges ?? []) {
-    if (anchoredStill || currentVideoState) exclude(`prior.${change.id}`, 'История действий — состояние уже задано текущим планом и первым кадром', change.changes);
+    if (anchoredStill || currentVideoState || currentStillState) exclude(`prior.${change.id}`, 'История действий — состояние уже задано текущим планом и первым кадром', change.changes);
     else add(`prior.${change.id}`, 'Уже произошедшее изменение — сохранять', change.changes, true);
   }
   if (!anchoredStill && !currentVideoState && !continuity.length) add('legacy-continuity', 'Непрерывность одежды, предметов и положения', plan?.continuity, true);
@@ -321,7 +330,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     const framing = input.kind === 'image' && !middle ? keyframe === 'end' ? direction.framingEnd : direction.framingStart : undefined;
     const framingPath = [direction.framingStart && FRAMING_NAMES[direction.framingStart], direction.framingEnd && FRAMING_NAMES[direction.framingEnd]].filter(Boolean).join(' → ');
     add('framing', 'Крупность', framing ? FRAMING_NAMES[framing] : middle && framingPath ? `Промежуточная на пути ${framingPath}; одна композиция.` : input.kind === 'video' ? framingPath : '', true);
-    if (!(stillPlan && keyframe === 'end' && direction.endFrame)) add('composition', 'Композиция', direction.composition, true);
+    if (!(stillPlan && keyframe === 'end' && direction.endFrame) && !currentStillState) add('composition', 'Композиция', direction.composition, true);
     add('angle', 'Ракурс', direction.angle && `${direction.angle.type}${direction.angle.description ? ': ' + direction.angle.description : ''}`, true);
     add('attention', 'Центр внимания', middle && direction.attention ? `Одна промежуточная фаза между ${direction.attention.start} и ${direction.attention.end}.` : input.kind === 'image' ? keyframe === 'end' ? direction.attention?.end : direction.attention?.start
       : direction.attention && `В начале: ${direction.attention.start}. В конце: ${direction.attention.end}.`, true);
@@ -395,8 +404,11 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const roleTask = stillPlan && !!input.keyframeInstruction?.trim() && taskWithoutSeries === input.keyframeInstruction.trim();
   const automaticStartTask = stillPlan && keyframe !== 'start' && !!generatedTask.trim() && taskWithoutSeries === generatedTask.trim();
   const defaultVideoWrapper = videoPlan && !((sourcePlan as PromptPlan & {videoPrompt?:string})?.videoPrompt) && taskWithoutSeries === generatedTask.trim();
-  if (roleTask || automaticStartTask || defaultVideoWrapper) {
-    omitted.push({key: 'task', label: roleTask ? 'Повтор назначения ключевого кадра' : 'Автоматический промпт первого кадра — не относится к этому моменту', reason: roleTask ? 'duplicate' : 'irrelevant', characters: taskWithoutSeries.length});
+  const preparedStillShot=currentStillState?p.directing?.scenes.flatMap(scene=>scene.shots).find(shot=>shot.id===sourcePlan?.id):undefined;
+  const preparedStillStartTask=!!preparedStillShot?.promptBasis&&taskWithoutSeries===generatedTask.trim()&&preparedStillShot.imagePrompt?.trim()===taskWithoutSeries&&
+    (sourcePlan as PromptPlan&{imagePrompt?:string})?.imagePrompt?.trim()===taskWithoutSeries;
+  if (roleTask || automaticStartTask || defaultVideoWrapper || preparedStillStartTask) {
+    omitted.push({key: 'task', label: preparedStillStartTask?'Повтор автоматически подготовленного первого кадра — состояние задано утверждённой постановкой':roleTask ? 'Повтор назначения ключевого кадра' : 'Автоматический промпт первого кадра — не относится к этому моменту', reason: roleTask||preparedStillStartTask ? 'duplicate' : 'irrelevant', characters: taskWithoutSeries.length});
     add('series', 'Вариант', input.prompt.match(/Создай самостоятельный вариант \d+ из \d+, сохраняя обязательные признаки текущего плана\.$/)?.[0], true);
   } else if (plan && (input.instruction?.trim() || taskWithoutSeries === generatedTask.trim())) {
     const saved=input.kind==='image'?(sourcePlan as PromptPlan&{imagePrompt?:string})?.imagePrompt:(sourcePlan as PromptPlan&{videoPrompt?:string})?.videoPrompt;

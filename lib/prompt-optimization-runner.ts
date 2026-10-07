@@ -9,6 +9,14 @@ import {zenPromptLimit} from './zencreator-provider';
 import {stopJobWait} from './job-wait';
 
 export const PROMPT_OPTIMIZERS=['gpt-6-astra','grok-4.6','MiniMax-M2.7'];
+// Prefer a model that has actually returned a usable directing answer in this
+// project. Mere submission/usage or an unknown paid outcome is not success.
+function successfulOptimizerModels(jobs:readonly Job[]):string[]{
+  const successful=jobs.map((job,index)=>({job,index}))
+    .filter(({job})=>job.kind==='text'&&job.purpose==='directing'&&job.status==='done'&&!job.error&&!!job.output?.text?.trim()&&PROMPT_OPTIMIZERS.includes(job.model))
+    .sort((a,b)=>(Date.parse(b.job.timings?.finishedAt??b.job.created)||0)-(Date.parse(a.job.timings?.finishedAt??a.job.created)||0)||b.index-a.index);
+  return [...new Set(successful.map(({job})=>job.model))];
+}
 export type PromptStateScope=<T>(work:()=>Promise<T>)=>Promise<T>;
 const directState:PromptStateScope=work=>work();
 
@@ -97,7 +105,7 @@ export async function prepareMediaPrompt(user:string,id:string,job:Job,key:strin
   const previous=job.promptOptimization,task=optimizationTask(job,cap);
   // Keep the large snapshot inside a short scoped state operation, never while
   // waiting for the optimizer provider. No cross-project cache or secret storage.
-  const context=await withState(async()=>{const p=await loadProject(user,id);return {saved:savedOptimization(p,job,cap,task),cooling:coolingOptimizers(p.jobs)};});
+  const context=await withState(async()=>{const p=await loadProject(user,id);return {saved:savedOptimization(p,job,cap,task),cooling:coolingOptimizers(p.jobs),successful:successfulOptimizerModels(p.jobs)};});
   if(context.saved){
     const saved=context.saved;
     return await change(p=>{
@@ -117,6 +125,8 @@ export async function prepareMediaPrompt(user:string,id:string,job:Job,key:strin
     try{available.push({id:candidate,key:await getKey(user,model(candidate).provider)});}catch{}
   }
   if(!available.length)throw new ProviderError(context.cooling.length?'Доступные LLM подготовки временно пропущены после повторных ошибок. Проверьте подключения или повторите через 10 минут. Видео не отправлено.':'Нет доступной резервной LLM для подготовки промпта. Проверьте подключения xAI, MiniMax и OpenAI. Видео не отправлено.',true,true);
+  const preferred=context.successful.find(id=>available.some(candidate=>candidate.id===id));
+  if(preferred){const index=available.findIndex(candidate=>candidate.id===preferred);available.unshift(...available.splice(index,1));}
   const {id:optimizer,key:optimizerKey}=available[0];
   const auditId=crypto.randomUUID();
   // Explicit construction avoids inheriting parent receipts, wait clocks,
