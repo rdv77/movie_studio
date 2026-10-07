@@ -5,6 +5,7 @@ import type {ShotDirection} from './shot-direction';
 import {materialBasis} from './material-basis';
 import {versionShot,versionSignature,versionStable} from './creative-versions';
 import {GROK_IMAGE_MODEL,LEGACY_IMAGE_SETTINGS,type ImageSettings} from './image-quality';
+import {unresolvedJobBlocks} from './job-wait';
 
 export const KEYFRAME_ROLES=['start','middle','end'] as const;
 export const KEYFRAME_ROLE_NAMES:Record<KeyframeRole,string>={start:'Первый кадр',middle:'Промежуточный кадр',end:'Последний кадр'};
@@ -15,7 +16,7 @@ export type KeyframeApproval=KeyframeSelection&{basis:string};
 export type KeyframeMetadata={keyframe?:KeyframeRole;pairId?:string;sourceFrameVariantId?:string;keyframeSourceBasis?:string;keyframeReviewBasis?:string};
 export type KeyframeVariant=Variant&KeyframeMetadata;
 export type KeyframeJob=Job&KeyframeMetadata;
-export type KeyframeItem=Item&{keyframeMode?:KeyframeMode;keyframeSelection?:KeyframeSelection;approvedKeyframes?:KeyframeApproval};
+export type KeyframeItem=Item&{keyframeMode?:KeyframeMode;keyframePolicy?:'legacy'|'auto'|'single'|'pair';keyframeSelection?:KeyframeSelection;approvedKeyframes?:KeyframeApproval};
 const identity=z.string().min(1).max(100);
 export const keyframeSelectionSchema=z.object({startId:identity.optional(),middleId:identity.optional(),endId:identity.optional()}).strict();
 export const keyframeConfigSchema=z.object({mode:z.enum(['single','pair','triple'])}).strict();
@@ -39,7 +40,22 @@ export function recommendedKeyframeMode(direction?:ShotDirection):KeyframeMode{
     direction.positions?.some(position=>position.start.trim()!==position.end.trim())?'pair':'single';
 }
 export function keyframeMode(item:KeyframeItem,direction?:ShotDirection):KeyframeMode{return item.keyframeMode??recommendedKeyframeMode(direction);}
-export function planKeyframeMode(p:Project,item:KeyframeItem):KeyframeMode{return keyframeMode(item,versionShot(p,item)?.direction);}
+export function planKeyframeMode(p:Project,item:KeyframeItem):KeyframeMode{
+  if(item.keyframeMode)return item.keyframeMode;
+  const direction=versionShot(p,item)?.direction,policy=item.keyframePolicy??p.directing?.brief.framePolicy;
+  if(policy==='single'||policy==='pair')return policy;
+  if(policy==='auto')return direction?.requiresEndFrame?'pair':'single';
+  return recommendedKeyframeMode(direction);
+}
+/** A new project preference must not reinterpret already reviewed frame sets. */
+export function freezeExistingKeyframeModes(p:Project):void{
+  const activeImages=new Set(p.jobs.filter(j=>j.kind==='image'&&(['queued','dispatching','pending','saving'].includes(j.status)||unresolvedJobBlocks(j))).map(j=>j.itemId));
+  for(const raw of p.items){const item=raw as KeyframeItem;
+    if(item.stage===5&&!item.removedAt&&!item.planArchive&&!item.keyframeMode&&!item.keyframePolicy&&
+      (item.variants.some(v=>v.kind==='image'&&!!v.assetId)||activeImages.has(item.id)))
+      item.keyframePolicy=p.directing?.brief.framePolicy??'legacy';
+  }
+}
 export function hasKeyframeConfig(p:Project,item:KeyframeItem):boolean{return !!(item.keyframeMode||item.keyframeSelection||item.approvedKeyframes)||planKeyframeMode(p,item)!=='single';}
 export function requiredKeyframeRoles(mode:KeyframeMode):KeyframeRole[]{return mode==='single'?['start']:mode==='pair'?['start','end']:['start','middle','end'];}
 export function keyframeOptions(item:Item,role:KeyframeRole):KeyframeVariant[]{

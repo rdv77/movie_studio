@@ -26,9 +26,10 @@ export function KeyframeEditor({p,item:raw,busy,saveConfig,select,approve,runFra
   return <section className="space-y-4 rounded border border-border p-4" aria-label={`Ключевые кадры: ${item.title}`}>
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">Ключевые кадры плана</h3>{approved&&<span className="text-sm text-primary">✓ Комплект утверждён</span>}</div>
     <label htmlFor={`${uid}-mode`} className="block space-y-2"><span className="text-sm">Как показать действие в раскадровке и аниматике</span><select id={`${uid}-mode`} className="w-full rounded border border-input bg-background p-2 text-sm" disabled={locked} value={mode} onChange={event=>perform(()=>saveConfig(event.target.value as KeyframeMode))}>
-      <option value="single">Один кадр · статичный план</option><option value="pair">Два кадра · начало и окончание</option><option value="triple">Три кадра · начало, середина и окончание</option>
+      <option value="single">Один кадр · действие по описанию</option><option value="pair">Два кадра · начало и окончание</option><option value="triple">Три кадра · начало, середина и окончание</option>
     </select></label>
     <p className="text-xs text-muted-foreground">Первый кадр задаёт образ плана. Остальные создаются по выбранному первому изображению с сохранением модели и качества. Выбор картинки и утверждение комплекта — отдельные действия.</p>
+    {mode==='single'&&<p className="text-xs text-muted-foreground">В аниматике показано одно изображение, а видео получит описание действия и конечного состояния. Один кадр не означает неподвижность героя или камеры.</p>}
     {operation&&<p role="status" className="text-sm">Сохраняем изменения… Отметка обновится после ответа сервера.</p>}
     <div className={`grid gap-4 ${roles.length>1?'md:grid-cols-2':''}`}>
       {roles.map(role=>{const options=keyframeOptions(item,role),current=selectedKeyframe(item,role);return <article key={role} className="space-y-3 rounded border border-border p-3">

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {stagingModeSchema,STAGING_MODE_LABELS} from './staging-policy';
 import {facialExpressionSchema,FACIAL_EXPRESSION_LABELS} from './facial-expression';
 
 const idSchema = z.string().trim().min(1).max(100);
@@ -14,6 +15,8 @@ export const FRAMING_NAMES: Record<typeof FRAMINGS[number], string> = {
 /** Optional as a whole on both DirectingShot and a flat ScriptPlan. No legacy defaults. */
 export const shotDirectionSchema = z.object({
   facialExpression: facialExpressionSchema.optional(),
+  stagingMode: stagingModeSchema.optional(),
+  requiresEndFrame: z.boolean().optional(),
   framingStart: z.enum(FRAMINGS).optional(),
   framingEnd: z.enum(FRAMINGS).optional(),
   angle: z.object({
@@ -53,9 +56,9 @@ export type ShotDirection = z.infer<typeof shotDirectionSchema>;
 /** Agent suggestions may develop staging but cannot replace a director's
  * explicit acting preference. Manual shot edits deliberately bypass this. */
 export function preserveShotFacialExpression(next:ShotDirection|undefined,previous:ShotDirection|undefined):ShotDirection|undefined {
-  if(!next&&!previous?.facialExpression)return undefined;
-  const {facialExpression,...direction}=next??{};
-  return {...direction,...(previous?.facialExpression!==undefined?{facialExpression:previous.facialExpression}:{})};
+  if(!next&&!previous?.facialExpression&&!previous?.stagingMode)return undefined;
+  const {facialExpression,stagingMode,...direction}=next??{};
+  return {...direction,...(previous?.facialExpression!==undefined?{facialExpression:previous.facialExpression}:{}),...(previous?.stagingMode!==undefined?{stagingMode:previous.stagingMode}:{})};
 }
 export type MontageShot = { id: string; duration: number; direction?: ShotDirection };
 export type ScenePlan = { id: string; shots: MontageShot[] };
@@ -66,6 +69,8 @@ export type DirectionIssue = {
 export function readableShotDirection(d?:ShotDirection):string {
   if(!d)return '';
   return [
+    d.stagingMode!==undefined?`Постановка: ${STAGING_MODE_LABELS[d.stagingMode]}`:'',
+    d.requiresEndFrame!==undefined?`Точная конечная композиция: ${d.requiresEndFrame?'нужен конечный кадр':'достаточно описания'}`:'',
     d.facialExpression!==undefined?`Мимика: ${FACIAL_EXPRESSION_LABELS[d.facialExpression]}`:'',
     d.framingStart||d.framingEnd?`Крупность: ${d.framingStart?FRAMING_NAMES[d.framingStart]:'не задана'} → ${d.framingEnd?FRAMING_NAMES[d.framingEnd]:'не задана'}`:'',
     d.startFrame?`Начальный ключевой кадр: ${d.startFrame}`:'',d.endFrame?`Конечный ключевой кадр: ${d.endFrame}`:'',

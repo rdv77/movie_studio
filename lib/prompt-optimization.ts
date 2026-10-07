@@ -5,13 +5,13 @@ import {promptCapacity,fitsPrompt,promptUnit,promptSize,tokenUpperBound,type Pro
 // Only a short compiler-owned directive is locked verbatim. A whole performance
 // biography would consume the API budget; its shot-specific sections stay required
 // and compressible instead. Never trust a model to reproduce this policy block.
-const protectedSection=(section:PromptSection)=>section.key==='facial-expression';
+const protectedSection=(section:PromptSection)=>section.key==='facial-expression'||section.key==='staging-policy';
 function optimizationBudget(sections:PromptSection[],cap:PromptCapacity){
   const locked=sections.filter(protectedSection),editable=sections.filter(s=>!protectedSection(s));
   const suffix=locked.map(s=>s.text).join('\n')+(locked.length&&editable.length?'\n':'');
   const limit=Math.floor(cap.limit*.8)-promptSize(suffix,cap);
   const byteLimit=cap.unit==='tokens'||cap.maxUtf8Bytes?Math.floor((cap.maxUtf8Bytes??cap.limit)*.8)-tokenUpperBound(suffix):undefined;
-  if(limit<=0||byteLimit!==undefined&&byteLimit<=0)throw Error('Защищённый блок мимики не оставляет места для постановки в лимите выбранной модели. Он не обрезан. Выберите модель с большим лимитом или сократите настройку; запрос не отправлен.');
+  if(limit<=0||byteLimit!==undefined&&byteLimit<=0)throw Error('Защищённый блок мимики и постановки не оставляет места для постановки в лимите выбранной модели. Он не обрезан. Выберите модель с большим лимитом или сократите настройку; запрос не отправлен.');
   return {locked,editable,limit,byteLimit};
 }
 

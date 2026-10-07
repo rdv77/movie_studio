@@ -1,5 +1,7 @@
 import { api, owner, runtime } from '@/lib/server';
 import { newProject, now } from '@/lib/domain';
+import {ensureDirecting} from '@/lib/directing';
+import {stagingModeSchema,framePolicySchema} from '@/lib/staging-policy';
 import { z } from 'zod';
 export const GET = api(async (req) => {
   const user = await owner(req);
@@ -12,10 +14,11 @@ export const GET = api(async (req) => {
 });
 export const POST = api(async (req) => {
   const user = await owner(req, true);
-  const { title } = z
-    .object({ title: z.string().trim().min(1).max(100) })
+  const { title,stagingMode,framePolicy } = z
+    .object({ title: z.string().trim().min(1).max(100),stagingMode:stagingModeSchema.default('readable'),framePolicy:framePolicySchema.default('auto') })
     .parse(await req.json());
   const p = newProject(title);
+  Object.assign(ensureDirecting(p).brief,{stagingMode,framePolicy});
   await runtime.DB.prepare(
     'INSERT INTO projects (id,owner,title,state,revision,updated) VALUES (?,?,?,?,?,?)',
   )

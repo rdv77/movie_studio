@@ -15,6 +15,7 @@ import { VIDEO_DURATION_CONTRACTS, videoRequestTiming } from './video-duration';
 import {compactPromptText,preparedPromptBody,frameStyleText} from './prompt-text';
 import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import {keyframeRoleInstruction} from './keyframes';
+import {effectiveStagingMode,stagingPrompt} from './staging-policy';
 import {effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
@@ -196,6 +197,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   if (ids?.some(id => !locations.some(location => location.id === id))) throw new PromptCompilationError('missing_location', 'В плане указана удалённая или неутверждённая локация. Выберите локацию текущего проекта.');
   const locationState = plan?.locationState ?? (scene as typeof scene & { locationState?: LocationState })?.locationState;
 
+  const staging=effectiveStagingMode(p.directing?.brief.stagingMode,direction?.stagingMode);
   const keyframe = input.keyframe ?? 'start';
   const stillPlan = input.kind === 'image' && !!plan;
   const videoPlan = input.kind === 'video' && !!plan;
@@ -247,7 +249,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       add('start-frame', 'Начальная композиция', direction?.startFrame, true);
       add('end-frame', 'Конечная композиция', direction?.endFrame, true);
       add('changes', 'Изменения в действии, сохраняющиеся после плана', plan.continuityChanges, true);
-      add('shot-duration', 'Время действия', duration === undefined ? undefined : `Заверши описанное действие за ${duration} сек; затем удерживай итоговую позу до конца клипа. Не добавляй новые события.`, true);
+      add('shot-duration', 'Время действия', duration === undefined ? undefined : staging ? `Распредели описанное действие и короткую реакцию на ${duration} сек. Не замирай в финальной позе: сохраняй естественное микродвижение; пауза только если явно задана. Не добавляй новые события.` : `Заверши описанное действие за ${duration} сек; затем удерживай итоговую позу до конца клипа. Не добавляй новые события.`, true);
     }
   }
   for (const hero of heroes) {
@@ -380,6 +382,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   // The current film/approved shot setting is compiled for every new request,
   // including legacy shots with an older prepared prompt. Never read unapproved
   // shot edits or rewrite an already queued job to obtain this preference.
+  if(plan&&staging)add('staging-policy','Читаемость действия и живое завершение',stagingPrompt(staging,input.kind),true);
   if(visibleFaces)add('facial-expression','Актуальная выразительность мимики',facialExpressionPrompt(effectiveFacialExpression(p.directing?.brief.facialExpression,direction?.facialExpression)),true);
 
   const knownOwners = new Map<string, Item>();

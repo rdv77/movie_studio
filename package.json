@@ -18,6 +18,7 @@
     "test": "node tests/all.mjs",
     "test:api": "node tests/api.mjs",
     "test:facial-expression": "node tests/facial-expression.mjs && node tests/facial-expression-prompts.mjs && node tests/facial-expression-basis.mjs && node tests/shot-direction-editor.mjs",
+    "test:staging": "node tests/staging-policy.mjs && node tests/staging-prompts.mjs && node tests/staging-keyframes.mjs && node tests/staging-policy-ui.mjs",
     "test:characters": "node tests/characters.mjs",
     "test:plan-sync": "node tests/plan-sync.mjs",
     "test:storyboard-prompt": "node tests/storyboard-image-prompt.mjs",

@@ -2,6 +2,8 @@
 import { useState,useEffect,useRef } from 'react';
 import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
 import {FacialExpressionControl} from './facial-expression-control';
+import {StagingModeControl,FramePolicyControl} from './staging-policy-controls';
+import {STAGING_MODE_LABELS,FRAME_POLICY_LABELS} from '@/lib/staging-policy';
 import {FACIAL_EXPRESSION_LABELS} from '@/lib/facial-expression';
 import { GENRE_OPTIONS,renderCreativeInstructions } from '@/lib/creative-brief';
 import {ShotDirectionEditor,ShotDirectionSummary,directionEditorIssues} from './shot-direction-editor';
@@ -96,6 +98,9 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
         <F label="Порядок производства"><select className="w-full rounded border p-2 bg-background" value={order} onChange={e=>setOrder(e.target.value as typeof order)}><option value="voice-first">Сначала голоса и аниматик, затем видео</option><option value="video-first">Сначала видео, затем голоса под его длительность</option></select><small>При озвучке после видео проверяем фактическую длину файлов. Речь не обрезается и не ускоряется.</small></F>
       </div>
       <CreativeStrengthControls value={brief.strengths} disabled={locked} onChange={strengths=>setBrief({...brief,strengths})}/>
+      <StagingModeControl value={brief.stagingMode} disabled={locked} onChange={stagingMode=>setBrief({...brief,stagingMode})}/>
+      <FramePolicyControl value={brief.framePolicy} disabled={locked} onChange={framePolicy=>setBrief({...brief,framePolicy})}/>
+      <p className="muted text-sm">Новые настройки применяются к дальнейшей проработке и генерации. Утверждённые материалы и выбранные комплекты кадров сохраняются. Чтобы изменить готовый план, откройте его правки и заново проработайте нужное действие.</p>
       <FacialExpressionControl value={brief.facialExpression} disabled={locked} onChange={facialExpression=>setBrief({...brief,facialExpression})}/>
       <p className="muted text-sm">Мимика применяется при новой проработке актёрской игры и генерации кадров и видео. Готовые материалы сохраняются. В отдельном плане можно выбрать другую манеру.</p>
       <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
@@ -120,6 +125,7 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
     </>}
     {stage===4&&<>
       <div className="rounded border p-4 space-y-2"><p><b>Мимика героев:</b> {FACIAL_EXPRESSION_LABELS[d?.brief.facialExpression??'auto']}</p><p className="muted text-sm">Для отдельного плана откройте «Правки четырёх частей» → «Мимика этого плана». Задачу и смену эмоций можно уточнить в «Актёрских задачах».</p><Button variant="outline" size="sm" onClick={()=>open(0)}>Настроить мимику для фильма</Button></div>
+      <div className="rounded border p-4 space-y-2"><p><b>Постановка фильма:</b> {d?.brief.stagingMode?STAGING_MODE_LABELS[d.brief.stagingMode]:'Прежняя постановка'}</p><p><b>Опорные изображения:</b> {d?.brief.framePolicy?FRAME_POLICY_LABELS[d.brief.framePolicy]:'Прежний подбор кадров'}</p><p className="muted text-sm">Постановку и необходимость точной конечной композиции можно уточнить в правках каждого плана.</p><Button variant="outline" size="sm" onClick={()=>open(0)}>Настроить постановку фильма</Button></div>
       <Button variant="outline" onClick={()=>open(14)}>Открыть набор планов и плотность монтажа</Button>
       <DirectorExecutionControls model={model} value={execution} disabled={locked} onChange={setExecution}/>
       {d?.shotPlanning&&!allPlanSetsApproved(p)&&<p role="status">Сначала утвердите изменённые наборы на этапе «Планы сцен».</p>}
@@ -144,7 +150,7 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
           {(['story','stateIn','stateOut','cinematography','productionDesign','continuityChanges'] as const).map((key,n)=><F key={key} label={['Сценарий','Начальное состояние','Конечное состояние','Операторская работа','Художественное решение','Обоснованные изменения одежды / реквизита'][n]}><Textarea rows={4} value={shotEdit.shot[key]} onChange={e=>shotField(key,e.target.value)}/></F>)}
           <F label="Режим речи"><select className="rounded border p-2 bg-background" value={shotEdit.shot.dialogue.speechType} onChange={e=>shotField('dialogue',{...shotEdit.shot.dialogue,speechType:e.target.value,...(e.target.value==='none'?{text:'',speaker:''}:{})})}><option value="none">Без речи</option><option value="voiceover">Закадровый голос</option><option value="character">Герой в кадре</option></select></F>
           {(['speaker','text','delivery'] as const).map((key,n)=><F key={key} label={['Говорящий','Только произносимые слова','Подача, паузы и звуки'][n]}><Textarea value={shotEdit.shot.dialogue[key]} onChange={e=>shotField('dialogue',{...shotEdit.shot.dialogue,[key]:e.target.value})}/></F>)}
-          <ShotDirectionEditor direction={shotEdit.shot.direction} duration={shotEdit.shot.duration} inheritedFacialExpression={d?.brief.facialExpression} disabled={locked} onChange={value=>shotField('direction',value)}/>
+          <ShotDirectionEditor direction={shotEdit.shot.direction} duration={shotEdit.shot.duration} inheritedFacialExpression={d?.brief.facialExpression} inheritedStagingMode={d?.brief.stagingMode} disabled={locked} onChange={value=>shotField('direction',value)}/>
           <div className="row"><Button disabled={locked||directionEditorIssues(shotEdit.shot.direction,shotEdit.shot.duration).some(i=>i.severity==='conflict')} onClick={async()=>{await call('saveShot',{...shotEdit,shot:{...shotEdit.shot,cast:castText.split(',').map(s=>s.trim()).filter(Boolean)}});setShotEdit(undefined);}}>Сохранить план</Button><Button variant="ghost" onClick={()=>setShotEdit(undefined)}>Закрыть</Button></div>
         </div>}
         <p role="status">Готовы к утверждению: {readyShotIds.length}. Неполные: {readiness.incomplete.length}. С конфликтами: {readiness.conflicts.length}.</p>

@@ -1,5 +1,7 @@
 'use client';
 import {ImageRetrySettings} from './image-retry-settings';
+import {NewProjectPolicyFields} from './staging-policy-controls';
+import {filmBrowserTools,type FilmBrowserBridge} from './browser-film-tools';
 import type {ImageRetryOptions} from '@/lib/image-retries';
 import {request,ApiResponseError} from '@/lib/client-request';
 import {generationBasis} from '@/lib/generation-basis';
@@ -496,14 +498,23 @@ function Workspace() {
     }, 5000);
     return () => clearInterval(timer);
   }, [projectId, qc]);
+  const browserToolFlight=useRef(false),browserFilmBridge=useRef<FilmBrowserBridge|undefined>(undefined);
+  browserFilmBridge.current={
+    current:()=>qc.getQueryData<Project>(['project',activeProject.current]),activeProjectId:()=>activeProject.current,
+    readCurrent:id=>request('/api/projects/'+id),readConnections:()=>request('/api/connections'),
+    request:(path,method,body)=>request(path,method,body),replace,openProject:switchProject,
+    run:async work=>{if(browserToolFlight.current||busy||renderAbort.current)throw Error('Дождитесь текущего действия в студии.');browserToolFlight.current=true;const epoch=projectEpoch.current;setBusy(true);setError('');try{return await work();}catch(e){if(projectEpoch.current===epoch)setError(e instanceof Error?e.message:String(e));throw e;}finally{browserToolFlight.current=false;if(projectEpoch.current===epoch)setBusy(false);}},
+    assembleSilent:project=>assemble(true,project),
+  };
   useEffect(() => {
     const context = (document as any).modelContext;
     if (!context?.registerTool) return;
     const life = new AbortController();
-    const register = (tool: any) =>
-      Promise.resolve(
-        context.registerTool(tool, { signal: life.signal }),
-      ).catch(() => {});
+    const register = (tool: any) => {
+      try {return Promise.resolve(context.registerTool(tool,{signal:life.signal})).catch(()=>{});}
+      catch {return Promise.resolve();}
+    };
+    for(const tool of filmBrowserTools(()=>browserFilmBridge.current!))register(tool);
     register({
       name: 'read_film_project',
       title: 'Состояние фильма',
@@ -572,7 +583,8 @@ function Workspace() {
       return a as Asset;
     } finally { uploads.current.delete(controller); }
   }
-  async function assemble(animatic: boolean) {
+  async function assemble(animatic: boolean, source = p) {
+    const p=source;
     if (!p) return;
     const controller = new AbortController(), epoch = projectEpoch.current;
     renderAbort.current = controller;
@@ -597,9 +609,9 @@ function Workspace() {
         controller.signal,
       );
       const target = animatic?undefined:p.items.find((i) => i.stage === 8);
-      await action(
-        animatic ? 'saveAnimaticPreview' : 'addVariant',
-        {
+      const next=await request('/api/projects/'+p.id,'PATCH',{
+        revision:p.revision,action:animatic?'saveAnimaticPreview':'addVariant',itemId:animatic?'':target?.id,
+        data:{
           ...(basis?{basis}:{}),
           ...(manifest?{animaticManifest:manifest}:{}),
           title: animatic
@@ -612,8 +624,9 @@ function Workspace() {
           assetId: a.id,
           duration: seconds,
         },
-        animatic?'':target?.id,
-      );
+      });
+      replace(next);
+      if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');
     } catch (e) {
       if (downloaded) throw new Error('Готовый MP4 передан браузеру для скачивания. Сохранить карточку в студии не удалось: ' + (e as Error).message);
       throw e;
@@ -1523,10 +1536,11 @@ function Workspace() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const title = String(new FormData(e.currentTarget).get('title'));
+              const form = new FormData(e.currentTarget), title = String(form.get('title'));
+              const stagingMode = String(form.get('stagingMode')||'')||undefined, framePolicy = String(form.get('framePolicy')||'')||undefined;
               perform(async () => {
                 const epoch = projectEpoch.current, opened = dialogEpoch.current;
-                const n = await request('/api/projects', 'POST', { title });
+                const n = await request('/api/projects', 'POST', { title, stagingMode, framePolicy });
                 replace(n);
                 if (epoch === projectEpoch.current && opened === dialogEpoch.current) switchProject(n.id);
               });
@@ -1540,6 +1554,7 @@ function Workspace() {
                 placeholder="Например, Последний фонарь"
               />
             </Field>
+            <NewProjectPolicyFields disabled={busy}/>
             <Button type="submit" className="full-width" disabled={busy}>
               <Plus />
               Создать фильм

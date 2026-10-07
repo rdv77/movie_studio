@@ -1,3 +1,4 @@
+import {effectiveStagingMode,stagingPrompt} from './staging-policy';
 import { planCharacterIds } from './plan-references';
 import {unresolvedJobBlocks} from './job-wait';
 import { id, isApproved, excludedShot, type Item, type Project } from './domain';
@@ -58,9 +59,10 @@ export function videoPrompt(p: Project, item: Item) {
   if (!shot) return '';
   if(shot.videoPrompt)return shot.videoPrompt;
   const index = script.shots.findIndex(s => s.title === shot.title);
+  const staging=effectiveStagingMode(p.directing?.brief.stagingMode,shot.direction?.stagingMode);
   const sections = [
     `Анимационный фильм. Сохрани внешность героев, одежду, палитру и стиль первого кадра. Формат ${p.format}.`,
-    `План: ${shot.title}. Заверши действие за ${shot.duration} с; затем удерживай финальную позу до конца клипа.`,
+    staging ? `План: ${shot.title}. Действие и реакция занимают ${shot.duration} с. ${stagingPrompt(staging)}` : `План: ${shot.title}. Заверши действие за ${shot.duration} с; затем удерживай финальную позу до конца клипа.`,
     `Действие: ${shot.description}`,
     `Камера: ${shot.camera}`,
     ...(shot.productionDesign?[`Художественное решение: ${shot.productionDesign}`]:[]),

@@ -1,0 +1,45 @@
+import {build} from 'esbuild';
+import {strict as A} from 'node:assert';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as T from './app/browser-film-tools';export * as D from './lib/domain';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/browser-film-tools.mjs',external:['@ffmpeg/ffmpeg']});
+const {T,D}=await import('../work/tests/browser-film-tools.mjs');
+let current=D.newProject('Фильм'),active=current.id,requests=[],assembled=0;
+const bridge={current:()=>current,activeProjectId:()=>active,replace:p=>current=p,openProject:id=>active=id,run:work=>work(),
+  readCurrent:async id=>{A.equal(id,active);return {...current,revision:current.revision+1};},readConnections:async()=>({apiKey:'must-not-leak',providers:[{id:'xai',name:'xAI',configured:true,key:'must-not-leak'}]}),
+  request:async(path,method,body)=>{requests.push({path,method,body});return path==='/api/projects'?D.newProject(body.title):{...current,revision:current.revision+1};},assembleSilent:async()=>{assembled++;}};
+const tools=T.filmBrowserTools(()=>bridge),tool=name=>tools.find(t=>t.name===name),target=()=>({projectId:current.id,revision:current.revision});
+const rejects=async(name,input)=>{const before=requests.length;await A.rejects(async()=>tool(name).execute(input));A.equal(requests.length,before,'Invalid tool input must not reach the backend');};
+await rejects('edit_current_film',{...target(),operation:'project',action:'deleteVariant',itemId:D.id(),data:{}});
+await rejects('edit_current_film',{...target(),operation:'directing',action:'removeScene',data:{}});
+await rejects('edit_current_film',{...target(),operation:'project',action:'settings',data:{limit:null}});
+await rejects('edit_current_film',{...target(),operation:'project',action:'approve',url:'https://example.com'});
+await rejects('edit_current_film',{...target(),projectId:D.id(),operation:'project',action:'approve'});
+await rejects('edit_current_film',{...target(),revision:current.revision+1,operation:'project',action:'approve'});
+await rejects('edit_current_film',{...target(),operation:'auth',action:'approve'});
+await rejects('create_film_project',{title:'X',stagingMode:'readable',framePolicy:'auto',apiKey:'forbidden'});
+const result=await tool('edit_current_film').execute({...target(),operation:'directing',action:'brief',data:{brief:{stagingMode:'readable'}}});
+A.equal(requests.at(-1).path,`/api/projects/${current.id}/directing`);A.equal(requests.at(-1).method,'POST');A.equal(result.revision,current.revision);
+A(!Object.hasOwn(requests.at(-1).body,'operation'));A(!Object.hasOwn(requests.at(-1).body,'projectId'));
+await tool('edit_current_film').execute({...target(),operation:'project',action:'prepareShots'});A.equal(requests.at(-1).method,'PATCH');
+const sourceId=D.id();await tool('edit_current_film').execute({...target(),operation:'project',action:'importLibrary',data:{projectId:sourceId,itemId:D.id()}});
+A.equal(requests.at(-1).body.data.projectId,sourceId,'Cross-project library reads remain server-authorized, target stays current');
+const batch={...target(),batchId:D.id(),model:'grok-imagine-image',refs:[],estimate:'100',plans:[{itemId:D.id(),prompt:'Кадр'}]};
+await tool('generate_storyboard_images').execute(batch);A.equal(requests.at(-1).path,`/api/projects/${current.id}/generate-storyboard`);A.equal(requests.at(-1).body.batchId,batch.batchId);
+await rejects('generate_storyboard_images',{...batch,revision:current.revision,models:['a','b']});
+await rejects('generate_storyboard_images',{...batch,revision:current.revision,plans:[]});
+await rejects('assemble_silent_animatic',target());current.animaticSettings={sound:'silent',music:true,motion:false};await rejects('assemble_silent_animatic',target());
+current.animaticSettings={sound:'silent',music:false,motion:false};await tool('assemble_silent_animatic').execute(target());A.equal(assembled,1);
+current.jobs=[{id:D.id(),itemId:D.id(),status:'done',model:'x',prompt:'secret prompt '.repeat(100000),created:'2026-01-01',refs:[]}];
+const summary=await tool('read_film_summary').execute({});A(JSON.stringify(summary).length<5000);A(!JSON.stringify(summary).includes('secret prompt'));
+const rev=current.revision;A.equal((await tool('read_film_summary').execute({refresh:true})).revision,rev+1);
+const models=await tool('read_model_catalog').execute({kind:'image'});A(models.models.every(m=>m.kind==='image'));A(models.models.some(m=>m.provider==='xai'&&m.configured));A(!JSON.stringify(models).includes('must-not-leak'));
+const empty={id:D.id(),title:'Пустой герой',stage:1,variants:[]};current.items.push(empty);
+await tool('cleanup_empty_film_item').execute({...target(),itemId:empty.id});A.equal(requests.at(-1).body.action,'removeEmpty');
+for(const patch of [{variants:[{id:D.id(),kind:'text',text:'X'}]},{character:{name:'Герой'}},{location:{name:'Пруд'}},{sourceShot:{scriptId:D.id(),title:'X'}},{approvedId:D.id()},{characterHistory:[{}]}]){
+  const item=current.items.find(i=>i.id===empty.id);Object.assign(item,empty,patch);await rejects('cleanup_empty_film_item',{...target(),itemId:empty.id});for(const key of Object.keys(patch))delete item[key];item.variants=[];
+}
+const profile={name:'Герой',appearance:'Лицо',description:'Характер',instructions:'Сохранить',refs:[D.id()],actorProfile:{identity:'Неизменно',role:'Главный',motivation:'Найти',contradiction:'Боится',mannerisms:'Наклоняет голову',traits:[{name:'Смелость',intensity:5,instruction:'Решается'}]}};
+current.items.find(i=>i.id===empty.id).character=profile;
+const profileSummary=T.filmSummary(current).items.find(i=>i.id===empty.id);A.deepEqual(JSON.parse(JSON.stringify(profileSummary.characterProfile)),profile);A.equal(profileSummary.characterProfileSource,'item');
+const created=await tool('create_film_project').execute({title:'Новый фильм',stagingMode:'readable',framePolicy:'auto'});A.equal(active,created.id);A.equal(current.title,'Новый фильм');
+A.equal(requests.at(-1).path,'/api/projects');A.deepEqual(requests.at(-1).body,{title:'Новый фильм',stagingMode:'readable',framePolicy:'auto'});
+console.log('PASS browser film tools: allowlisted same-origin actions, current-project revision guard, no identity/keys/URL/budget bypass, one-model storyboard schema, silent assembly guard, compact results. No live requests or paid calls.');

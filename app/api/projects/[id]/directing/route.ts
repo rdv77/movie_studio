@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {freezeExistingKeyframeModes} from '@/lib/keyframes';
 import { createScriptWorkflowRun,importScriptWorkflowCandidate,isRecoverableUnsentScriptRun,resumeUnsentScriptRun,scriptRoleSchema,scriptPromptOverridesSchema,CINEMA_METHOD_IDS } from '@/lib/script-workflow';
 import { recordCreativeVersion, restoreCreativeVersion, restoreSceneVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
@@ -80,7 +81,11 @@ export const POST=api(async(req,ctx)=>{
       const groups=new Map<string,typeof shots>();shots.forEach((s,n)=>{const key=s.sceneId??String(Math.floor(n/20));groups.set(key,[...(groups.get(key)??[]),s]);});
       d.scenes=[...groups.entries()].map(([key,shots],n)=>({id:shots[0].sceneId??id(),title:`Сцена ${n+1} · из текущего сценария`,purpose:'Уточните задачу эпизода',location:'Уточните локацию',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:shots.map(s=>({id:s.id??id(),title:s.title,duration:s.duration,cast:s.cast??(s.speaker?[s.speaker]:[]),story:s.description,stateIn:s.continuity,stateOut:'',cinematography:s.camera,productionDesign:s.productionDesign??'',dialogue:{speechType:s.speechType??(s.dialogue?'voiceover':'none'),speaker:s.speaker??'',text:s.dialogue,delivery:''},continuityChanges:'',...(s.direction?{direction:structuredClone(s.direction)}:{})}))}));break;
     }
-    case 'brief':d.brief=creativeBriefSchema.parse(v.brief);if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
+    case 'brief':{
+      const brief=creativeBriefSchema.parse(v.brief);
+      if(brief.framePolicy!==d.brief.framePolicy)freezeExistingKeyframeModes(p);
+      d.brief=brief;if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
+    }
     case 'run':{
       const s=z.object({model:z.string(),execution:directorExecutionSchema.optional(),mode:z.enum(['plan-shots','critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
       const scoped=s.scope!==undefined||s.sceneIds!==undefined||s.shotIds!==undefined?{scope:s.scope,sceneIds:s.sceneIds,shotIds:s.shotIds}:undefined;
