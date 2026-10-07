@@ -10,6 +10,7 @@ import type {Project} from './domain';
 /** A ready dependency is not necessarily an admissible paid request. Waiting
  * on an unchanged queue refusal must not rewrite the whole project every tick. */
 function directorAdvanceChanges(p:Project,dispatch=true){
+  let preview:Project|undefined;
   for(const run of p.directing?.runs??[]){
     if(run.tasks.some(t=>{const j=p.jobs.find(j=>j.id===t.jobId);return j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000;}))return true;
     if(!dispatch||run.stopped)continue;
@@ -18,9 +19,12 @@ function directorAdvanceChanges(p:Project,dispatch=true){
     if(!ready.length)continue;
     let issue:string|undefined;
     for(const task of ready){
-      // directorJob records an input basis on its task. Preview on a copy so a
-      // read-only blocked tick never returns unsaved task fields to the browser.
-      const candidate=directorJob(p,run,{...task}),blocked=queueSlotIssue(p,candidate,new Set(),task);
+      // directorJob records an input basis on its task. Preserve the entire
+      // project/run/task graph in the read-only preview: script workflows check
+      // task ownership by identity, not just matching IDs.
+      preview??=structuredClone(p);
+      const previewRun=preview.directing!.runs.find(r=>r.id===run.id)!,previewTask=previewRun.tasks.find(t=>t.id===task.id)!;
+      const candidate=directorJob(preview,previewRun,previewTask),blocked=queueSlotIssue(p,candidate,new Set(),task);
       if(!blocked)return true;
       if(blocked.includes('неизвестным исходом'))issue=blocked;
     }
