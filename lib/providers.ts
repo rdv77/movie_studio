@@ -166,6 +166,10 @@ export async function generate(
     };
   }
   if (j.kind === 'text') {
+    // M2.7 always reasons; its output limit includes those tokens. Leave room
+    // for the final structured answer, without changing other providers/tasks.
+    const miniMaxDirecting = m.provider === 'minimax' && j.purpose === 'directing';
+    const maxTokens = miniMaxDirecting ? 16000 : j.purpose === 'prompt-optimization' ? 6000 : 7000;
     d = await json(
       await call(
         `https://${m.provider === 'xai' ? 'api.x.ai' : 'api.minimax.io'}/v1/chat/completions`,
@@ -181,16 +185,24 @@ export async function generate(
             { role: 'user', content: refs.length?[{type:'text',text:j.prompt},...refs.map(url=>({type:'image_url',image_url:{url,detail:'high'}}))]:j.prompt },
           ],
           stream: false,
-          max_tokens: j.purpose==='prompt-optimization'?6000:7000,
+          max_tokens: maxTokens,
+          ...(miniMaxDirecting ? {reasoning_split:true} : {}),
           ...(j.purpose==='prompt-optimization'&&m.provider==='xai'?{reasoning_effort:'low'}:{}),
         },
-        j.purpose==='prompt-optimization'?120000:180000,
+        miniMaxDirecting ? 300000 : j.purpose==='prompt-optimization'?120000:180000,
       ),
     );
-    const text = d.choices?.[0]?.message?.content
-      ?.replace(/<think>[\s\S]*?<\/think>/g, '')
-      .trim();
-    return { ...(text?{text}:{error:'Провайдер не вернул текст.'}), requestId: d.id, ...receipt(d) };
+    const choice = d.choices?.[0], content = choice?.message?.content;
+    // A cut-off <think> block is not a screenplay. Never retain hidden
+    // reasoning as the final answer, even if a provider ignores reasoning_split.
+    const text = typeof content === 'string'
+      ? content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '').trim() : '';
+    const result = { ...(text ? {text} : {}), requestId: d.id, ...receipt(d) };
+    if (choice?.finish_reason === 'length') {
+      const tokenCount = (value:unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? String(value) : 'не указано';
+      return {...result,error:`${m.provider === 'minimax' ? 'MiniMax' : 'Grok'}: ответ остановлен по лимиту ${maxTokens} выходных токенов (finish_reason=length). Вход: ${tokenCount(d.usage?.prompt_tokens)}, выход: ${tokenCount(d.usage?.completion_tokens)} токенов.${m.provider === 'minimax' ? ' Лимит включает рассуждения.' : ''} ${text ? 'Неполный итоговый текст сохранён для проверки; он не применён.' : 'Итоговый текст не получен.'}`};
+    }
+    return { ...result, ...(!text ? {error:'Провайдер не вернул итоговый текст.'} : {}) };
   }
   if (j.kind === 'image' && m.provider === 'xai') {
     const body: any = {

@@ -84,7 +84,8 @@ test('generic prompts require observable causal emotion, no story-specific examp
   for(const role of S.SCRIPT_ROLES){
     const {p,source}=fixture(),run=S.createScriptWorkflowRun(p,'test-model',[role],source.id);
     const prompt=S.scriptWorkflowPrompt(p,run,run.tasks[0]);
-    for(const required of ['ожидание → событие → осознание → переживание → выбор → видимое поведение','emotionalArcs','visibleEvidence','Сдержанная мимика','При запрете звука'])assert(prompt.includes(required));
+    for(const required of ['ожидание → событие → осознание → переживание → выбор → видимое поведение','emotionalArcs','Сдержанная мимика','При запрете звука'])assert(prompt.includes(required));
+    if(!['script-critic','script-control'].includes(role))assert(prompt.includes('visibleEvidence'),'Writers return the complete screen-evidence field; readonly reviewers do not generate an arc');
     assert(!/лягуш|камыш|царевич|стрел[ауы]/i.test(prompt),'Prompt template must not hardcode this film');
   }
 });
