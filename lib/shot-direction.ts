@@ -28,6 +28,7 @@ export const shotDirectionSchema = z.object({
   cameraMovement: z.object({
     type: z.enum(['static', 'pan', 'tilt', 'push-in', 'pull-out', 'dolly', 'tracking', 'orbit', 'handheld', 'crane', 'zoom', 'custom']),
     description: note, from: note.optional(), to: note.optional(),
+    purpose: note.optional(), speed: note.optional(), start: second.optional(), end: second.optional(), keepInFrame: note.optional(),
   }).strict().optional(),
   actionBeats: z.array(z.object({
     id: idSchema.optional(), start: second, end: second, action: nonempty, emotionalChange: note.optional(),
@@ -76,7 +77,7 @@ export function readableShotDirection(d?:ShotDirection):string {
     d.startFrame?`Начальный ключевой кадр: ${d.startFrame}`:'',d.endFrame?`Конечный ключевой кадр: ${d.endFrame}`:'',
     d.angle?`Ракурс: ${d.angle.type}${d.angle.description?' · '+d.angle.description:''}`:'',d.composition?`Композиция: ${d.composition}`:'',
     d.attention?`Внимание: ${d.attention.start} → ${d.attention.end}`:'',
-    d.cameraMovement?`Движение камеры: ${d.cameraMovement.type} · ${d.cameraMovement.description}${d.cameraMovement.from?' · от '+d.cameraMovement.from:''}${d.cameraMovement.to?' · к '+d.cameraMovement.to:''}`:'',
+    d.cameraMovement?`Движение камеры: ${d.cameraMovement.type} · ${d.cameraMovement.description}${d.cameraMovement.from?' · от '+d.cameraMovement.from:''}${d.cameraMovement.to?' · к '+d.cameraMovement.to:''}${d.cameraMovement.purpose?' · задача: '+d.cameraMovement.purpose:''}${d.cameraMovement.speed?' · скорость: '+d.cameraMovement.speed:''}${d.cameraMovement.start!==undefined?' · начало: '+d.cameraMovement.start+' сек':''}${d.cameraMovement.end!==undefined?' · окончание: '+d.cameraMovement.end+' сек':''}${d.cameraMovement.keepInFrame?' · удерживать в кадре: '+d.cameraMovement.keepInFrame:''}`:'',
     ...(d.actionBeats??[]).map(b=>`Действие ${b.start}–${b.end} сек: ${b.action}${b.emotionalChange?' · '+b.emotionalChange:''}`),
     d.timing?.openingHold!==undefined?`Начальная пауза: ${d.timing.openingHold} сек`:'',d.timing?.endingHold!==undefined?`Конечная пауза: ${d.timing.endingHold} сек`:'',d.timing?.revealAt!==undefined?`Раскрытие: ${d.timing.revealAt} сек`:'',
     ...(d.positions??[]).map(v=>`${v.subject}: ${v.start} → ${v.end}${v.screenDirection?' · '+v.screenDirection:''}`),
@@ -101,6 +102,13 @@ export function validateShotDirection(shot: MontageShot): DirectionIssue[] {
     return issues;
   }
   const d = parsed.data;
+  if(d.cameraMovement){
+    const {start,end}=d.cameraMovement;
+    if(end!==undefined&&end<=(start??0))
+      add('camera_order','Окончание движения камеры должно быть позже начала.','direction.cameraMovement.end');
+    if(start!==undefined&&start>=shot.duration||end!==undefined&&end>shot.duration)
+      add('camera_fit','Движение камеры выходит за длительность плана.','direction.cameraMovement');
+  }
   const seen = new Set<string>();
   let previousStart = -1;
   for (const [n, beat] of (d.actionBeats ?? []).entries()) {

@@ -64,7 +64,7 @@ export function compileMediaJob(p: Project, job: Job, input: MediaJobInput = {})
   const last = result.references.find(ref => ref.role === 'last-frame');
   const auxiliary = result.references.filter(ref => ref.role !== 'first-frame' && ref.role !== 'last-frame').map(ref => ref.assetId);
   const output: CompiledMediaJob = {
-    ...job, prompt: result.prompt, promptSections:result.budget.needsOptimization||model(job.model).provider==='zencreator'?result.sections:undefined, promptOptimization:undefined, promptTokenCount:undefined,
+    ...job, prompt: result.prompt, promptSections:result.budget.needsOptimization||model(job.model).provider==='zencreator'||result.sections.some(s=>s.verbatim||s.key==='camera-policy')?result.sections:undefined, promptOptimization:undefined, promptTokenCount:undefined,
     refs: job.kind === 'video' ? [first!.assetId] : result.references.map(ref => ref.assetId),
     characterRefs: job.kind === 'video' && auxiliary.length ? auxiliary : undefined,
     compilation: compilationSnapshot(result, job.kind === 'image' ? input.keyframe ?? 'start' : undefined),

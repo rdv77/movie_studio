@@ -1,5 +1,7 @@
 'use client';
 import {useId,useState} from 'react';
+import {CameraPolicyControl} from './camera-policy-control';
+import type {CameraPolicy} from '@/lib/camera-policy';
 import {STAGING_MODE_LABELS,STAGING_MODE_HELP,FRAME_POLICY_LABELS,FRAME_POLICY_HELP,type StagingMode,type FramePolicy} from '@/lib/staging-policy';
 
 export function StagingModeControl({value,inherited,shot=false,disabled=false,name,allowLegacy=true,onChange}:{
@@ -32,9 +34,10 @@ export function FramePolicyControl({value,disabled=false,name,allowLegacy=true,o
 
 /** Defaults belong only to this explicit new-project form, never to legacy hydration. */
 export function NewProjectPolicyFields({disabled=false}:{disabled?:boolean}){
-  const [stagingMode,setStagingMode]=useState<StagingMode|undefined>('readable'),[framePolicy,setFramePolicy]=useState<FramePolicy|undefined>('auto');
+  const [stagingMode,setStagingMode]=useState<StagingMode|undefined>('readable'),[framePolicy,setFramePolicy]=useState<FramePolicy|undefined>('auto'),[cameraPolicy,setCameraPolicy]=useState<CameraPolicy|undefined>('cinematic');
   return <div className="space-y-3 my-3" aria-label="Постановка нового фильма">
     <StagingModeControl name="stagingMode" value={stagingMode} allowLegacy={false} disabled={disabled} onChange={setStagingMode}/>
+    <CameraPolicyControl name="cameraPolicy" value={cameraPolicy} allowLegacy={false} disabled={disabled} onChange={setCameraPolicy}/>
     <FramePolicyControl name="framePolicy" value={framePolicy} allowLegacy={false} disabled={disabled} onChange={setFramePolicy}/>
     <p className="text-sm text-muted-foreground">Настройки задаются для нового фильма. Их можно изменить позже в творческом задании или отдельно для плана.</p>
   </div>;

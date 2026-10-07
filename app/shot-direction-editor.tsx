@@ -37,7 +37,7 @@ export function directionEditorIssues(direction:ShotDirection|undefined,duration
     else if(/positions\.\d+\.subject$/.test(field))message=`Положение ${row(/positions\.(\d+)/)}: укажите героя или предмет.`;
     else if(/performance\.\d+\.character$/.test(field))message=`Актёрская задача ${row(/performance\.(\d+)/)}: укажите героя.`;
     else if(/sound\.effects\.\d+\.description$/.test(field))message=`Звук ${row(/effects\.(\d+)/)}: добавьте описание эффекта.`;
-    else if(/(?:actionBeats\.\d+\.(?:start|end)|timing\.(?:openingHold|endingHold|revealAt)|effects\.\d+\.at)$/.test(field))message='Время должно быть числом от 0 до 60 секунд.';
+    else if(/(?:actionBeats\.\d+\.(?:start|end)|cameraMovement\.(?:start|end)|timing\.(?:openingHold|endingHold|revealAt)|effects\.\d+\.at)$/.test(field))message='Время должно быть числом от 0 до 60 секунд.';
     else if(/(?:subjectId|characterId|toShotId|\.id)$/.test(field))message='Идентификатор должен быть непустым и не длиннее 100 символов.';
     return {...issue,message};
   });
@@ -72,6 +72,13 @@ export function ShotDirectionEditor({direction,duration,inheritedFacialExpressio
       <Group label="Движение камеры">
         {select('Тип движения',d.cameraMovement?.type,MOVEMENT_NAMES,type=>change('cameraMovement',type?{...d.cameraMovement,type,description:d.cameraMovement?.description??''}:undefined))}
         {d.cameraMovement&&<><Field label="Описание движения"><Textarea value={d.cameraMovement.description} rows={3} maxLength={3000} onChange={e=>change('cameraMovement',{...d.cameraMovement!,description:e.target.value})}/></Field><div className="grid gap-3 md:grid-cols-2">{(['from','to'] as const).map((key,n)=><Field key={key} label={n?'Куда приходит камера':'Откуда начинается движение'}><Textarea value={d.cameraMovement?.[key]??''} maxLength={3000} onChange={e=>change('cameraMovement',{...d.cameraMovement!,[key]:e.target.value||undefined})}/></Field>)}</div></>}
+        {d.cameraMovement&&<>
+          <Field label="Зачем движется камера"><Textarea value={d.cameraMovement.purpose??''} maxLength={3000} onChange={e=>change('cameraMovement',{...d.cameraMovement!,purpose:e.target.value||undefined})} placeholder="Например, приблизиться к переживанию героя или открыть находку"/></Field>
+          <Field label="Скорость и характер движения"><Input value={d.cameraMovement.speed??''} maxLength={3000} onChange={e=>change('cameraMovement',{...d.cameraMovement!,speed:e.target.value||undefined})} placeholder="Медленно и плавно, без рывков"/></Field>
+          <div className="grid gap-3 md:grid-cols-2">{seconds('Начало движения камеры, сек',d.cameraMovement.start,value=>change('cameraMovement',{...d.cameraMovement!,start:value}))}{seconds('Конец движения камеры, сек',d.cameraMovement.end,value=>change('cameraMovement',{...d.cameraMovement!,end:value}))}</div>
+          <Field label="Что удерживать в кадре"><Textarea value={d.cameraMovement.keepInFrame??''} maxLength={3000} onChange={e=>change('cameraMovement',{...d.cameraMovement!,keepInFrame:e.target.value||undefined})} placeholder="Лицо героя и предмет в его руке"/></Field>
+          <p className="text-sm text-muted-foreground">Начальная и конечная крупность задаются выше. Для неподвижной камеры время движения можно не указывать. Движение само по себе не требует отдельного конечного изображения.</p>
+        </>}
       </Group>
       <Group label={`Действия и время · ${d.actionBeats?.length??0}`}>
         <p className="text-sm text-muted-foreground">Время считается от начала этого плана. Действия перечисляются по времени начала; речь и физическое действие не ускоряются автоматически.</p>
@@ -118,6 +125,10 @@ export function ShotDirectionSummary({direction,duration}:{direction?:ShotDirect
     {d.angle&&<p><b>Ракурс:</b> {ANGLE_NAMES[d.angle.type]}{d.angle.description&&' · '+d.angle.description}</p>}{d.composition&&<p><b>Композиция:</b> {d.composition}</p>}
     {d.attention&&<p><b>Внимание:</b> {d.attention.start} → {d.attention.end}</p>}
     {d.cameraMovement&&<p><b>Камера:</b> {MOVEMENT_NAMES[d.cameraMovement.type]} · {d.cameraMovement.description}{d.cameraMovement.from&&' · от '+d.cameraMovement.from}{d.cameraMovement.to&&' · к '+d.cameraMovement.to}</p>}
+    {d.cameraMovement?.purpose&&<p><b>Задача камеры:</b> {d.cameraMovement.purpose}</p>}
+    {d.cameraMovement?.speed&&<p><b>Скорость камеры:</b> {d.cameraMovement.speed}</p>}
+    {(d.cameraMovement?.start!==undefined||d.cameraMovement?.end!==undefined)&&<p><b>Время движения:</b> {d.cameraMovement.start??0}–{d.cameraMovement.end??duration??'конец'} сек</p>}
+    {d.cameraMovement?.keepInFrame&&<p><b>В кадре остаётся:</b> {d.cameraMovement.keepInFrame}</p>}
     {d.actionBeats?.map((beat,n)=><p key={beat.id??n}><b>{beat.start}–{beat.end} сек:</b> {beat.action}{beat.emotionalChange&&' · '+beat.emotionalChange}</p>)}
     {d.timing&&<p><b>Ритм:</b> {[d.timing.openingHold!==undefined?`пауза в начале ${d.timing.openingHold} сек`:null,d.timing.revealAt!==undefined?`раскрытие на ${d.timing.revealAt} сек`:null,d.timing.endingHold!==undefined?`пауза в конце ${d.timing.endingHold} сек`:null].filter(Boolean).join(' · ')}</p>}
     {d.positions?.map((position,n)=><p key={position.subjectId??n}><b>{position.subject}:</b> {position.start} → {position.end}{position.screenDirection&&' · '+SCREEN_NAMES[position.screenDirection]}</p>)}

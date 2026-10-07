@@ -2,16 +2,18 @@ import type {Job} from './domain';
 import type {PromptSection} from './prompt-compiler';
 import {promptCapacity,fitsPrompt,promptUnit,promptSize,tokenUpperBound,type PromptCapacity} from './model-capabilities';
 
-// Only a short compiler-owned directive is locked verbatim. A whole performance
+// Compiler-owned policy and concrete approved video camera movement/framing
+// are locked verbatim. A whole performance
 // biography would consume the API budget; its shot-specific sections stay required
 // and compressible instead. Never trust a model to reproduce this policy block.
-const protectedSection=(section:PromptSection)=>section.key==='facial-expression'||section.key==='staging-policy';
+const protectedSection=(section:PromptSection)=>section.verbatim||section.key==='facial-expression'||section.key==='staging-policy'||section.key==='camera-policy';
+const lockedText=(section:PromptSection)=>section.verbatim?`${section.label}: ${section.text}`:section.text;
 function optimizationBudget(sections:PromptSection[],cap:PromptCapacity){
   const locked=sections.filter(protectedSection),editable=sections.filter(s=>!protectedSection(s));
-  const suffix=locked.map(s=>s.text).join('\n')+(locked.length&&editable.length?'\n':'');
+  const suffix=locked.map(lockedText).join('\n')+(locked.length&&editable.length?'\n':'');
   const limit=Math.floor(cap.limit*.8)-promptSize(suffix,cap);
   const byteLimit=cap.unit==='tokens'||cap.maxUtf8Bytes?Math.floor((cap.maxUtf8Bytes??cap.limit)*.8)-tokenUpperBound(suffix):undefined;
-  if(limit<=0||byteLimit!==undefined&&byteLimit<=0)throw Error('Защищённый блок мимики и постановки не оставляет места для постановки в лимите выбранной модели. Он не обрезан. Выберите модель с большим лимитом или сократите настройку; запрос не отправлен.');
+  if(limit<=0||byteLimit!==undefined&&byteLimit<=0)throw Error('Защищённый блок мимики, постановки и камеры не оставляет места для остальных деталей в лимите выбранной модели. Он не обрезан. Выберите модель с большим лимитом или сократите настройки и операторское задание; запрос не отправлен.');
   return {locked,editable,limit,byteLimit};
 }
 
@@ -42,7 +44,7 @@ export function parseOptimizedPrompt(text:string,sections:PromptSection[],cap:Pr
   }
   const missing=sections.filter(s=>s.required&&!protectedSection(s)&&!values.has(s.key));
   if(missing.length)throw Error('При сокращении пропали обязательные детали: '+missing.map(s=>s.label).join(', '));
-  const prompt=sections.map(s=>protectedSection(s)?s.text:values.get(s.key)).filter(Boolean).join('\n');
+  const prompt=sections.map(s=>protectedSection(s)?lockedText(s):values.get(s.key)).filter(Boolean).join('\n');
   if(!prompt||!fitsPrompt(prompt,cap))throw Error('Ответ LLM всё ещё превышает лимит. Изображение или видео не запрашивалось; сократите описание или выберите модель с большим лимитом.');
   return prompt;
 }

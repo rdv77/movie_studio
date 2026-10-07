@@ -1,8 +1,8 @@
-/** Global facial acting and staging are preferences for future generations, not an edit to
- * already reviewed story/material. Keep all other brief fields in approvals.
- * Omitting this optional key also preserves legacy signatures byte for byte. */
-export function creativeFoundationBrief<T extends object>(brief:T|undefined):Omit<T,'facialExpression'|'stagingMode'|'framePolicy'>|undefined {
+/** Production preferences do not rewrite the approved story, heroes or world.
+ * Concrete shot direction remains an ordinary reviewed edit; camera preference
+ * also has its own video-only basis. Omission preserves legacy signatures. */
+export function creativeFoundationBrief<T extends object>(brief:T|undefined):Omit<T,'facialExpression'|'stagingMode'|'framePolicy'|'cameraPolicy'>|undefined {
   if(!brief)return undefined;
-  const {facialExpression,stagingMode,framePolicy,...foundation}=brief as T&{facialExpression?:unknown;stagingMode?:unknown;framePolicy?:unknown};
+  const {facialExpression,stagingMode,framePolicy,cameraPolicy,...foundation}=brief as T&{facialExpression?:unknown;stagingMode?:unknown;framePolicy?:unknown;cameraPolicy?:unknown};
   return foundation;
 }

@@ -2,6 +2,8 @@
 import { useState,useEffect,useRef } from 'react';
 import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
 import {FacialExpressionControl} from './facial-expression-control';
+import {CameraPolicyControl} from './camera-policy-control';
+import {CAMERA_POLICY_LABELS} from '@/lib/camera-policy';
 import {StagingModeControl,FramePolicyControl} from './staging-policy-controls';
 import {STAGING_MODE_LABELS,FRAME_POLICY_LABELS} from '@/lib/staging-policy';
 import {FACIAL_EXPRESSION_LABELS} from '@/lib/facial-expression';
@@ -99,6 +101,7 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
       </div>
       <CreativeStrengthControls value={brief.strengths} disabled={locked} onChange={strengths=>setBrief({...brief,strengths})}/>
       <StagingModeControl value={brief.stagingMode} disabled={locked} onChange={stagingMode=>setBrief({...brief,stagingMode})}/>
+      <CameraPolicyControl value={brief.cameraPolicy} disabled={locked} onChange={cameraPolicy=>setBrief({...brief,cameraPolicy})}/>
       <FramePolicyControl value={brief.framePolicy} disabled={locked} onChange={framePolicy=>setBrief({...brief,framePolicy})}/>
       <p className="muted text-sm">Новые настройки применяются к дальнейшей проработке и генерации. Утверждённые материалы и выбранные комплекты кадров сохраняются. Чтобы изменить готовый план, откройте его правки и заново проработайте нужное действие.</p>
       <FacialExpressionControl value={brief.facialExpression} disabled={locked} onChange={facialExpression=>setBrief({...brief,facialExpression})}/>
@@ -124,6 +127,7 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
       <Button variant="outline" onClick={()=>open(2)}>Перейти к визуальному стилю</Button>
     </>}
     {stage===4&&<>
+      <div className="rounded border p-4 space-y-2"><p><b>Работа камеры:</b> {d?.brief.cameraPolicy?CAMERA_POLICY_LABELS[d.brief.cameraPolicy]:'Прежняя постановка · политика не задана'}</p><p className="muted text-sm">Оператор выбирает движение, его цель, скорость и смену крупности по этой политике. Для существующих планов нажмите «Доработать: Оператор», затем проверьте и утвердите результат. Камера и крупность сохраняются в промпте видео при сокращении.</p><Button variant="outline" size="sm" onClick={()=>open(0)}>Настроить работу камеры</Button></div>
       <div className="rounded border p-4 space-y-2"><p><b>Мимика героев:</b> {FACIAL_EXPRESSION_LABELS[d?.brief.facialExpression??'auto']}</p><p className="muted text-sm">Для отдельного плана откройте «Правки четырёх частей» → «Мимика этого плана». Задачу и смену эмоций можно уточнить в «Актёрских задачах».</p><Button variant="outline" size="sm" onClick={()=>open(0)}>Настроить мимику для фильма</Button></div>
       <div className="rounded border p-4 space-y-2"><p><b>Постановка фильма:</b> {d?.brief.stagingMode?STAGING_MODE_LABELS[d.brief.stagingMode]:'Прежняя постановка'}</p><p><b>Опорные изображения:</b> {d?.brief.framePolicy?FRAME_POLICY_LABELS[d.brief.framePolicy]:'Прежний подбор кадров'}</p><p className="muted text-sm">Постановку и необходимость точной конечной композиции можно уточнить в правках каждого плана.</p><Button variant="outline" size="sm" onClick={()=>open(0)}>Настроить постановку фильма</Button></div>
       <Button variant="outline" onClick={()=>open(14)}>Открыть набор планов и плотность монтажа</Button>

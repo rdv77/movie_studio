@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import type {Project} from '@/lib/domain';
 import {stagingModeSchema,framePolicySchema} from '@/lib/staging-policy';
+import {cameraPolicySchema} from '@/lib/camera-policy';
 import {imageSettingsSchema} from '@/lib/image-quality';
 import {imageRetrySchema} from '@/lib/image-retries';
 import {MEDIA_INPUT_LIMIT} from '@/lib/prompt-limits';
@@ -12,7 +13,7 @@ import {availableForDirecting} from '@/lib/model-capabilities';
 export const PROJECT_BROWSER_ACTIONS=['addVariant','addItem','renameItem','select','approve','approveBatch','approveReview','reapproveStyle','reapproveScript','reapproveStoryboard','reapproveUnchangedStoryboard','saveCharacter','importLibrary','bindPlanCharacter','prepareShots','speechMode','setAnimaticSettings','selectAnimatic','approveAnimatic'] as const;
 export const DIRECTING_BROWSER_ACTIONS=['brief','runtimePolicy','acceptRuntime','importScript','saveScene','approveScenes','saveShot','approveShots','planPolicy','savePlanCards','choosePlanSet','approvePlanSets','run','scriptRun','importScriptCandidate','useAlternative','applyPatch','applySolution','applyAllSolutions','publish','repairSavedAnswer'] as const;
 const targetSchema=z.object({projectId:z.string().uuid(),revision:z.number().int().nonnegative()});
-const createSchema=z.object({title:z.string().trim().min(1).max(100),stagingMode:stagingModeSchema,framePolicy:framePolicySchema}).strict();
+const createSchema=z.object({title:z.string().trim().min(1).max(100),stagingMode:stagingModeSchema,framePolicy:framePolicySchema,cameraPolicy:cameraPolicySchema.optional()}).strict();
 const editSchema=z.discriminatedUnion('operation',[
   targetSchema.extend({operation:z.literal('project'),action:z.enum(PROJECT_BROWSER_ACTIONS),itemId:z.string().uuid().optional(),data:z.unknown().optional()}).strict(),
   targetSchema.extend({operation:z.literal('directing'),action:z.enum(DIRECTING_BROWSER_ACTIONS),data:z.unknown().optional()}).strict(),

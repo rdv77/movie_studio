@@ -17,6 +17,7 @@ import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import {keyframeRoleInstruction} from './keyframes';
 import {effectiveStagingMode,stagingPrompt} from './staging-policy';
 import {effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
+import {cameraPolicyPrompt} from './camera-policy';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -120,7 +121,7 @@ function belongsToPlan(frame: Item, item: Item, plan: PromptPlan): boolean {
   if (item.sourceShot?.scriptId && frame.sourceShot?.scriptId !== item.sourceShot.scriptId) return false;
   return frame.id === item.id || !!frame.sourceShot && (plan.id ? frame.sourceShot.shotId === plan.id : frame.sourceShot.title === plan.title);
 }
-export type PromptSection = { key: string; label: string; text: string; priority: number; required: boolean };
+export type PromptSection = { key: string; label: string; text: string; priority: number; required: boolean; verbatim?: boolean };
 const render = (sections: readonly PromptSection[]) => sections.map(s => `${s.label}: ${s.text}`).join('\n\n');
 
 /** Pure, deterministic preflight. Never performs compression calls, reads files, enqueues or mutates. */
@@ -165,7 +166,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
 
   const warnings: string[] = modelId===GROK_VIDEO_1080?['Grok 1080p: передаётся только первый кадр. Конечный кадр и отдельные образы героев исключены; внешний вид задаёт первый кадр.']:[], omitted: PromptExclusion[] = [], sections: PromptSection[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
-    if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority });
+    if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority,
+      ...(input.kind==='video'&&['camera-movement','camera-legacy','framing'].includes(key)?{verbatim:true}:{}) });
   };
   const optional = (key: string, label: string, text: string | undefined, priority: number) =>
     paragraphs(text ?? '').forEach((text, n) => add(`${key}.${n}`, label, text, false, priority));
@@ -325,7 +327,14 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     for (const position of direction.positions ?? []) add(`position.${position.subjectId ?? position.subject}`, `Положение ${position.subject}`, middle ? `Одна промежуточная поза между ${position.start} и ${position.end}. Не совмещай несколько поз.` : input.kind === 'image' ? keyframe === 'end' ? position.end : position.start
       : `В начале: ${position.start}. В конце: ${position.end}. Направление на экране: ${position.screenDirection ?? 'сохранить'}.`, true);
     if (input.kind === 'video') {
-      add('camera-movement', 'Движение камеры', direction.cameraMovement && `${direction.cameraMovement.type}: ${direction.cameraMovement.description}${direction.cameraMovement.from ? '. Откуда: ' + direction.cameraMovement.from : ''}${direction.cameraMovement.to ? '. Куда: ' + direction.cameraMovement.to : ''}`, true);
+      const movement=direction.cameraMovement;
+      add('camera-movement', 'Движение камеры', movement && [
+        `${movement.type}: ${movement.description}`,
+        movement.purpose&&`Задача: ${movement.purpose}`,movement.from&&`Откуда: ${movement.from}`,movement.to&&`Куда: ${movement.to}`,
+        movement.speed&&`Скорость: ${movement.speed}`,movement.start!==undefined&&`Начало: ${movement.start} сек`,movement.end!==undefined&&`Остановка: ${movement.end} сек`,
+        movement.keepInFrame&&`Оставить в кадре: ${movement.keepInFrame}`,
+      ].filter(Boolean).join('. '), true);
+      if(!movement)add('camera-legacy','Камера',plan?.camera??plan?.cinematography,true);
       for (const [n, beat] of (direction.actionBeats ?? []).entries()) add(`beat.${n}`, `Действие ${beat.start}–${beat.end} сек`, beat.action + (beat.emotionalChange ? `. Изменение эмоции: ${beat.emotionalChange}` : ''), true);
       add('timing', 'Ритм плана', direction.timing && `Начальная пауза ${direction.timing.openingHold ?? 0} сек; конечная ${direction.timing.endingHold ?? 0} сек${direction.timing.revealAt !== undefined ? `; раскрытие на ${direction.timing.revealAt} сек` : ''}.`, true);
       exclude('transition', 'Монтажная склейка находится за пределами генерируемого клипа', direction.transition?.description);
@@ -383,6 +392,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   // including legacy shots with an older prepared prompt. Never read unapproved
   // shot edits or rewrite an already queued job to obtain this preference.
   if(plan&&staging)add('staging-policy','Читаемость действия и живое завершение',stagingPrompt(staging,input.kind),true);
+  if(videoPlan&&p.directing?.brief.cameraPolicy)add('camera-policy','Политика работы камеры',cameraPolicyPrompt(p.directing.brief.cameraPolicy),true);
   if(visibleFaces)add('facial-expression','Актуальная выразительность мимики',facialExpressionPrompt(effectiveFacialExpression(p.directing?.brief.facialExpression,direction?.facialExpression)),true);
 
   const knownOwners = new Map<string, Item>();

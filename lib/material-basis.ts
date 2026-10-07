@@ -18,7 +18,8 @@ export function materialBasis(p:Project,item:Item,variant?:Partial<Variant>){
   const frame=p.items.find(i=>i.stage===5&&!i.planArchive&&(item.sourceShot?.shotId?i.sourceShot?.shotId===item.sourceShot.shotId:i.sourceShot?.title===item.sourceShot?.title));
   return stable({format:p.format,cast:shot.cast,story:shot.description,camera:shot.camera,design:shot.productionDesign,continuity:shot.continuity,heroes,world,
     speech:{type:speech.type,speaker:speech.type==='character'?speech.speaker:''},
-    ...(item.stage===7?{duration:shot.duration,frame:frame?.variants.find(v=>v.id===frame.approvedId)?.assetId,lipsync:variant?.lipsync}:{}),
+    ...(item.stage===7?{duration:shot.duration,frame:frame?.variants.find(v=>v.id===frame.approvedId)?.assetId,lipsync:variant?.lipsync,
+      ...(p.directing?.brief.cameraPolicy?{cameraPolicy:p.directing.brief.cameraPolicy}:{})}:{}),
   });
 }
 
@@ -91,6 +92,7 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
     ...(shot.locationState??scene?.locationState?{locationState:shot.locationState??scene?.locationState}:{}),
     speech:{type:speech.type,speaker:speech.type==='character'?speech.speaker:''},
     ...(item.stage===7?{duration:shot.duration,stateOut:shot.stateOut,changes:shot.continuityChanges,
-      frames:frame,previous:boundary(previous,'out'),next:boundary(next,'in'),lipsync:variant.lipsync}:{}),
+      frames:frame,previous:boundary(previous,'out'),next:boundary(next,'in'),lipsync:variant.lipsync,
+      ...(p.directing?.brief.cameraPolicy?{cameraPolicy:p.directing.brief.cameraPolicy}:{})}:{}),
   });
 }

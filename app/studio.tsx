@@ -1537,10 +1537,10 @@ function Workspace() {
             onSubmit={(e) => {
               e.preventDefault();
               const form = new FormData(e.currentTarget), title = String(form.get('title'));
-              const stagingMode = String(form.get('stagingMode')||'')||undefined, framePolicy = String(form.get('framePolicy')||'')||undefined;
+              const stagingMode = String(form.get('stagingMode')||'')||undefined, framePolicy = String(form.get('framePolicy')||'')||undefined, cameraPolicy = String(form.get('cameraPolicy')||'')||undefined;
               perform(async () => {
                 const epoch = projectEpoch.current, opened = dialogEpoch.current;
-                const n = await request('/api/projects', 'POST', { title, stagingMode, framePolicy });
+                const n = await request('/api/projects', 'POST', { title, stagingMode, framePolicy, cameraPolicy });
                 replace(n);
                 if (epoch === projectEpoch.current && opened === dialogEpoch.current) switchProject(n.id);
               });

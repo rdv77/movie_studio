@@ -21,8 +21,23 @@ export function prepareDirectorRetry(p:Project,run:DirectorRun,t:DirectorTask){c
   }else{t.jobId=undefined;t.error=undefined;t.result=undefined;t.applied=undefined;}
   run.stopped=false;
 }
-const optionalDirectionKeys=new Set(['stagingMode','requiresEndFrame','framingStart','framingEnd','angle','description','composition','attention','cameraMovement','from','to','actionBeats','timing','openingHold','endingHold','revealAt','positions','screenDirection','subjectId','performance','characterId','transition','toShotId','sound','ambience','effects','music','silence','startFrame','endFrame','id','emotionalChange']);
-function cleanDirection(value:any):any{if(Array.isArray(value))return value.map(cleanDirection);if(!value||typeof value!=='object')return value;const copy:any={};for(const [key,v] of Object.entries(value))if(v!==null||!optionalDirectionKeys.has(key))copy[key]=cleanDirection(v);if(typeof copy.screenDirection==='string'&&!['left-to-right','right-to-left','toward-camera','away-from-camera','static','custom'].includes(copy.screenDirection)){const raw=copy.screenDirection,normal=raw.toLowerCase().replace(/[.]/g,'').trim();const aliases:Record<string,string>={'слева направо':'left-to-right','справа налево':'right-to-left','к камере':'toward-camera','от камеры':'away-from-camera','неподвижно':'static','статично':'static'};copy.screenDirection=aliases[normal]??'custom';copy.end=(copy.end??'')+'; направление: '+raw;}return copy;}
+const optionalDirectionKeys=new Set(['stagingMode','requiresEndFrame','framingStart','framingEnd','angle','description','composition','attention','cameraMovement','from','to','purpose','speed','keepInFrame','actionBeats','timing','openingHold','endingHold','revealAt','positions','screenDirection','subjectId','performance','characterId','transition','toShotId','sound','ambience','effects','music','silence','startFrame','endFrame','id','emotionalChange']);
+function cleanDirection(value:any):any{
+  if(Array.isArray(value))return value.map(cleanDirection);if(!value||typeof value!=='object')return value;
+  const copy:any={};
+  for(const [key,v] of Object.entries(value))if(v!==null||!optionalDirectionKeys.has(key)){
+    copy[key]=cleanDirection(v);
+    // Camera timing is optional. Action-beat start/end and actor positions are
+    // required, so null there must remain a validation error, not be hidden.
+    if(key==='cameraMovement'&&copy[key]&&typeof copy[key]==='object')
+      for(const time of ['start','end'])if(copy[key][time]===null)delete copy[key][time];
+  }
+  if(typeof copy.screenDirection==='string'&&!['left-to-right','right-to-left','toward-camera','away-from-camera','static','custom'].includes(copy.screenDirection)){
+    const raw=copy.screenDirection,normal=raw.toLowerCase().replace(/[.]/g,'').trim();const aliases:Record<string,string>={'слева направо':'left-to-right','справа налево':'right-to-left','к камере':'toward-camera','от камеры':'away-from-camera','неподвижно':'static','статично':'static'};
+    copy.screenDirection=aliases[normal]??'custom';copy.end=(copy.end??'')+'; направление: '+raw;
+  }
+  return copy;
+}
 /** Only unambiguous syntax cleanup. Unknown IDs, duplicates, missing rows and timing conflicts stay errors. */
 export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:string|undefined,answer:unknown):unknown{const copy=structuredClone(answer) as any;if(!copy||!Array.isArray(copy.shots))return copy;if(role==='camera'||role==='story')for(const shot of copy.shots)if(shot.direction)shot.direction=cleanDirection(shot.direction);
   // Some actor responses include neighbours marked as context. Drop only IDs
@@ -32,7 +47,14 @@ export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:stri
 }
 export function compactSpecialistContext(p:Project,t:DirectorTask,base:any){if(!t.sceneId||!['story','camera','art','dialogue','performance','compress','shot-planner'].includes(t.role))return base;const scene=p.directing!.scenes.find(s=>s.id===t.sceneId)!;const ids=t.shotIds??(t.shotId?[t.shotId]:scene.shots.map(s=>s.id)),selected=scene.shots.filter(s=>ids.includes(s.id)),index=p.directing!.scenes.indexOf(scene);
   const summary=(s:any)=>s&&({id:s.id,title:s.title,purpose:s.purpose,location:s.location,stateIn:s.stateIn,stateOut:s.stateOut,turn:s.turn});
-  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition});
+  const excerpt=(value:string|undefined,max=600)=>value===undefined?undefined:value.length<=max?value:value.slice(0,max)+'… [контекст сокращён]';
+  const neighbourCamera=(d:any)=>!d?{}:{
+    framingEnd:d.framingEnd,angle:d.angle?{type:d.angle.type,description:excerpt(d.angle.description)}:undefined,
+    startFrame:excerpt(d.startFrame),endFrame:excerpt(d.endFrame),
+    cameraMovement:d.cameraMovement?{...d.cameraMovement,description:excerpt(d.cameraMovement.description),from:excerpt(d.cameraMovement.from),to:excerpt(d.cameraMovement.to),purpose:excerpt(d.cameraMovement.purpose),speed:excerpt(d.cameraMovement.speed,200),keepInFrame:excerpt(d.cameraMovement.keepInFrame)}:undefined,
+    positions:d.positions?.slice(0,8).map((v:any)=>({subject:v.subject,subjectId:v.subjectId,start:excerpt(v.start,300),end:excerpt(v.end,300),screenDirection:v.screenDirection})),
+  };
+  const neighbour=(s:any)=>({id:s.id,title:s.title,duration:s.duration,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut,continuityChanges:s.continuityChanges,dialogue:s.dialogue,framing:s.direction?.framingStart,transition:s.direction?.transition,...(['camera','compress'].includes(t.role)?neighbourCamera(s.direction):{})});
   const edge=new Set<number>();for(const shot of selected){const n=scene.shots.indexOf(shot);for(const k of [n-1,n+1])if(k>=0&&k<scene.shots.length&&!ids.includes(scene.shots[k].id))edge.add(k);}
   const stripped=(s:any)=>{const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...content}=s;return content;};
   // Scene specialists own only these target rows; adjacent rows are lightweight

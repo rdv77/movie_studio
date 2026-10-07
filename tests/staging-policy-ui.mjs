@@ -27,7 +27,7 @@ const projectBefore=structuredClone(project),briefHtml=html(E.DirectingEditor,{p
 A(briefHtml.includes('Способ постановки фильма'));A(briefHtml.includes('Опорные изображения'));
 A(briefHtml.includes('Утверждённые материалы и выбранные комплекты кадров сохраняются'));A.deepEqual(project,projectBefore);
 const app=await readFile('app/studio.tsx','utf8'),frames=await readFile('app/keyframe-editor.tsx','utf8');
-A(app.includes("request('/api/projects', 'POST', { title, stagingMode, framePolicy })"));
+A.match(app,/request\('\/api\/projects',\s*'POST',\s*\{\s*title,\s*stagingMode,\s*framePolicy(?:,\s*cameraPolicy)?\s*\}\)/);
 A(frames.includes('Один кадр · действие по описанию'));A(!frames.includes('Один кадр · статичный план'));
 A.equal(calls,0);
 console.log('PASS staging UI: new-project defaults; unchanged legacy settings; inherited and explicit shot overrides; false end-frame requirement; SSR without mutations or generation.');
