@@ -41,7 +41,8 @@ try{
     assert.match(prompt,/сохраняй остальные неизменённые поля, включая performance/);
     assert.match(prompt,/Если эмоционального поворота по сюжету нет, не навязывай его/);
   }
-  assert.match(R.directorPrompt(p,run,task('story')),/сохрани актёрскую задачу в возвращаемой direction/);
+  assert.match(R.directorPrompt(p,run,task('story')),/В direction возвращай ТОЛЬКО narrativeBeat/);
+  assert.match(R.directorPrompt(p,run,task('story')),/камера и актёрская задача сохраняются программой/);
   const cameraContext=JSON.parse(R.directorPrompt(p,run,task('camera')).split('\nДанные:\n')[1]);
   assert(!Object.hasOwn(cameraContext.contextOnlyNeighbours[0],'performance'),'Other specialists do not acquire unnecessary neighbour acting dossiers');
   assert.deepEqual(p,before,'Preparing specialist prompts is read-only');

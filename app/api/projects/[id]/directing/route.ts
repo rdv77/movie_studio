@@ -28,7 +28,7 @@ export const POST=api(async(req,ctx)=>{
   if(body.revision!==p.revision)throw Error('Проект изменился. Обновите данные и повторите действие.');
   const d=ensureDirecting(p),v=body.data??{};
   const running=d.runs.some(directorRunActive);
-  if(running&&!['stop','retry','importScriptCandidate'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
+  if(running&&!['stop','retry','importScriptCandidate','repairSavedAnswer'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
   const tracksHistory=['planPolicy','choosePlanSet','savePlanCards','restorePlanCard','approvePlanSets','brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){

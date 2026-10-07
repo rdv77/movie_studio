@@ -53,6 +53,10 @@ export const directingShotSchema=z.object({
   cinematography:text,productionDesign:text,dialogue:dialogueSchema,continuityChanges:z.string().max(2000),
   direction:shotDirectionSchema.optional(),
 });
+// The story specialist owns the narrative beat, not the camera/actor schema.
+// Ignore unsolicited fields from those roles before validating this response;
+// the complete manual/editor schema above remains strict.
+const storyShotSchema=directingShotSchema.extend({direction:shotDirectionSchema.pick({narrativeBeat:true}).strip().optional()});
 export type DirectingShot=z.infer<typeof directingShotSchema>&{approvalVersion?:2;approved?:string;approvedFoundation?:string;imagePrompt?:string;videoPrompt?:string;promptBasis?:string};
 export const sceneSchema=z.object({id:z.string().min(1).max(100),title:z.string().min(1).max(100),purpose:text,location:text,conflict:text,turn:text,
   causalChain:z.array(sceneCausalLinkSchema).max(20).optional(),
@@ -196,7 +200,7 @@ export function directorPrompt(p:Project,run:DirectorRun,t:DirectorTask){
   schemas.scenes+=SCENE_CAUSALITY_INSTRUCTION;
   schemas.story+=SHOT_CAUSALITY_INSTRUCTION+' В ответе narrativeBeat находится внутри direction. Сохрани прежний narrativeBeat, если событие не меняется; уточняй только в соответствии с causalChain. Запиши причину, проживание и решение также в story/stateIn/stateOut, чтобы смысл читался без расшифровки метаданных.';
   schemas.story+=' Если переданы requestedShotIds, сохрани их порядок, duration, состав героев, вид речи и утверждённые события. Новые планы, объединения и удаления только отдельным предложением редактора. Подробно развивай видимое действие в существующих планах, не меняя монтажный набор.';
-  schemas.story+=' Если уже есть direction.performance, сохрани актёрскую задачу в возвращаемой direction и согласуй story/stateIn/stateOut с целью, подтекстом, причиной эмоционального поворота и emotionStart/emotionEnd. Не теряй её при переработке других полей. При действительном изменении события явно уточни затронутую игру, не подставляй несовместимую прежнюю реакцию и не заменяй переживание одним механическим жестом.';
+  schemas.story+=' В direction возвращай ТОЛЬКО narrativeBeat. Не возвращай framing, cameraMovement, performance, другие операторские/актёрские поля и не дублируй causalChain сцены внутри плана: их разрабатывают отдельные специалисты. Уже сохранённые камера и актёрская задача сохраняются программой. Если есть direction.performance, учитывай её как контекст и согласуй story/stateIn/stateOut с целью, подтекстом, причиной эмоционального поворота и emotionStart/emotionEnd. При действительном изменении события явно опиши новый смысл в narrativeBeat и story, чтобы актёрский специалист уточнил игру; не подставляй несовместимую прежнюю реакцию и не заменяй переживание одним механическим жестом.';
   schemas.camera+=' Все screenDirection только из перечисления: left-to-right, right-to-left, toward-camera, away-from-camera, static, custom. Свободное описание — в start/end, не в enum. Необязательное поле без значения пропусти: null недопустим. revealAt только число, если раскрытие есть. Опиши каждый запрошенный ID кратко, без повторения общей основы. Не более 1200 слов на три плана.';
   for(const role of SCENE_SPECIALIST_ROLES)schemas[role]+=' Верни ровно requestedShotIds, по одному объекту на ID. contextOnlyNeighbours, previous/next и sceneBoundaryNeighbours — контекст, никогда не включай их в shots.';
   const facialGuide=' Мимика задана режиссёром в facialActing: для каждого плана используй его разрешённую интенсивность, а для новых планов — filmInstruction. Свяжи выражение лица с характером, жанром и происходящим действием. Не меняй и не возвращай direction.facialExpression: это настройка пользователя, а не решение агента. Закрытый рот не означает неподвижное лицо: допустимы мимика глаз и бровей, улыбка с закрытым ртом; речевая артикуляция только у указанного говорящего. Не меняй узнаваемые черты лица.\n';
@@ -259,7 +263,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
       });
       for(const {shot,...fields} of prepared)Object.assign(shot,fields);
     }else if(t.role==='story'){
-      const data=z.object({shots:z.array(directingShotSchema).min(1).max(40)}).parse(result);
+      const data=z.object({shots:z.array(storyShotSchema).min(1).max(40)}).parse(result);
       if(scene.causalChain?.length){const missing=data.shots.find(shot=>!shot.direction?.narrativeBeat);if(missing)throw Error(`«${missing.title}»: ответ потерял direction.narrativeBeat. Укажите роль плана, повод, смысл и видимое действие/реакцию; для перебивки можно выбрать setup или transition без героя.`);}
       if(new Set(data.shots.map(s=>s.id)).size!==data.shots.length)throw Error('Повторяются ID планов.');
       const requested=t.shotIds??(t.shotId?[t.shotId]:undefined);
@@ -267,7 +271,7 @@ export function applyDirectorResult(p:Project,run:DirectorRun,t:DirectorTask,res
       if(d.shotPlanning)for(const value of data.shots){const old=scene.shots.find(s=>s.id===value.id);if(!old||old.duration!==value.duration||JSON.stringify(old.cast)!==JSON.stringify(value.cast)||old.dialogue.speechType!==value.dialogue.speechType)throw Error('Режиссёр не может менять утверждённый монтажный набор, длительность, участников и вид речи. Предложите изменение отдельно.');}
       if(!requested&&d.scenes.filter(s=>s.id!==scene.id).reduce((n,s)=>n+s.shots.length,0)+data.shots.length>120)throw Error('В фильме максимум 120 планов.');
       const ids=new Map(data.shots.map(s=>[s.id,scene.shots.find(old=>old.id===s.id)?.id??id()]));
-      const shots=data.shots.map(s=>{validateDialogue(s);const next={...s,id:ids.get(s.id)!};const previous=scene.shots.find(old=>old.id===s.id)?.direction;next.direction=preserveShotFacialExpression(next.direction,previous);if(next.direction?.transition?.toShotId)next.direction={...next.direction,transition:{...next.direction.transition,toShotId:ids.get(next.direction.transition.toShotId)??next.direction.transition.toShotId}};return next;});
+      const shots=data.shots.map(s=>{validateDialogue(s);const next:DirectingShot={...s,id:ids.get(s.id)!};const previous=scene.shots.find(old=>old.id===s.id)?.direction;next.direction=preserveShotFacialExpression(previous||next.direction?{...previous,...next.direction}:undefined,previous);if(next.direction?.transition?.toShotId)next.direction={...next.direction,transition:{...next.direction.transition,toShotId:ids.get(next.direction.transition.toShotId)??next.direction.transition.toShotId}};return next;});
       const merged=requested?scene.shots.map(shot=>shots.find(value=>value.id===shot.id)??shot):shots;
       const conflict=validateScenePlan({...scene,shots:merged}).find(i=>i.severity==='conflict'&&(!requested||!i.shotId||requested.includes(i.shotId)));if(conflict)throw Error(conflict.message);scene.shots=merged;
     }else{

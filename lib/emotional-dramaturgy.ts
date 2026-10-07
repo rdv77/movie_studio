@@ -6,7 +6,14 @@ const causalFields={trigger:fact,meaning:fact,emotionStart:fact,emotionEnd:fact,
 export const sceneCausalLinkSchema=z.object({character:z.string().trim().min(1).max(100),expectation:fact,...causalFields}).strict();
 export type SceneCausalLink=z.infer<typeof sceneCausalLinkSchema>;
 export const NARRATIVE_BEAT_LABELS={setup:'Подготовка / ожидание',action:'Действие',reaction:'Реакция','action-reaction':'Действие и реакция',transition:'Переход'} as const;
-export const narrativeBeatSchema=z.object({role:z.enum(['setup','action','reaction','action-reaction','transition']),character:z.string().trim().min(1).max(100).optional(),...causalFields}).strict();
+// A cutaway can have no character. Models sometimes serialize that optional
+// field as an empty string; remove only that spelling, without inventing a hero.
+export const narrativeBeatSchema=z.preprocess(value=>{
+  if(value&&typeof value==='object'&&!Array.isArray(value)&&'character' in value&&typeof value.character==='string'&&!value.character.trim()){
+    const normalized={...value};delete (normalized as {character?:string}).character;return normalized;
+  }
+  return value;
+},z.object({role:z.enum(['setup','action','reaction','action-reaction','transition']),character:z.string().trim().min(1).max(100).optional(),...causalFields}).strict());
 export type NarrativeBeat=z.infer<typeof narrativeBeatSchema>;
 
 export const SCENE_CAUSALITY_INSTRUCTION=' Эмоциональная причинность обязательна для новых сцен: опирайся на emotionalArcs утверждённого сценария, а при отсутствии структурированных дуг извлеки их из самого текста. Для каждого героя, чья перспектива меняется, заполни объект causalChain по полному формату ответа: character — имя; expectation — чего ждёт до события; trigger — какое видимое событие меняет ожидание; meaning — что герой теперь понимает и почему это важно лично ему; emotionStart/emotionEnd — чувство до/после; decision — как новое понимание меняет намерение; visibleEvidence — что именно зритель увидит в лице, теле и поступке. В purpose/conflict/turn и stateIn/stateOut также должна читаться эта причинность; отдельная справка не заменяет драматургию сцены. Пустой causalChain допустим только для сцены без эмоциональной перспективы персонажей. Событие → его значение для героя → изменение чувства → решение → наблюдаемое поведение. Не приписывай зрителю знание исходного произведения: значимые ожидания, сравнения и причины тревоги сначала установи экранным действием. Скрытая авторская мысль не является экранным доказательством. Для фильма без речи смысл должен читаться без рассказчика, титров и добавленного диалога. Не создавай новые сюжетные события ради схемы и не заставляй каждую сцену менять знак эмоции.';

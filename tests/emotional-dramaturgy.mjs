@@ -1,5 +1,7 @@
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
+import {existsSync,readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as S from './lib/shot-direction';export * as P from './lib/shot-planning';export * as A from './lib/directing-specialists';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/emotional-dramaturgy.mjs',external:['@ffmpeg/ffmpeg']});
 const {D,R,S,P,A}=await import('../work/tests/emotional-dramaturgy.mjs');
 const oldFetch=globalThis.fetch;globalThis.fetch=()=>{throw Error('No API calls allowed')};
@@ -14,6 +16,16 @@ try{
   assert.deepEqual(R.sceneSchema.parse(scene).causalChain,[link]);
   assert.deepEqual(R.directingShotSchema.parse(shot).direction.narrativeBeat,beat);
   assert.deepEqual(P.planSketchSchema.parse(P.sketchFromShot(shot)).narrativeBeat,beat);
+  const cutaway={...beat,role:'action',character:'',meaning:'Стрела уходит к лесу',emotionStart:'',emotionEnd:'',decision:'',visibleEvidence:'Стрела исчезает справа за деревьями'};
+  const {character:emptyCharacter,...cutawayWithoutCharacter}=cutaway;
+  for(const character of ['', '  \n ']){
+    const input={...cutaway,character},parsed=S.shotDirectionSchema.parse({narrativeBeat:input});
+    assert(!Object.hasOwn(parsed.narrativeBeat,'character'),'An explicit empty optional character is omitted for cutaways');
+    assert.equal(input.character,character,'Normalization does not mutate the supplied AI result');
+    assert.deepEqual(parsed.narrativeBeat,cutawayWithoutCharacter);
+  }
+  assert(!S.shotDirectionSchema.safeParse({narrativeBeat:{...cutaway,character:null}}).success,'Do not silently repair other invalid character values');
+  assert(!R.sceneSchema.safeParse({...scene,causalChain:[{...link,character:''}]}).success,'A causal scene link still requires an actual character');
   const legacyScene=structuredClone(scene);delete legacyScene.causalChain;for(const s of legacyScene.shots)delete s.direction.narrativeBeat;
   const oldApproval=R.shotApproval(legacyScene,legacyScene.shots[0]);
   assert(!Object.hasOwn(R.sceneSchema.parse(legacyScene),'causalChain'));
@@ -63,5 +75,27 @@ try{
   assert.throws(()=>R.applyDirectorResult(p,{...strictRun,basis:R.directorBasis(p)},{id:'story',role:'story',sceneId:current.id,requires:[]},{shots:[missingShot]}),/потерял direction.narrativeBeat/);
   const missingCard=P.sketchFromShot(shot);delete missingCard.narrativeBeat;
   assert.throws(()=>P.savePlanningProposal(p,strictRun,{id:'planner',role:'shot-planner',sceneId:current.id,requires:[],inputContentBasis:P.planningInputBasis(p,current)},{shots:[missingCard]}),/не содержит narrativeBeat/);
+  const cutawayCard={...P.sketchFromShot(shot),cast:[],narrativeBeat:cutaway};
+  P.savePlanningProposal(p,strictRun,{id:'empty-character-planner',role:'shot-planner',sceneId:current.id,requires:[],inputContentBasis:P.planningInputBasis(p,current)},{shots:[cutawayCard]});
+  const savedCard=P.ensureShotPlanning(p).proposals.at(-1).cards[0];
+  assert.deepEqual(savedCard.narrativeBeat,cutawayWithoutCharacter,'A valid generated cutaway saves without a paid retry');
+  P.replacePlanCards(p,current.id,[savedCard]);
+  assert.deepEqual(current.shots[0].direction.narrativeBeat,cutawayWithoutCharacter,'Normalized optional character survives planner-to-shot handoff');
+  // Local production evidence is optional and is never copied into the repo.
+  // The synthetic regression above remains self-contained in CI.
+  const fixturePath=resolve('../work/emotion-films/film-b-current.json');
+  if(existsSync(fixturePath)){
+    const fixture=JSON.parse(readFileSync(fixturePath,'utf8'));
+    const raw=fixture.jobs?.find(job=>job.id==='af0205da-6064-487a-b598-aa78cf4edcc9')?.output?.text;
+    if(raw){
+      const output=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));
+      const cards=output.shots.map(card=>P.planSketchSchema.parse(card));
+      assert.equal(cards.length,8);assert.equal(output.shots[1].narrativeBeat.character,'');
+      assert(!Object.hasOwn(cards[1].narrativeBeat,'character'));
+      assert.deepEqual(cards[1].cast,[]);
+      assert.equal(cards[1].narrativeBeat.trigger,output.shots[1].narrativeBeat.trigger);
+      console.log('PASS actual saved MiniMax shot-planner response: all 8 cards accepted; only empty optional character removed.');
+    }
+  }
   console.log('PASS optional causal schema, scene persistence, planner handoff, complete specialist contexts, parallel ownership, viewer checks and legacy approval compatibility. No paid calls.');
 }finally{globalThis.fetch=oldFetch;}
