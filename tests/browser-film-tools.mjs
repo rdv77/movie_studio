@@ -29,6 +29,12 @@ await rejects('edit_current_film',{...retry(),data:{runId:run.id,taskId:failedTa
 failedTask.error=undefined;await rejects('edit_current_film',retry());failedTask.error='JSON invalid';
 const failedJob=current.jobs.find(j=>j.id===failedTask.jobId);failedJob.status='pending';await rejects('edit_current_film',retry());
 failedJob.status='unknown';await rejects('edit_current_film',retry());await tool('edit_current_film').execute({...retry(),data:{runId:run.id,taskId:failedTask.id,acknowledgeCost:true}});
+const allow=()=>({...target(),operation:'project',action:'allowNewSeries',data:{jobId:failedJob.id,acknowledgeCost:true}});
+for(const data of [{jobId:failedJob.id},{jobId:failedJob.id,acknowledgeCost:false},{jobId:failedJob.id,acknowledgeCost:'true'},{jobId:D.id(),acknowledgeCost:true},{jobId:failedJob.id,acknowledgeCost:true,model:'grok-4.6'}])await rejects('edit_current_film',{...allow(),data});
+for(const status of ['queued','dispatching','pending','saving','done','failed','cancelled']){failedJob.status=status;await rejects('edit_current_film',allow());}
+failedJob.status='unknown';const jobsBeforeAllow=JSON.stringify(current.jobs);await tool('edit_current_film').execute(allow());
+A.equal(requests.at(-1).method,'PATCH');A.equal(requests.at(-1).path,`/api/projects/${current.id}`);A.equal(requests.at(-1).body.action,'allowNewSeries');A.deepEqual(requests.at(-1).body.data,{jobId:failedJob.id});
+A.equal(JSON.stringify(current.jobs),jobsBeforeAllow,'Browser action does not change the old paid request or create a replacement job locally');
 const resolve=()=>({...target(),operation:'directing',action:'resolveIssue',data:{issueId:issue.id,resolution:'Монтажный пропуск проверен режиссёром: перенос лягушки специально не показываем.'}});
 await rejects('edit_current_film',{...resolve(),data:{issueId:issue.id,resolution:'  '}});
 await rejects('edit_current_film',{...resolve(),data:{issueId:D.id(),resolution:'Проверено'}});
@@ -46,6 +52,25 @@ current.animaticSettings={sound:'silent',music:false,motion:false};await tool('a
 current.jobs=[{id:D.id(),itemId:D.id(),status:'done',model:'x',prompt:'secret prompt '.repeat(100000),created:'2026-01-01',refs:[]}];
 const summary=await tool('read_film_summary').execute({});A(JSON.stringify(summary).length<5000);A(!JSON.stringify(summary).includes('secret prompt'));
 const rev=current.revision;A.equal((await tool('read_film_summary').execute({refresh:true})).revision,rev+1);
+// A queue response can reach the cache while a slower GET/PATCH is in flight.
+// Tool receipts must return the same newest revision retained by the UI cache.
+{
+  const original={replace:bridge.replace,readCurrent:bridge.readCurrent,request:bridge.request};
+  bridge.replace=p=>{if(current.id!==p.id||current.revision<=p.revision)current=p;};
+  bridge.readCurrent=async id=>{A.equal(id,active);const response={...current,revision:current.revision+1};current={...current,revision:current.revision+2};return response;};
+  const beforeRefresh=current.revision;
+  A.equal((await tool('read_film_summary').execute({refresh:true})).revision,beforeRefresh+2);
+  A.equal(current.revision,beforeRefresh+2);
+  bridge.request=async(path,method,body)=>{requests.push({path,method,body});const response={...current,revision:current.revision+1};current={...current,revision:current.revision+2};return response;};
+  const beforeWrite=current.revision;
+  const receipt=await tool('edit_current_film').execute({...target(),operation:'project',action:'prepareShots'});
+  A.equal(receipt.revision,beforeWrite+2);
+  A.equal(receipt.id,current.id);
+  await rejects('edit_current_film',{...target(),revision:beforeWrite+1,operation:'project',action:'prepareShots'});
+  const previousActive=active;bridge.readCurrent=async()=>{active=D.id();return {...current};};
+  await A.rejects(()=>tool('read_film_summary').execute({refresh:true}),/Проект сменился/);
+  active=previousActive;Object.assign(bridge,original);
+}
 const models=await tool('read_model_catalog').execute({kind:'image'});A(models.models.every(m=>m.kind==='image'));A(models.models.some(m=>m.provider==='xai'&&m.configured));A(!JSON.stringify(models).includes('must-not-leak'));
 const empty={id:D.id(),title:'Пустой герой',stage:1,variants:[]};current.items.push(empty);
 await tool('cleanup_empty_film_item').execute({...target(),itemId:empty.id});A.equal(requests.at(-1).body.action,'removeEmpty');

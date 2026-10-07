@@ -5,17 +5,43 @@ import { generate } from './providers';
 import { now, assertBudget } from './domain';
 import { directorBasis, directorRunBasis, directorJob, taskReady, parseDirectorJSON, applyDirectorResult,publishDirectorScript } from './directing';
 import {normalizeDirectorAnswer,scheduleDirectorFallback} from './director-reliability';
+import type {Project} from './domain';
+
+/** A ready dependency is not necessarily an admissible paid request. Waiting
+ * on an unchanged queue refusal must not rewrite the whole project every tick. */
+function directorAdvanceChanges(p:Project,dispatch=true){
+  for(const run of p.directing?.runs??[]){
+    if(run.tasks.some(t=>{const j=p.jobs.find(j=>j.id===t.jobId);return j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000;}))return true;
+    if(!dispatch||run.stopped)continue;
+    if(run.basis!==directorRunBasis(p,run))return true;
+    const ready=run.tasks.filter(t=>taskReady(run,t));
+    if(!ready.length)continue;
+    let issue:string|undefined;
+    for(const task of ready){
+      // directorJob records an input basis on its task. Preview on a copy so a
+      // read-only blocked tick never returns unsaved task fields to the browser.
+      const candidate=directorJob(p,run,{...task}),blocked=queueSlotIssue(p,candidate,new Set(),task);
+      if(!blocked)return true;
+      if(blocked.includes('неизвестным исходом'))issue=blocked;
+    }
+    if(run.queueIssue!==issue)return true;
+  }
+  return false;
+}
+class DirectorQueueUnchanged extends Error {}
 
 // All admission and task dependencies are decided on the server. CAS claims
 // prevent two tabs/workers from sending the same paid request twice.
 export async function runDirectorStep(user:string,projectId:string,options:{dispatch?:boolean}={}){
   const snapshot=await loadProject(user,projectId);
-  const expired=snapshot.jobs.some(j=>j.purpose==='directing'&&j.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000);
-  const ready=options.dispatch!==false&&snapshot.directing?.runs.some(r=>!r.stopped&&(r.basis!==directorRunBasis(snapshot,r)||r.tasks.some(t=>taskReady(r,t))));
-  if(!expired&&!ready)return snapshot;
+  if(!directorAdvanceChanges(snapshot,options.dispatch!==false))return snapshot;
   const claimed:string[]=[];
-  let p=await mutate(user,projectId,p=>{
+  let p:Project;
+  try{p=await mutate(user,projectId,p=>{
     claimed.length=0;
+    // Another tab may have recorded this queue issue or claimed the task since
+    // the snapshot. Recheck inside CAS before saving or dispatching anything.
+    if(!directorAdvanceChanges(p,options.dispatch!==false))throw new DirectorQueueUnchanged();
     const d=p.directing;if(!d)return;
     for(const run of d.runs){
       for(const t of run.tasks){const j=p.jobs.find(j=>j.id===t.jobId);if(j?.status==='dispatching'&&Date.now()-Date.parse(j.started??j.created)>15*60*1000){j.status='unknown';j.error='Прервалось ожидание ответа. Проверьте расход; автоматического повтора нет.';t.error=j.error;}}
@@ -29,7 +55,7 @@ export async function runDirectorStep(user:string,projectId:string,options:{disp
         assertBudget(p,[j]);j.status='dispatching';j.started=now();t.jobId=j.id;p.jobs.push(j);claimed.push(j.id);
       }
     }
-  });
+  });}catch(e){if(e instanceof DirectorQueueUnchanged)return loadProject(user,projectId);throw e;}
   await Promise.allSettled(claimed.map(async jobId=>{
     const job=p.jobs.find(j=>j.id===jobId)!;
     let sent=false;

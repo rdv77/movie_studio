@@ -48,7 +48,7 @@ test('specialists preserve arc across critic, dramaturg, control and explicit im
   const revised=candidate();revised.emotionalArcs[0].beats[0].visibleEvidence+=' Стиснутые пальцы разжимаются.';
   S.applyScriptWorkflowResult(p,run,dramaturg,revised);
   assert.deepEqual(context(S.scriptWorkflowPrompt(p,run,control)).currentEmotionalArcs,revised.emotionalArcs);
-  assert.throws(()=>S.applyScriptWorkflowResult(p,run,control,candidate()),/сохранить эмоциональную линию/);
+  const probe=structuredClone(p),probeRun=probe.directing.runs[0];S.applyScriptWorkflowResult(probe,probeRun,probeRun.tasks[3],candidate());assert.deepEqual(probeRun.tasks[3].result.emotionalArcs,revised.emotionalArcs);assert(probeRun.tasks[3].processingWarning);
   S.applyScriptWorkflowResult(p,run,control,{...readOnly});
   assert.deepEqual(control.result.emotionalArcs,revised.emotionalArcs);
   const selected=item.selectedId,approved=item.approvedId,imported=S.importScriptWorkflowCandidate(p,run.id,control.id);

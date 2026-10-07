@@ -50,7 +50,8 @@ export function ScriptWorkflowEditor({p,model,busy,submit,openScenario}:Props){
     if(!parsed.success)return null;
     const data=parsed.data,imported=!!task.importedVariantId&&p.items.some(i=>i.stage===0&&!i.removedAt&&!i.planArchive&&i.variants.some(v=>v.id===task.importedVariantId)),job=p.jobs.find(j=>j.id===task.jobId);
     return <div className="space-y-3 border-t border-border pt-3">
-      {['script-critic','script-control'].includes(task.role)&&<p className="text-xs text-muted-foreground">Это проверка: полный текст сохранён без изменений. Решения и замечания — в заключении ниже.</p>}
+      {['script-critic','script-control'].includes(task.role)&&<p className="text-xs text-muted-foreground">Это проверка: приложение сохраняет исходный сценарий и эмоциональную линию; специалист возвращает заключение с решениями и замечаниями ниже.</p>}
+      {task.processingWarning&&<p role="status" className="text-sm text-amber-700 dark:text-amber-300">{task.processingWarning}</p>}
       <p className="text-xs text-muted-foreground">В варианты будет добавлен полный сценарий, показанный выше. Выбор и утверждение выполняются на этапе «Общий сценарий».</p>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy||operation||!task.applied||!!task.error||imported} onClick={()=>perform('importScriptCandidate',{runId:run.id,taskId:task.id},'Полный сценарий добавлен в варианты. Текущий выбор и утверждение сохранены.')}>{imported?'✓ Добавлен в варианты':'Добавить полный сценарий в варианты'}</Button>
         <Button type="button" size="sm" variant="outline" disabled={locked||!task.applied||!!task.error} onClick={()=>chooseBranch(run,task.id,scriptTaskChain(p,run,task.id)+' · '+data.title)}>Продолжить с этого результата</Button></div>
@@ -59,6 +60,7 @@ export function ScriptWorkflowEditor({p,model,busy,submit,openScenario}:Props){
         {!data.findings.length&&<p className="mt-2 text-sm">Замечаний не предложено.</p>}{data.findings.map((finding,n)=><div key={n} className="mt-2 space-y-1 rounded border border-border p-2 text-sm"><p><b>{finding.severity==='conflict'?'Конфликт':'Замечание'}:</b> {finding.evidence}</p><p><b>Предложенное решение:</b> {finding.proposal}</p>{finding.requiresDirectorChoice&&<small className="text-muted-foreground">Нужен творческий выбор режиссёра.</small>}</div>)}
       </details>}
       {job&&<details><summary className="cursor-pointer text-xs">Фактически отправленный промпт</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{job.prompt}</pre></details>}
+      {task.processingWarning&&job?.output?.text&&<details><summary className="cursor-pointer text-xs">Необработанный ответ модели проверки</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{job.output.text}</pre></details>}
     </div>;
   };
   return <section className="space-y-4 rounded border border-border p-4" aria-label="Команда разработки общего сценария">
@@ -118,11 +120,13 @@ export function ScriptWorkflowEditor({p,model,busy,submit,openScenario}:Props){
           return <article key={task.id} className="space-y-3 rounded border border-border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b className="text-sm">{scriptTaskChain(p,run,task.id)}</b><span className="text-xs text-muted-foreground">{task.error?'Требует внимания':task.applied?'Готово':job?'В работе':run.stopped?'Не запущен':'Ожидает предыдущий шаг'}{job&&<> · расход: {money(job.actual)}</>}</span></div>
             {task.lateResult&&<p className="text-xs text-muted-foreground">Ответ получен после остановки; следующие шаги не запускались.</p>}
             {task.error&&<p role="alert" className="text-sm text-destructive">{task.error}</p>}
+            {task.processingWarning&&<p role="status" className="text-sm text-amber-700 dark:text-amber-300">{task.processingWarning}</p>}
             {task.error&&<Button type="button" size="sm" variant="outline" disabled={busy||operation} onClick={()=>perform('retry',{runId:run.id,taskId:task.id,acknowledgeCost:true},'Повтор этого задания поставлен в очередь.')}>{job?.status==='unknown'?'Повторить с возможным повторным списанием':'Повторить только это задание'}</Button>}
             {data&&<><h4 className="text-sm font-medium">{data.title}</h4>
               <Button type="button" size="sm" variant="outline" onClick={()=>setComparisonTarget(`task-${task.id}`)}>Показать в сравнении</Button>
             </>}
             {job&&<details><summary className="cursor-pointer text-xs">Фактически отправленный промпт</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{job.prompt}</pre></details>}
+            {task.processingWarning&&job?.output?.text&&<details><summary className="cursor-pointer text-xs">Необработанный ответ модели проверки</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{job.output.text}</pre></details>}
           </article>;
         })}</div>
         {directorRunActive(run)&&<Button type="button" size="sm" variant="outline" disabled={busy||operation} onClick={()=>perform('stop',{runId:run.id},'Дальнейшие шаги остановлены. Уже отправленные запросы могут завершиться.')}>Остановить дальнейшую проработку</Button>}

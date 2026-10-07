@@ -78,12 +78,12 @@ test('subset ordered as DAG, ready tasks and frozen input regardless of project 
 test('critic keeps input, dramaturg consumes its findings and control keeps candidate',()=>{
   const {p,source}=fixture(),run=S.createScriptWorkflowRun(p,'gpt-6-astra',['script-critic','script-dramaturg','script-control'],source.id);
   const [critic,dramaturg,control]=run.tasks;
-  assert.throws(()=>S.applyScriptWorkflowResult(p,run,critic,result('Переписано')),/сохранить/);assert.equal(critic.result,undefined);
+  const probe=structuredClone(p),probeRun=probe.directing.runs[0];S.applyScriptWorkflowResult(probe,probeRun,probeRun.tasks[0],result('Переписано'));assert.equal(probeRun.tasks[0].result.text,source.text);assert(probeRun.tasks[0].processingWarning);assert.equal(critic.result,undefined);
   const finding={methodologyId:'character_drive',severity:'note',evidence:'Выбор мальчика не показан.',proposal:'Добавить видимую паузу перед решением.',requiresDirectorChoice:true};
   S.applyScriptWorkflowResult(p,run,critic,{...result(source.text),findings:[finding]});assert(S.scriptWorkflowPrompt(p,run,dramaturg).includes(finding.proposal));
   const revised={...result('Мальчик решает взять лягушку после паузы.'),changes:['Показан выбор.']};S.applyScriptWorkflowResult(p,run,dramaturg,revised);
   assert(!S.scriptWorkflowPrompt(p,run,control).includes(finding.proposal),'Resolved criticism must not accumulate in later model inputs');
-  assert.throws(()=>S.applyScriptWorkflowResult(p,run,control,{...result(revised.text),changes:['Изменена история']}),/сохранить/);
+  const controlProbe=structuredClone(p),controlRun=controlProbe.directing.runs[0];S.applyScriptWorkflowResult(controlProbe,controlRun,controlRun.tasks[2],{...result(revised.text),changes:['Изменена история']});assert.deepEqual(controlRun.tasks[2].result.changes,[]);assert(controlRun.tasks[2].processingWarning);
   S.applyScriptWorkflowResult(p,run,control,result(revised.text));assert(run.tasks.every(t=>t.applied));
   S.applyScriptWorkflowResult(p,run,control,result(revised.text));assert.throws(()=>S.applyScriptWorkflowResult(p,run,dramaturg,result('Другой текст')),/уже сохранён/);
 });
