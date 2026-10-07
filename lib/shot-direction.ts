@@ -7,9 +7,9 @@ const idSchema = z.string().trim().min(1).max(100);
 const note = z.string().max(3000);
 const nonempty = z.string().trim().min(1).max(3000);
 const second = z.number().finite().min(0).max(60);
-export const FRAMINGS = ['extreme-wide', 'wide', 'medium', 'close-up', 'extreme-close-up', 'detail'] as const;
+export const FRAMINGS = ['extreme-wide', 'wide', 'medium', 'medium-close', 'close-up', 'extreme-close-up', 'detail'] as const;
 export const FRAMING_NAMES: Record<typeof FRAMINGS[number], string> = {
-  'extreme-wide': 'Дальний', wide: 'Общий', medium: 'Средний', 'close-up': 'Крупный',
+  'extreme-wide': 'Дальний', wide: 'Общий', medium: 'Средний', 'medium-close': 'Средне-крупный', 'close-up': 'Крупный',
   'extreme-close-up': 'Очень крупный', detail: 'Деталь',
 };
 

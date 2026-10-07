@@ -1,12 +1,12 @@
-/** Recover only a duplicated opening quote on an ASCII object-property name.
- * Strings, values and array members are never rewritten. The repaired candidate
- * must still pass JSON.parse and the caller's ordinary semantic schema. */
+/** Recover a duplicated opening property quote or one extra mismatched closing
+ * delimiter in an otherwise closed JSON tail. Strings/values are never rewritten
+ * and missing closers are not invented. JSON.parse and semantic schemas still run. */
 export function parseDirectorJSON(value:string):unknown{
   const source=value.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
   try{return JSON.parse(source);}catch(original){
     if(source.length>200_000)throw original;
     const stack:string[]=[],remove:number[]=[];
-    let quoted=false,escaped=false,previous='';
+    let quoted=false,escaped=false,previous='',tailDelimiterRemoved=false;
     for(let i=0;i<source.length;i++){
       const c=source[i];
       if(quoted){
@@ -25,7 +25,18 @@ export function parseDirectorJSON(value:string):unknown{
         quoted=true;previous='"';continue;
       }
       if(c==='{'||c==='[')stack.push(c);
-      else if(c==='}'||c===']')stack.pop();
+      else if(c==='}'||c===']'){
+        const expected=stack.at(-1)==='{'?'}':stack.at(-1)==='['?']':undefined;
+        if(c!==expected){
+          // Only a redundant closer immediately before the expected closer at
+          // the very end. No recovery across another value, key or array item.
+          if(expected&&!tailDelimiterRemoved&&/^[\s\]}]+$/.test(source.slice(i))&&source.slice(i+1).trimStart().startsWith(expected)){
+            remove.push(i);tailDelimiterRemoved=true;continue;
+          }
+          throw original;
+        }
+        stack.pop();
+      }
       previous=c;
     }
     if(!remove.length)throw original;

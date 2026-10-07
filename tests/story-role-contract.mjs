@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 const server=`export class HttpError extends Error{constructor(message,status=400){super(message);this.status=status;}};export const api=f=>async(r,c)=>{try{return await f(r,c)}catch(e){return Response.json({error:e.message},{status:e.status??400})}};export const owner=async()=> 'owner';export const getKey=async()=>{throw Error('No credentials allowed')};export const imageData=async()=>{throw Error('No images allowed')};export const loadProject=async()=>structuredClone(globalThis.testFilm);export async function saveProject(u,p,revision){if(revision!==globalThis.testFilm.revision)throw new HttpError('CAS conflict',409);p.revision++;globalThis.testFilm=structuredClone(p);return p};export async function mutate(u,id,fn){const p=await loadProject(),revision=p.revision;await fn(p);return saveProject(u,p,revision);}`;
-await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as S from './lib/directing-specialists';export {POST} from './app/api/projects/[id]/directing/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/story-role-contract.mjs',external:['@ffmpeg/ffmpeg'],plugins:[{name:'local-server',setup(b){b.onResolve({filter:/^(?:@\/lib|\.)\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
-const {D,R,S,POST}=await import('../work/tests/story-role-contract.mjs');
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as D from './lib/domain';export * as R from './lib/directing';export * as S from './lib/directing-specialists';export * as Q from './lib/directing-solutions';export {POST} from './app/api/projects/[id]/directing/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/story-role-contract.mjs',external:['@ffmpeg/ffmpeg'],plugins:[{name:'local-server',setup(b){b.onResolve({filter:/^(?:@\/lib|\.)\/server$/},()=>({path:'server',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:server}));}}]});
+const {D,R,S,Q,POST}=await import('../work/tests/story-role-contract.mjs');
 const originalFetch=globalThis.fetch;globalThis.fetch=()=>{throw Error('No API calls allowed');};
 try {
   const p=D.newProject('Реакция героя'),d=R.ensureDirecting(p);
@@ -30,11 +30,20 @@ try {
   assert.throws(()=>R.applyDirectorResult(structuredClone(p),run,{...task},{shots:[{...response.shots[0],id:'unknown'}]}),/прежними ID/);
   assert.throws(()=>S.specialistUpdates(scene,'camera',{shots:[{id:shot.id,cinematography:'Камера',direction:{cameraMovement:{type:'tilt_up'}}}]},shot.id));
   assert.throws(()=>S.specialistUpdates(scene,'performance',{shots:[{id:shot.id,performance:{objective:'Bad'}}]},shot.id));
+  for(const [section,after] of [['direction',oldDirection],['dialogue',shot.dialogue]]){
+    const raw={issues:[],patches:[{shotId:'shot',section,after,reason:'Уточнение'}]},before=structuredClone(raw);
+    const prepared=Q.prepareDirectorReview(p,raw);
+    assert.deepEqual(JSON.parse(prepared.patches[0].after),after);
+    assert.deepEqual(raw,before,'Structured after serialization does not change the saved response');
+  }
+  for(const [section,after] of [['story',{text:'Не строка'}],['dialogue',[]],['dialogue',{speechType:'none',speaker:'',text:'Недопустимая речь',delivery:''}],['direction',{cameraMovement:{type:'tilt_up',description:'Bad enum'}}]]){
+    assert.throws(()=>Q.prepareDirectorReview(p,{issues:[],patches:[{shotId:'shot',section,after,reason:'Ошибка'}]}),'Structured patch values remain semantically validated');
+  }
 
   const path=resolve('../work/emotion-films/film-b-current.json');
   if(existsSync(path)){
     const saved=JSON.parse(readFileSync(path,'utf8'));
-    const failed=saved.jobs.filter(j=>['14df848b-2d2e-4900-bee1-908a98657a22','006bad01-749b-4af1-b83d-cc226d75ee89','754003b6-f729-4fd4-aaa9-2bd939905477'].includes(j.id)&&j.status==='failed'&&j.output?.text);
+    const failed=saved.jobs.filter(j=>['14df848b-2d2e-4900-bee1-908a98657a22','006bad01-749b-4af1-b83d-cc226d75ee89','754003b6-f729-4fd4-aaa9-2bd939905477','92fc7922-3b69-4f83-9aef-776db8eb6800','f225ab4f-3fa7-45f2-93c2-b5ce8f150e17'].includes(j.id)&&j.status==='failed'&&j.output?.text);
     globalThis.testFilm=structuredClone(saved);
     for(const job of failed){
       const ownerRun=testFilm.directing.runs.find(r=>r.id===job.batchId),ownerTask=ownerRun.tasks.find(t=>t.jobId===job.id);
@@ -45,7 +54,7 @@ try {
       assert.equal(after.status,'done');assert(!after.error);assert.equal(after.actual,receiptBefore.actual);assert.deepEqual(after.usage,receiptBefore.usage);assert.deepEqual(after.output,receiptBefore.output);assert.equal(testFilm.jobs.length,count);
       assert(testFilm.directing.runs.find(r=>r.id===ownerRun.id).tasks.find(t=>t.id===ownerTask.id).applied);
     }
-    if(failed.length)console.log(`PASS actual saved story answers: ${failed.length} restored through repairSavedAnswer with unchanged receipts and zero new jobs.`);
+    if(failed.length)console.log(`PASS actual saved specialist answers: ${failed.length} restored through repairSavedAnswer with unchanged receipts and zero new jobs.`);
     if(failed.length)for(const guard of ['unknown','stopped','basis','revision']){
       globalThis.testFilm=structuredClone(saved);
       const job=testFilm.jobs.find(j=>j.id===failed[0].id),ownerRun=testFilm.directing.runs.find(r=>r.id===job.batchId),ownerTask=ownerRun.tasks.find(t=>t.jobId===job.id);

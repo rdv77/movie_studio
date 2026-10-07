@@ -17,7 +17,10 @@ for(const valid of [{text:'Данные ,""emotionStart": внутри репл�
 }
 assert.deepEqual(parseDirectorJSON('{"text":"🙂",""key":"значение"}'),{text:'🙂',key:'значение'});
 assert.deepEqual(parseDirectorJSON('{"a":[{""emotionStart":"тревога"},{""emotionEnd":"доверие"}]}'),{a:[{emotionStart:'тревога'},{emotionEnd:'доверие'}]});
-for(const invalid of ['{"text":"незавершённая строка}', '[""value"]', '{""key":}', '{"key" "value"}', '{"a":1,}', '{""key":1,"tail":}', '{""a":1,""b":2,""c":3,""d":4,""e":5}']){
+assert.deepEqual(parseDirectorJSON('{"shots":[{"performance":{"objective":"🙂"}]}]}'),{shots:[{performance:{objective:'🙂'}}]},'A redundant mismatched closer at the closed tail is removed');
+assert.deepEqual(parseDirectorJSON('{"shots":[{"performance":{"objective":"🙂"} ] } ] }'),{shots:[{performance:{objective:'🙂'}}]});
+assert.deepEqual(parseDirectorJSON('{"key":"literal ]}]} inside a string"}'),{key:'literal ]}]} inside a string'});
+for(const invalid of ['{"text":"незавершённая строка}', '[""value"]', '{""key":}', '{"key" "value"}', '{"a":1,}', '{""key":1,"tail":}', '{""a":1,""b":2,""c":3,""d":4,""e":5}', '{"a":1],"b":2}', '{"a":1', '{"a":1]]}', '{"a":1} garbage']){
   assert.throws(()=>parseDirectorJSON(invalid),SyntaxError,'No general JSON or semantic repair: '+invalid);
 }
 const tooLong='{"text":'+JSON.stringify('x'.repeat(200_000))+',""emotionStart":"тревога"}';

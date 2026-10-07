@@ -12,9 +12,19 @@ export type DirectingSolutionsState={montageOperations?:EditorMontageOperation[]
 const state=(p:Project)=>ensureDirecting(p) as DirectingState&DirectingSolutionsState;
 const text=z.string().max(6000),patchText=z.string().max(32000);
 export const REVIEW_SECTIONS=['story','cinematography','productionDesign','dialogue','stateIn','stateOut','continuityChanges','direction'] as const;
+const reviewPatchSchema=z.preprocess(value=>{
+  if(value&&typeof value==='object'&&!Array.isArray(value)){
+    const patch=value as Record<string,unknown>;
+    // Structured sections have the same meaning as an object or its JSON text.
+    // Plain-text sections, arrays and null are deliberately not coerced.
+    if((patch.section==='direction'||patch.section==='dialogue')&&patch.after&&typeof patch.after==='object'&&!Array.isArray(patch.after))
+      return {...patch,after:JSON.stringify(patch.after)};
+  }
+  return value;
+},z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(REVIEW_SECTIONS),after:patchText,reason:text}));
 export const directorReviewSchema=z.object({
   issues:z.array(z.object({id:z.string().optional(),category:z.enum(['runtime_target','runtime_metadata','speech_fit','other']).optional(),sceneId:z.string().optional(),shotId:z.string().optional(),severity:z.enum(['note','conflict']),message:text,solution:text.optional()})).max(150),
-  patches:z.array(z.object({issueId:z.string().optional(),shotId:z.string(),section:z.enum(REVIEW_SECTIONS),after:patchText,reason:text})).max(150),
+  patches:z.array(reviewPatchSchema).max(150),
   montageOperations:z.array(z.record(z.string(),z.unknown())).max(40).optional(),
 });
 type ExtendedPatch=Omit<EditorPatch,'section'>&{section:EditorPatch['section']|'direction'};
@@ -37,6 +47,7 @@ export function prepareDirectorReview(p:Project,result:unknown,sceneId?:string):
     if(v.issueId&&!links.has(v.issueId))throw Error('Правка ссылается на неизвестное замечание.');
     const key=v.shotId+':'+v.section;if(fields.has(key))throw Error('Редактор предложил несовместимые повторные правки одного поля.');fields.add(key);
     if(v.section==='direction'){const raw=JSON.parse(v.after);v.after=JSON.stringify(preserveShotFacialExpression(raw===null?undefined:shotDirectionSchema.parse(raw),shot.direction)??null);}
+    if(v.section==='dialogue')dialogueSchema.parse(JSON.parse(v.after));
     return {...v,issueId:v.issueId?links.get(v.issueId):undefined,id:id(),before:patchValue(shot,v.section)} as ExtendedPatch;
   });
   const montageOperations=(data.montageOperations??[]).map(raw=>{
