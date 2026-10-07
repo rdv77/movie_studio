@@ -6,6 +6,10 @@ import { resolveFinalClip } from './render';
 import {hasKeyframeConfig,planKeyframeMode,requiredKeyframeRoles,selectedKeyframe,KEYFRAME_ROLE_NAMES,type KeyframeRole,type KeyframeSelection} from './keyframes';
 import {storyboardSelection,storyboardSetIssues,storyboardSetReview,assertStoryboardSelection,approveStoryboardSelection,type StoryboardSelection} from './storyboard-approval';
 export type ReviewRow={itemId:string;variantId?:string;stage:number;title:string;status:'ready'|'review'|'conflict'|'missing'|'approved';reason:string;keyframes?:KeyframeSelection;};
+export type ReviewScope='all'|'animatic';
+export function selectableReviewRows(rows:ReviewRow[]):ReviewRow[]{
+  return rows.filter(row=>!!row.variantId&&(row.status==='ready'||row.status==='review'));
+}
 export type ReviewKeyframePreview={role:KeyframeRole;label:string;variantId?:string;assetId?:string;status:'current'|'review'|'conflict'|'missing';reason:string};
 /** Preview the actual selected role set, never the first image or generation history alone. */
 export function reviewKeyframePreviews(p:Project,itemId:string):ReviewKeyframePreview[]{
@@ -52,13 +56,14 @@ export function timingConflict(p:Project,item:Item){
   try{resolveFinalClip({...v,title:item.title,trim:cut?.trim??v.trim,duration:cut?.duration??v.duration,assemblyMode:cut?.duration!=null?'custom':'full'},vs,speech);return '';}
   catch(e){return `Видео ${seconds.toFixed(2)} сек, речь ${speech.toFixed(2)} сек${speech>seconds?`: превышение ${(speech-seconds).toFixed(2)} сек`:''}. ${(e as Error).message}`;}
 }
-export function reviewRows(p:Project):ReviewRow[]{
-  return p.items.filter(i=>participates(p,i)&&i.stage!==8).sort((a,b)=>stagePosition(a.stage)-stagePosition(b.stage)).map(item=>{
+export function reviewRows(p:Project,scope:ReviewScope='all'):ReviewRow[]{
+  return p.items.filter(i=>participates(p,i)&&i.stage!==8&&(scope!=='animatic'||i.stage===5||i.stage===6&&p.animaticSettings?.sound!=='silent')).sort((a,b)=>stagePosition(a.stage)-stagePosition(b.stage)).map(item=>{
     const v=chosen(item),base={itemId:item.id,variantId:v?.id,stage:item.stage,title:item.title,keyframes:storyboardSelection(p,item)};
     if(!v)return {...base,status:'missing',reason:'Выберите готовый вариант.'};
     if(item.character&&(v.kind!=='image'||!v.assetId||!v.character))return {...base,status:'missing',reason:'Выберите готовый образ героя с сохранённым описанием.'};
     if([5,6,7].includes(item.stage)&&(!v.assetId||v.kind!==({5:'image',6:'audio',7:'video'} as any)[item.stage]))return {...base,status:'missing',reason:'Нужен готовый файл.'};
-    const conflict=timingConflict(p,item);
+    // Still images can hold for the full speech; future video duration is not an animatic constraint.
+    const conflict=scope==='animatic'?'':timingConflict(p,item);
     if(conflict)return {...base,status:'conflict',reason:conflict};
     if(v.lipsync&&p.items.find(i=>i.id===v.lipsync!.audioItemId)?.approvedId!==v.lipsync.audioVariantId)return {...base,status:'conflict',reason:'После синхронизации выбран другой голос. Повторите синхронизацию губ.'};
     if(p.jobs.some(j=>j.itemId===item.id&&j.purpose!=='media-review'&&['queued','dispatching','pending','saving'].includes(j.status)))return {...base,status:'conflict',reason:'Материал ещё создаётся.'};
@@ -69,12 +74,12 @@ export function reviewRows(p:Project):ReviewRow[]{
     return {...base,status:'review',reason:'Основа изменилась. Посмотрите материал и отметьте, если он подходит текущему фильму.'};
   });
 }
-export function approveReview(p:Project,selections:(StoryboardSelection&{reviewed?:boolean})[]){
+export function approveReview(p:Project,selections:(StoryboardSelection&{reviewed?:boolean})[],scope:ReviewScope='all'){
   if(!selections.length||new Set(selections.map(s=>s.itemId)).size!==selections.length)throw Error('Выберите материалы без повторов.');
   const copy=structuredClone(p);
-  const rows=reviewRows(copy);
+  const rows=reviewRows(copy,scope);
   for(const row of rows.filter(r=>selections.some(s=>s.itemId===r.itemId))){
-    const currentRow=reviewRows(copy).find(r=>r.itemId===row.itemId)!;
+    const currentRow=reviewRows(copy,scope).find(r=>r.itemId===row.itemId)!;
     if(currentRow.status==='review'&&!selections.find(s=>s.itemId===row.itemId)?.reviewed)throw Error(`${row.title}: после предыдущих утверждений изменилась основа. Посмотрите материал и отметьте его повторно.`);
     if(row.variantId!==selections.find(s=>s.itemId===row.itemId)?.variantId)throw Error('Выбор изменился. Обновите данные.');
     if(['conflict','missing'].includes(currentRow.status))throw Error(`${row.title}: ${currentRow.reason}`);

@@ -42,6 +42,45 @@ try{
  const submitted=C.reviewApprovalSelection(row(triple.p,triple.item));assert.equal(submitted.keyframes.middleId,triple.middle.id);assert.equal(submitted.keyframes.endId,triple.end.id);C.approveReview(triple.p,[submitted]);assert(K.keyframesApproved(triple.p,triple.p.items.find(i=>i.id===triple.item.id)));
 
  const missing=fixture();missing.item.variants=missing.item.variants.filter(v=>v.id!==missing.end.id);const missingPreview=C.reviewKeyframePreviews(missing.p,missing.item.id);assert.equal(missingPreview[1].status,'missing');assert(!missingPreview[1].assetId);assert(html(missing.p).includes('Нет изображения'));assert.throws(()=>C.reviewApprovalSelection(row(missing.p,missing.item)),/готовый материал/);
+ const selectionCases=['ready','review','approved','missing','conflict'].map(status=>({itemId:status,variantId:`variant-${status}`,stage:5,title:status,status,reason:status}));
+ selectionCases.push({itemId:'no-variant',stage:5,title:'No selection',status:'ready',reason:'No selected variant'});
+ const selectionSnapshot=structuredClone(selectionCases),allSelectable=C.selectableReviewRows(selectionCases);
+ assert.deepEqual(allSelectable.map(r=>r.itemId),['ready','review'],'Select all includes unchanged and reviewed images, but never approved, incomplete or conflicting materials');
+ assert.deepEqual(allSelectable.map(C.reviewApprovalSelection).map(s=>[s.itemId,s.reviewed]),[['ready',false],['review',true]],'A bulk selection preserves the explicit confirmation required by changed foundations');
+ assert.deepEqual(selectionCases,selectionSnapshot,'Selecting materials does not approve or mutate them');
+ assert.deepEqual(C.selectableReviewRows([]),[]);
+
+ const scoped=fixture('single');scoped.p.speechMode='plans';scoped.item.title='КАДР_ДЛЯ_АНИМАТИКА';
+ const scopedVoice={id:D.id(),stage:6,title:'ГОЛОС_ДЛЯ_АНИМАТИКА',sourceShot:{...scoped.item.sourceShot},variants:[]};
+ const scopedVideo={id:D.id(),stage:7,title:'ВИДЕО_ТОЛЬКО_ДЛЯ_ФИЛЬМА',sourceShot:{...scoped.item.sourceShot},variants:[]};
+ for(const [target,kind] of [[scopedVoice,'audio'],[scopedVideo,'video']]){const variant=D.makeVariant(scoped.p,target,{kind,assetId:D.id(),duration:5});target.variants.push(variant);target.selectedId=variant.id;}
+ scoped.p.items.push(scopedVoice,scopedVideo);scoped.p.animaticSettings={sound:'silent',music:false,motion:false};
+ const scopeHtml=props=>renderToStaticMarkup(createElement(ReviewCenter,{p:scoped.p,busy:false,submit:()=>{throw Error('Viewing cannot approve');},open:()=>{throw Error('Viewing cannot navigate');},...props}));
+ const scopedSnapshot=JSON.stringify(scoped.p),silentHtml=scopeHtml({scope:'animatic'});
+ assert(silentHtml.includes(scoped.item.title),'Silent animatics still expose pending storyboard images');
+ assert(!silentHtml.includes(scopedVideo.title),'Video plans do not participate in animatic review');
+ assert(!silentHtml.includes(scopedVoice.title),'Silent animatics do not ask for voice approvals');
+ assert(silentHtml.includes('Выбрать все доступные материалы'),'The bulk checkbox is visible before reviewing each individual plan');
+ assert(silentHtml.indexOf('Выбрать все доступные материалы')<silentHtml.indexOf(scoped.item.title),'Bulk selection sits above the plan list');
+ assert.equal(JSON.stringify(scoped.p),scopedSnapshot,'Opening animatic review changes no project data');
+ scoped.p.animaticSettings.sound='voices';const voicedHtml=scopeHtml({scope:'animatic'});
+ assert(voicedHtml.includes(scopedVoice.title),'An animatic with speech exposes the voice materials it needs');
+ assert(!voicedHtml.includes(scopedVideo.title),'Adding voices never adds video plan approval requirements');
+ const generalHtml=scopeHtml({});assert(generalHtml.includes(scopedVideo.title),'The general review centre retains video plan diagnostics');
+ const onlyFramesHtml=scopeHtml({scope:'animatic',stage:5});assert(onlyFramesHtml.includes(scoped.item.title));assert(!onlyFramesHtml.includes(scopedVoice.title),'An explicit stage filter is retained within the animatic scope');
+ scoped.p.mediaDurations={[scopedVoice.variants[0].assetId]:6,[scopedVideo.variants[0].assetId]:3};
+ assert.equal(C.reviewRows(scoped.p).find(r=>r.itemId===scopedVoice.id).status,'conflict','A voice longer than its video still blocks general film review');
+ assert.equal(C.reviewRows(scoped.p).find(r=>r.itemId===scopedVideo.id).status,'conflict');
+ assert(!C.reviewRows(scoped.p,'animatic').some(r=>r.itemId===scopedVideo.id),'The backend animatic scope also excludes future video plans');
+ const beforeOutsideScope=structuredClone(scoped.p);
+ assert.throws(()=>C.approveReview(scoped.p,[{itemId:scopedVideo.id,variantId:scopedVideo.selectedId,reviewed:true}],'animatic'),'An animatic request cannot approve a hidden video card');
+ assert.deepEqual(scoped.p,beforeOutsideScope,'An out-of-scope approval is rejected without partial changes');
+ C.approveReview(scoped.p,[C.reviewApprovalSelection(C.reviewRows(scoped.p,'animatic').find(r=>r.itemId===scoped.item.id))],'animatic');
+ const animaticVoice=C.reviewRows(scoped.p,'animatic').find(r=>r.itemId===scopedVoice.id);
+ assert(['ready','review'].includes(animaticVoice.status),'Future video length does not block a still-image animatic voice');
+ C.approveReview(scoped.p,[C.reviewApprovalSelection(animaticVoice)],'animatic');
+ assert.equal(scoped.p.items.find(i=>i.id===scopedVoice.id).approvedId,scopedVoice.selectedId,'Animatic approval can accept speech longer than a future video clip');
+ assert.equal(C.reviewRows(scoped.p).find(r=>r.itemId===scopedVideo.id).status,'conflict','Approving the animatic does not waive the film timing conflict');
  const legacy=fixture('single');delete legacy.item.keyframeMode;delete legacy.item.keyframeSelection;delete legacy.first.keyframe;delete legacy.first.keyframeReviewBasis;assert.equal(C.reviewKeyframePreviews(legacy.p,legacy.item.id).length,1);assert(!C.reviewApprovalSelection(row(legacy.p,legacy.item)).keyframes);
  legacy.item.removedAt=D.now();assert.deepEqual(C.reviewKeyframePreviews(legacy.p,legacy.item.id),[]);assert.deepEqual(C.reviewKeyframePreviews(legacy.p,D.id()),[]);
  const casting=fixture('single');casting.p.speechMode='plans';
@@ -59,5 +98,5 @@ try{
  delete video.sourceShot.shotId;delete voice.sourceShot.shotId;voice.sourceShot.title=video.sourceShot.title;
  const oldForeign={...voice,id:D.id(),sourceShot:{scriptId:D.id(),title:video.sourceShot.title}};casting.p.items.unshift(oldForeign);assert.equal(C.reviewVoiceItem(casting.p,video.id)?.id,voice.id,'Legacy matching stays scoped to its script and active plan');
  const ambiguous={...voice,id:D.id(),sourceShot:{...voice.sourceShot}};casting.p.items.unshift(ambiguous);assert.equal(C.reviewVoiceItem(casting.p,video.id),undefined,'Two active legacy matches do not identify a specific voice card');
- console.log('PASS review centre: pair/triple show selected current/stale frames; frozen role IDs and one atomic set approval; missing/removed/legacy cases; revoice uses stable shot identity and skips duplicate titles/history. SSR performs no fetch, payment or mutation.');
+ console.log('PASS review centre: pair/triple current/stale frame previews and atomic approval; animatic scope excludes video and silent voices; bulk selection includes ready/review, skips approved/missing/conflict; missing/removed/legacy cases; stable revoice identity. SSR performs no fetch, payment or mutation.');
 }finally{globalThis.fetch=originalFetch;}

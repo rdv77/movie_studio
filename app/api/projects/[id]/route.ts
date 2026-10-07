@@ -113,9 +113,9 @@ export const PATCH = api(async (req, ctx) => {
       p.mediaDurations={...p.mediaDurations,...durations};break;
     }
     case 'approveReview': {
-      const {selections}=z.object({selections:z.array(approvalSelection.extend({reviewed:z.boolean().optional()})).min(1).max(120)}).parse(d);
+      const {selections,scope}=z.object({selections:z.array(approvalSelection.extend({reviewed:z.boolean().optional()})).min(1).max(120),scope:z.enum(['all','animatic']).default('all')}).parse(d);
       for(const s of selections)await checkApprovalAssets(user,p,s.itemId,s.variantId);
-      approveReview(p,selections);break;
+      approveReview(p,selections,scope);break;
     }
     case 'removePlan':setPlanExcluded(p,body.itemId!,true);break;
     case 'restorePlan':setPlanExcluded(p,body.itemId!,false);break;
