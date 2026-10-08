@@ -5,6 +5,7 @@ import {model} from './models';
 import {id} from './domain';
 import {compactPromptText} from './prompt-text';
 import {shotBindsCharacter} from './character-bindings';
+import {shotDirectionSchema} from './shot-direction';
 export const directorExecutionSchema=z.object({parallelModels:z.array(z.string()).max(3).optional(),fallbackModel:z.string().optional()});
 export type DirectorExecution=z.infer<typeof directorExecutionSchema>;
 export function validateDirectorExecution(input:unknown):DirectorExecution{const value=directorExecutionSchema.parse(input);for(const key of [...(value.parallelModels??[]),...(value.fallbackModel?[value.fallbackModel]:[])]){const m=model(key);if(m.kind!=='text'||!['openai','xai','minimax'].includes(m.provider))throw Error('Для команды и резерва выберите текстовую модель GPT, Grok или MiniMax.');}return value;}
@@ -44,6 +45,17 @@ export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:stri
   // Explicit invalid/nonempty values remain visible to response validation.
   if(role==='scenes'&&Array.isArray(copy?.scenes))for(const scene of copy.scenes)
     if(scene&&typeof scene==='object'&&!Array.isArray(scene)&&!Object.hasOwn(scene,'shots'))scene.shots=[];
+  // One observed review format names the positions leaf instead of its parent.
+  // Expand only this exact path, retaining every other current direction field.
+  // Run/content-basis guards and the resulting full-parent before value still
+  // protect against stale answers. Unknown paths/targets/values remain errors.
+  if((role==='editor'||role==='scene-expressive-reviewer')&&Array.isArray(copy?.patches))copy.patches=copy.patches.map((patch:any)=>{
+    if(!patch||patch.section!=='direction.positions'||!Array.isArray(patch.after))return patch;
+    const shots=p.directing?.scenes.filter(s=>!sceneId||s.id===sceneId).flatMap(s=>s.shots).filter(s=>s.id===patch.shotId)??[];
+    if(shots.length!==1||!shots[0].direction||!shotDirectionSchema.safeParse(shots[0].direction).success)return patch;
+    const positions=shotDirectionSchema.shape.positions.safeParse(patch.after);if(!positions.success)return patch;
+    return {...patch,section:'direction',after:JSON.stringify({...shots[0].direction,positions:positions.data})};
+  });
   if(!copy||!Array.isArray(copy.shots))return copy;if(role==='camera'||role==='story')for(const shot of copy.shots)if(shot.direction)shot.direction=cleanDirection(shot.direction);
   // Some actor responses include neighbours marked as context. Drop only IDs
   // belonging to another known scene, never unknown/new or unrequested current shots.
