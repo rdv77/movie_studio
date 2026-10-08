@@ -1,5 +1,7 @@
 # Кадр — Movie Studio
 
+[Кинореференсы: поиск приёмов, сравнение и применение; чистый контекст портрета героя](docs/cinema-references.md).
+
 [Лимиты API, условное сокращение промптов, Kling 3.0 Pro и Grok 1080p](docs/media-model-limits.md).
 
 Последовательная разработка: [план выпусков](docs/release-plan.md), [требования](docs/implementation-plan.md), [журнал](docs/release-progress.md). [Режимы качества Grok](docs/grok-image-quality.md).

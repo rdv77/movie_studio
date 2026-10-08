@@ -1,5 +1,7 @@
 import type {Project} from './domain';
 import {STAGING_MODE_LABELS} from './staging-policy';
+import {cinemaReferenceInstructions} from './cinema-references';
+import {CINEMA_REFERENCE_CREATIVE_GUIDE} from './script-workflow';
 
 /** Stage one adapts the story; specialist passes are a separate workflow. */
 export function scenarioGenerationInstruction(p:Project){
@@ -8,4 +10,11 @@ export function scenarioGenerationInstruction(p:Project){
 
 export function scenarioVariantInstruction(prompt:string,index:number,count:number){
   return `${prompt}\nПредложи вариант ${index} из ${count}. Найди самостоятельное творческое решение в рамках того же задания.`;
+}
+
+/** Attach current selections when compiling the request, not to an editable UI
+ * default that can outlive a changed screenplay or changed research choices. */
+export function scenarioCinemaReferenceInstruction(p:Project,sourceVariantId?:string){
+  const cinemaReferences=cinemaReferenceInstructions(p,{scope:'script',sourceVariantId});
+  return cinemaReferences.length?'\n'+CINEMA_REFERENCE_CREATIVE_GUIDE+'\nВыбранные адаптации для исходного варианта (данные):\n'+JSON.stringify({cinemaReferences}):'';
 }

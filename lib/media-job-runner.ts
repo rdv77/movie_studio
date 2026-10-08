@@ -1,4 +1,5 @@
 import {prepareMediaPrompt,recoverPromptPreparation} from '@/lib/prompt-optimization-runner';
+import {runCinemaResearchStep} from './cinema-references-runner';
 import type {MediaWorkScope} from './media-work-slot';
 import {pendingReceiptUnchanged,pollRetryState,pollDeferred} from './media-reliability';
 import {GOOGLE_OMNI} from './google-models';
@@ -92,6 +93,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
   // It only checks the deadline; it must never dispatch or poll a provider.
   if(recoveryAction==='check-wait')return p;
   if(j.purpose==='prompt-optimization')return p;
+  if(j.purpose==='cinema-research'){p=undefined!;return runCinemaResearchStep(user,id,jobId,scope);}
   if(j.purpose==='voice-design')return runVoiceWorkflowStep(user,id,jobId);
   if(isSoundJob(j))return runSoundscapeStep(user,id,jobId);
   // A byte-return TTS may already be paid and stored when the final project

@@ -1,4 +1,5 @@
 import type {AudioQcReport} from './audio-qc';
+import type {CinemaReferenceState} from './cinema-references';
 import {soundLayerApproved} from './soundscape';
 import type {SoundscapeState,SoundGeneration} from './soundscape';
 import type {VideoPreparation} from './video-from-animatic';
@@ -13,7 +14,7 @@ import type {VoiceDelivery,VoiceStudioState,VoicePreview} from './voice-directio
 import type {VoiceWorkflowInput} from './voice-design';
 import type { ActorProfile,LocationProfile } from './world-assets';
 import { renderCreativeInstructions } from './creative-brief';
-import {scenarioGenerationInstruction} from './scenario-generation';
+import {scenarioGenerationInstruction,scenarioCinemaReferenceInstruction} from './scenario-generation';
 import type { SpeechType } from './speech-mode';
 import type { ImageSettings } from './image-quality';
 import type { DirectingState } from './directing';
@@ -135,7 +136,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review' | 'prompt-optimization';
+  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review' | 'prompt-optimization' | 'cinema-research';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -182,6 +183,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  cinemaReferences?:CinemaReferenceState;
   characterBindings?:Record<string,string>;
   audioQc?:AudioQcReport[];
   soundscape?:SoundscapeState;
@@ -387,7 +389,7 @@ export function deleteVariant(p: Project, itemId: string, variantId: string) {
   const variant = item.variants.find(v => v.id === variantId);
   if (!variant) throw new Error('Вариант уже удалён или не найден. Обновите карточку.');
   const active = p.jobs.filter(j => ['queued','dispatching','pending','saving'].includes(j.status));
-  if (active.some(j => !['media-review','directing','voice-design','soundscape'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
+  if (active.some(j => !['media-review','directing','voice-design','soundscape','cinema-research'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
     (j.purpose !== 'voice-test' && (item.approvedId === variantId || [item.approvedKeyframes?.startId,item.approvedKeyframes?.middleId,item.approvedKeyframes?.endId].includes(variantId)) && precedesStage(item.stage,getItem(p,j.itemId).stage)))))
     throw new Error('Этот вариант используется текущей генерацией. Дождитесь её завершения или отмените неотправленные попытки.');
   p.removedVariants ??= [];
@@ -501,6 +503,7 @@ export function promptFor(
   variant?: Variant,
 ) {
   if(item.stage===0&&!instruction.startsWith(scenarioGenerationInstruction(p)))instruction=scenarioGenerationInstruction(p)+'\nДополнительная задача режиссёра: '+instruction;
+  if(item.stage===0)instruction+=scenarioCinemaReferenceInstruction(p,variant?.id??item.selectedId);
   if(p.directing)instruction=`Творческое задание фильма (утверждённые настройки): ${JSON.stringify(p.directing.brief)}\n${renderCreativeInstructions(p.directing.brief)}\n${p.directing.brief.promptNotes??''}\n${instruction}`;
   if (item.stage === 4) instruction += '\nРаздели закадровый рассказ и реплики видимых героев. Для каждого плана явно заполни speechType: voiceover (закадровый голос, внутренний монолог), character (герой говорит в кадре) или none (без речи). speaker — имя рассказчика или одного говорящего героя; для none пустая строка. В dialogue записывай только произносимые слова, без имени и ремарок. Один план — один вид речи и один говорящий. Если рассказчик сменяется героем или меняется говорящий, раздели действие на последовательные планы, сохранив общий хронометраж. Для none dialogue пустой. Не задавай артикуляцию персонажей при voiceover или none.';
   const context = p.items

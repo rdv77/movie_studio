@@ -4,6 +4,7 @@ import { approvedCharacters } from './characters';
 import { planFields, storyboardPrompt } from './storyboard';
 import { videoShot } from './video';
 import {actorDirection,locationDraftForItem,locationProfileText,planWorldText} from './world-assets';
+import {PORTRAIT_DIRECTION,portraitStyleText,portraitTraits} from './character-portrait';
 
 export const MINIMAX_IMAGE_PROMPT_LIMIT = 1500;
 export const MINIMAX_IMAGE_ESTIMATE = '35000000'; // $0.0035; estimate, not a billing receipt.
@@ -24,19 +25,18 @@ const shorten = (s: string, n: number) => {
   return (space>n*0.7?cut.slice(0,space):cut).trimEnd()+'…';
 };
 
-// Separate quotas keep both style and locations present even with many cards.
-// Only approved descriptions are included; never embed serialized variants.
-export function characterVisualContext(p:Project) {
-  const summary=(stage:number)=>{
-    const cards=p.items.filter(i=>i.stage===stage&&isApproved(p,i));
+// A portrait shares the film's visual language, not its locations or events.
+export function characterVisualContext(p:Project,item?:Item) {
+  const summary=()=>{
+    const cards=p.items.filter(i=>i.stage===2&&isApproved(p,i));
     const perCard=Math.max(1,Math.floor(900/Math.max(1,cards.length))-3);
     return shorten(cards.map(card=>{
       const v=card.variants.find(v=>v.id===card.approvedId)!;
       const brief=v.kind==='text'?v.text:p.jobs.find(j=>j.id===v.jobId)?.brief||v.text;
-      return shorten(clean(`${card.title}: ${brief||'визуальный образ по утверждённому референсу'}`),perCard);
+      return shorten(clean(portraitStyleText(p,item?.character,brief||'')),perCard);
     }).join('; '),900);
   };
-  return {style:summary(2),locations:summary(3)};
+  return {style:summary()};
 }
 export function characterImageRequest(p:Project,item:Item,instruction:string,refs:string[],index=1,count=1,modelId='') {
   const limit=isMiniMaxImage(modelId)?MINIMAX_IMAGE_PROMPT_LIMIT:4000;
@@ -55,7 +55,7 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
     : 'У всех героев закрыты рты; речь только за кадром или отсутствует.';
   const character=item.stage===1?(item.character??chosen(item)?.character):undefined;
   const fixed=character
-    ? `Образ одного героя анимационного фильма, ${p.format}. Покажи только этого героя в полный рост, с хорошо различимым лицом, на простом фоне. Без текста, коллажа и других персонажей. Прикреплённые изображения — прообразы; сохрани узнаваемые черты, меняй только указанное в задаче. Вариант ${index}/${count}.`
+    ? `Образ одного героя анимационного фильма, ${p.format}. ${PORTRAIT_DIRECTION} Без текста и коллажа. Прикреплённые изображения — прообразы; сохрани узнаваемые черты, меняй только указанное в задаче. Вариант ${index}/${count}.`
     : `Анимация, ${p.format}. Одно цельное изображение, без текста, коллажа и пузырей речи. Сохрани лица, одежду и стиль референсов. Только участники описанного действия. ${speech} Вариант ${index}/${count}.`;
   const sections:{label:string;text:string;weight:number}[]=[];
   const add=(label:string,text:string,weight:number)=>{if(clean(text))sections.push({label,text:clean(text),weight});};
@@ -79,9 +79,10 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
   if(task!==defaultTask) add('Задача режиссёра',task,5);
   if(character) {
     add('Герой',`${character.name}: ${character.appearance}`,5);
-    add('Характер',character.description,2);
+    add('Неизменные черты актёрского образа',character.actorProfile?.identity??'',5);
+    add('Нельзя менять',character.locked??'',5);
     add('Работа с исходными изображениями',character.instructions,5);
-    if(character.actorProfile)add('Актёрский образ',actorDirection(character.actorProfile),3);
+    if(character.actorProfile)add('Выразительность образа',portraitTraits(character),3);
   }
   for(const c of item.stage<4?[]:approvedCharacters(p).filter(c=>![5,7].includes(item.stage)||planCharacterIds(p,item).includes(c.itemId))){
     add(`Герой ${c.profile.name}`,`${refs.includes(c.assetId)?`Референс ${refs.indexOf(c.assetId)+1}. `:''}${c.profile.appearance||c.profile.description}`,2);
@@ -90,10 +91,9 @@ export function compactImageRequest(p:Project,item:Item,instruction:string,refs:
   if(item.stage===3){const location=locationDraftForItem(item);if(location)add('Постоянная локация',locationProfileText(location),4);}
   if([5,7].includes(item.stage)){const world=planWorldText(p,item);if(world)add('Локация и состояние сцены',world,3);}
   if(item.stage===1){
-    const context=characterVisualContext(p);
+    const context=characterVisualContext(p,item);
     add('Стиль',context.style,3);
-    add('Локации и мир',context.locations,3);
-    add('Единство образа','Согласуй рисунок, фактуры, палитру, свет и костюм героя с утверждённым стилем и миром. Локации задают окружение истории, а портрет остаётся на простом фоне.',2);
+    add('Единство образа','Согласуй рисунок, фактуры, палитру и свет героя с утверждённым визуальным стилем.',2);
   }
   for(const card of p.items.filter(i=>item.stage!==1&&[2,3].includes(i.stage)&&i.stage<item.stage&&isApproved(p,i))) {
     const v=card.variants.find(v=>v.id===card.approvedId)!;

@@ -38,6 +38,7 @@ import { FINAL_IMAGE_SETTINGS, LEGACY_IMAGE_SETTINGS, GROK_IMAGE_MODEL, grokImag
 import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
 import { ScriptDevelopmentEditor } from './script-development-editor';
+import { CinemaReferencesPanel } from './cinema-references-panel';
 import {scriptVariantLabel} from '@/lib/script-labels';
 import {promptFor} from '@/lib/domain';
 import {scenarioGenerationInstruction,scenarioVariantInstruction} from '@/lib/scenario-generation';
@@ -869,6 +870,7 @@ function Workspace() {
               </div>
               {[6,11].includes(step)&&<VoiceStudioShell p={p} busy={busy} soundStage={step===11} onOpenCatalog={()=>{setStep(6);setVoiceView('casting');setItemId('');}} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
+              {[0,13,12,4].includes(step)&&<CinemaReferencesPanel key={p.id+':cinema:'+step} p={p} stage={step} busy={busy} submit={async(action,data)=>{replace(await request('/api/projects/'+p.id+'/cinema-references','POST',{action,data,revision:p.revision}));}}/>}
               {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===14&&<ShotPlanningEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
@@ -2128,6 +2130,7 @@ function GenerateDialog({
             {kind === 'video'
               ? 'Модель получит выбранный первый кадр и видеопромпт ниже. Проверьте внешность, стиль и действие. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
               : kind==='image'&&item.stage===5 ? 'Модель получит текущий план, утверждённые образы героев и визуальный стиль. Полный промпт можно проверить ниже. Выбирайте доступные модели одного типа; число вариантов задаётся для каждой.'
+              : kind==='image'&&item.stage===1 ? 'Создаём образ героя: внешность, костюм, неизменяемые признаки, выразительность и краткий визуальный стиль. Сюжет и локации автоматически не добавляются. Фон нейтральный, если в вашей задаче явно не указан другой.'
               : kind==='text'&&item.stage===0 ? 'Создаём варианты общего сценария по сохранённому жанру, режиссёрскому подходу и шкалам. Исходный текст передаётся отдельно. Каждый результат появится в карточках ниже для выбора и утверждения.' : 'Утвержденные сценарий, характеры и стиль автоматически войдут в запрос. Выбирайте доступные модели одного типа; число вариантов задается для каждой.'}
           </DialogDescription>
         </DialogHeader>

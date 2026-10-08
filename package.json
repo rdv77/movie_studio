@@ -22,7 +22,7 @@
     "test:camera": "node tests/camera-policy.mjs && node tests/camera-policy-prompts.mjs && node tests/camera-policy-ui.mjs",
     "test:staging": "node tests/staging-policy.mjs && node tests/staging-prompts.mjs && node tests/staging-keyframes.mjs && node tests/staging-policy-ui.mjs",
     "test:characters": "node tests/characters.mjs",
-    "test:meaning": "node tests/story-meaning.mjs && node tests/story-meaning-prompts.mjs && node tests/story-meaning-basis.mjs && node tests/media-review-meaning.mjs",
+    "test:meaning": "node tests/story-meaning.mjs && node tests/story-meaning-prompts.mjs && node tests/story-meaning-basis.mjs && node tests/media-review-meaning.mjs && node tests/media-review-whole-story.mjs",
     "test:plan-sync": "node tests/plan-sync.mjs",
     "test:storyboard-prompt": "node tests/storyboard-image-prompt.mjs",
     "test:minimax-image": "node tests/minimax-image.mjs && node tests/storyboard-image-prompt.mjs",
@@ -42,7 +42,8 @@
     "test:auth": "node tests/auth.mjs",
     "test:integration": "node tests/server-smoke.mjs",
     "test:container": "node tests/container-smoke.mjs",
-    "test:zencreator": "node tests/zencreator.mjs"
+    "test:zencreator": "node tests/zencreator.mjs",
+    "test:cinema": "node tests/cinema-references.mjs && node tests/cinema-references-runner.mjs && node tests/cinema-reference-integration.mjs && node tests/cinema-references-ui.mjs && node tests/character-image-prompt.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

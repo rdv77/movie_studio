@@ -11,12 +11,12 @@ export function montageProposalIssue(p:Project,value:MontageProposal){
  for(const a of audio){const n=p.mediaDurations?.[a.assetId!];if(!n)return 'Измерьте выбранную реплику перед применением монтажного решения.';if(n-a.trim>value.duration+.001)return 'Полная реплика длиннее предложенного участка. Выберите больше секунд или переозвучьте этот план.';}
  return '';
 }
-export function montageReviewCurrent(p:Project,r:NonNullable<Project['mediaReviews']>[number]){const item=p.items.find(i=>i.id===r.itemId),v=item?.variants.find(v=>v.id===r.variantId);return mediaReviewCurrent(p,r)||!!item&&!!v&&r.montageAppliedBasis===reviewBasis(p,item,v);}
+export function montageReviewCurrent(p:Project,r:NonNullable<Project['mediaReviews']>[number]){const item=p.items.find(i=>i.id===r.itemId),v=item?.variants.find(v=>v.id===r.variantId);return mediaReviewCurrent(p,r)||!!item&&!!v&&r.montageAppliedBasis===reviewBasis(p,item,v,r.filmStory!==undefined);}
 export function applyMontageProposal(p:Project,reviewId:string,index:number){
  const r=p.mediaReviews?.find(r=>r.id===reviewId),proposal=r?.result?.montage?.[index];
  if(!r||!montageReviewCurrent(p,r)||!proposal)throw Error('Монтажное предложение устарело или не найдено. Повторите проверку.');
  if(r.appliedMontage?.includes(index))return;
  const value=montageProposalSchema.parse(proposal),issue=montageProposalIssue(p,value);if(issue)throw Error(issue);
  p.assemblyCuts=[...(p.assemblyCuts??[]).filter(c=>c.itemId!==value.itemId),{itemId:value.itemId,variantId:value.variantId,trim:value.trim,duration:value.duration}];
- r.appliedMontage=[...(r.appliedMontage??[]),index];const item=p.items.find(i=>i.id===r.itemId)!,v=item.variants.find(v=>v.id===r.variantId)!;r.montageAppliedBasis=reviewBasis(p,item,v);
+ r.appliedMontage=[...(r.appliedMontage??[]),index];const item=p.items.find(i=>i.id===r.itemId)!,v=item.variants.find(v=>v.id===r.variantId)!;r.montageAppliedBasis=reviewBasis(p,item,v,r.filmStory!==undefined);
 }

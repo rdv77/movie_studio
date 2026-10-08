@@ -14,7 +14,8 @@ export function characterPrompt(c: CharacterBrief) {
   return `Создай утверждаемый образ одного героя анимационного фильма: ${c.name}. Покажи только этого героя, в полный рост, с хорошо различимым лицом, на простом фоне. Не добавляй надписи, панели комикса или других персонажей.\n\nНеизменные черты: ${c.appearance}\nОписание и характер: ${c.description}\nНельзя менять: ${c.locked || 'Сохранить заданные постоянные черты.'}\nЗадача режиссёра и работа с исходными изображениями: ${c.instructions || 'Создай образ по описанию.'}\n${c.refs.length ? 'Прикреплённые изображения — исходные прообразы этого героя. Сохрани узнаваемые черты, меняй только то, что указано в задаче.' : ''}${c.actorProfile?'\n\nАктёрский образ:\n'+actorDirection(c.actorProfile):''}`;
 }
 export function characterImageRefs(p: Project, item: Item, extra: string[]) {
-  const fixed = item.character && item.stage === 1 ? item.character.refs
+  const character = item.stage === 1 ? item.character ?? item.variants.find(v=>v.id===item.selectedId)?.character ?? item.variants.find(v=>v.id===item.approvedId)?.character : undefined;
+  const fixed = item.stage === 1 ? character?.refs ?? []
     : [5,7].includes(item.stage) ? planReferenceIds(p,item) : item.stage >= 4 ? approvedCharacters(p).map(c=>c.assetId) : [];
   return [...new Set([...fixed,...extra])];
 }

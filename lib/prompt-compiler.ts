@@ -20,6 +20,7 @@ import {effectiveFacialExpression,facialExpressionPrompt} from './facial-express
 import {cameraPolicyPrompt} from './camera-policy';
 import {readableNarrativeBeat} from './emotional-dramaturgy';
 import {storyMeaningContext,storyMeaningPublicationCurrent} from './story-meaning';
+import {PORTRAIT_DIRECTION,portraitTraits,portraitStyleText} from './character-portrait';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -212,6 +213,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const staging=effectiveStagingMode(p.directing?.brief.stagingMode,direction?.stagingMode);
   const keyframe = input.keyframe ?? 'start';
   const stillPlan = input.kind === 'image' && !!plan;
+  const portrait = input.kind === 'image' && item.stage === 1;
   const videoPlan = input.kind === 'video' && !!plan;
   const visibleFaces=!!plan&&(heroes.length>0||!!plan.cast?.length||!!plan.characterIds?.length||plan.cast===undefined&&plan.characterIds===undefined);
   // Video adapters require a first frame. With an explicit shot entrance it is
@@ -229,6 +231,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   add('format', 'Формат', input.kind === 'image' ? `Одно цельное изображение анимационного фильма, ${p.format}. Без текста, коллажа, субтитров и пузырей речи.`
     : `Один непрерывный анимационный видеоплан, ${p.format}. Без дополнительных персонажей, склеек внутри клипа, надписей и субтитров.`, true);
   add('instruction', 'Обязательная задача режиссёра', input.instruction, true);
+  if (portrait) add('portrait', 'Задача изображения героя', PORTRAIT_DIRECTION, true);
   const generatedRoleInstruction = stillPlan && input.keyframeInstruction === keyframeRoleInstruction(p, item, keyframe);
   // State, pose, framing and changes are rendered once from the approved shot below.
   if (!generatedRoleInstruction) add('keyframe-instruction', 'Назначение ключевого кадра', input.keyframeInstruction, true);
@@ -295,9 +298,13 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     add(`hero-source.${hero.item.id}`, item.stage === 1 ? 'Работа с прообразами героя' : `Постоянные указания к образу ${c.name}`, physical.instructions, true);
     add(`hero-locked.${hero.item.id}`, `Нельзя менять у героя ${c.name}`, physical.locked, true);
     const performance = [c.description, c.actorProfile?.mannerisms].filter(Boolean).join('\n\n');
-    if (stillPlan || videoPlan) exclude(`hero-performance.${hero.item.id}`, `Биография и общие манеры ${c.name} — не действие текущего плана`, performance);
+    if (stillPlan || videoPlan || portrait) exclude(`hero-performance.${hero.item.id}`, `Биография и общие манеры ${c.name} — не действие текущего изображения`, performance);
     else optional(`hero-performance.${hero.item.id}`, `Характер и манеры ${c.name}`, performance, 65);
-    if (c.actorProfile && !stillPlan && !videoPlan) {
+    if (portrait) {
+      optional(`portrait-traits.${hero.item.id}`, `Выразительность образа ${c.name}`, portraitTraits(c), 90);
+      exclude(`actor.${hero.item.id}`, 'Роль, мотивация и сюжетные задания — для постановки сцен, не для портрета', c.actorProfile && [c.actorProfile.role,c.actorProfile.motivation,c.actorProfile.contradiction,...c.actorProfile.traits.map(t=>t.instruction)].join('\n'));
+    }
+    if (c.actorProfile && !stillPlan && !videoPlan && !portrait) {
       const actor = c.actorProfile;
       optional(`actor.${hero.item.id}`, `Актёрская задача ${c.name} — без изменения утверждённой внешности`,
         [`Роль: ${actor.role}. Мотив: ${actor.motivation}. Внутреннее противоречие: ${actor.contradiction}.`,
@@ -330,19 +337,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       optional(`location-geography.${card.id}`, `География ${profile.name}`, profile.geography, 85);
     } else optional(`location.${card.id}`, `Локация ${card.title}`, v?.text, 85);
   }
-  // A portrait still belongs to the film's world. Reuse scene-related location TEXT,
-  // without transferring all location pictures or people into a character reference.
-  if (item.stage === 1) {
-    const name = heroes[0]?.profile.name;
-    const heroScenes = p.directing?.scenes.filter(s => s.shots.some(shot => shot.characterIds?.includes(item.id) ||
-      shot.cast.some(c => c === item.id || !!name && normalized(c) === normalized(name))) || s.continuity.some(c => c.characterId === item.id || !!name && normalized(c.character) === normalized(name))) ?? [];
-    const relatedIds = new Set(heroScenes.flatMap(s => s.locationIds ?? []));
-    const contextLocations = p.items.filter(i => i.stage === 3 && active(i) && approved(i) &&
-      (!heroScenes.length || (relatedIds.size ? relatedIds.has(i.id) : heroScenes.some(s => mentions(s.location, i.title)))));
-    for (const card of contextLocations) {
-      const v = approved(card) as WorldVariant, profile = v.location ?? (card as WorldItem).location;
-      optional(`portrait-world.${card.id}`, `Среда героя — ${card.title}`, profile ? [profile.identity, profile.permanentProps].filter(Boolean).join('\n\n') : v.text, 70);
-    }
+  if (portrait) {
+    for (const card of p.items.filter(i => i.stage === 3 && active(i) && approved(i)))
+      exclude(`portrait-world.${card.id}`, 'Локация фильма — не фон портрета', approved(card)!.text);
   }
   if (!anchoredStill && !currentVideoState) add('location-layout', 'Текущее расположение предметов локации', locationState?.layout, true);
   add('location-changes', 'Разрешённые изменения локации', locationState?.allowedChanges, true);
@@ -408,20 +405,21 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (anchoredStill) exclude(`style.${style.id}`, 'Общее описание фильма — стиль уже задан первым изображением', approved(style)!.text);
     else {
       const original = approved(style)!.text;
-      const visual = stillPlan || videoPlan ? frameStyleText(original,
+      const visual = portrait ? portraitStyleText(p,heroes[0]?.profile,original) : stillPlan || videoPlan ? frameStyleText(original,
         locations.flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? '']),
         p.items.filter(card => card.stage === 3 && active(card) && !locations.some(l => l.id === card.id)).flatMap(card => [card.title, (approved(card) as WorldVariant)?.location?.name ?? (card as WorldItem).location?.name ?? ''])) : original;
       optional(`style.${style.id}`, 'Единый визуальный стиль фильма', visual, 95);
+      if (portrait && !visual.trim()) warnings.push('Из документа визуального стиля не выделены отдельные указания о рисунке, палитре или свете. Сюжет и локации не переданы в портрет. При необходимости задайте стиль в правках к этой генерации.');
       if (visual !== original) omitted.push({key:`style-context.${style.id}`,label:'Сюжетные разделы и другие локации общего описания стиля',reason:'irrelevant',characters:Math.max(0,original.length-visual.length)});
     }
   }
-  if (p.directing && !stillPlan && !videoPlan) {
+  if (p.directing && !stillPlan && !videoPlan && !portrait) {
     const brief = effectiveCreativeBrief(p.directing.brief, scene?.creativeOverrides as CreativeOverrides | undefined);
     optional('creative', 'Творческое задание этой сцены', `Жанр: ${brief.genre}. Подход: ${brief.director}. Приёмы: ${brief.techniques}. Воздействие: ${brief.effect}.`, 75);
     if (brief.strengths) optional('creative-strengths', 'Сила выбранных приёмов', `Шкала 0–10: 0 — не применять приём, 10 — выраженно применять. Утверждённые события, внешность и состояние важнее интенсивности. ${JSON.stringify(brief.strengths)}`, 70);
   }
   const at = plans.findIndex(s => plan?.id ? s.id === plan.id : s.title === plan?.title);
-  if (!stillPlan && !videoPlan) {
+  if (!stillPlan && !videoPlan && !portrait) {
     optional('previous', 'Только для стыковки — выход предыдущего плана', plans[at - 1]?.stateOut, 25);
     optional('next', 'Только для стыковки — вход следующего плана', plans[at + 1]?.stateIn, 25);
   }
@@ -461,6 +459,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   for (const card of p.items) for (const assetId of [...(card.character?.refs ?? []), ...card.variants.flatMap(v => v.assetId ? [v.assetId] : []),
     ...((card as WorldItem).location?.refs ?? []), ...((card as WorldItem).location?.approvedAngles.flatMap(a => a.refs) ?? [])]) knownOwners.set(assetId, card);
   const heroAssets = new Map(heroes.flatMap(h => [h.variant?.assetId, ...h.profile.refs].filter((id): id is string => !!id).map(assetId => [assetId, h] as const)));
+  if (portrait && heroes[0]) for (const variant of item.variants)
+    if (variant.kind === 'image' && variant.assetId) heroAssets.set(variant.assetId, heroes[0]);
   const locationAssets = new Map(locations.flatMap(card => {
     const v = approved(card) as WorldVariant | undefined, profile = (item.stage === 3 ? (card as WorldItem).location : undefined) ?? v?.location ?? (card as WorldItem).location;
     return [v?.assetId, ...(profile?.refs ?? []), ...(profile?.approvedAngles.filter(a => locationState?.angleIds?.includes(a.id)).flatMap(a => a.refs) ?? [])]
@@ -489,6 +489,9 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     if (typeof id !== 'string' || !id.trim() || id.length > 100 || /^(?:data:|https?:)/i.test(id) || candidate.role !== undefined && !REFERENCE_ROLES.includes(candidate.role))
       throw new PromptCompilationError('reference_id', 'Передавайте только ID сохранённых референсов и поддерживаемую роль изображения, без URL или встроенных файлов.');
     if (!selectedReferences(p, [id]).length) { omitted.push({ key: `ref.${id}`, label: 'Референс', reason: 'hidden', assetId: id }); continue; }
+    if (portrait && owner && owner.id !== item.id && !hero) {
+      omitted.push({key:`ref.${id}`,label:'Другой герой, локация или материал фильма — не прообраз этого героя',reason:'irrelevant',assetId:id}); continue;
+    }
     let role: ReferenceRole | undefined = candidate.role === 'last-frame' && id === endFrame ? 'last-frame' : id === startFrame ? 'first-frame' : id === endFrame ? 'last-frame' : hero ? 'character' : location ? 'location'
       : frameAssets.has(id) ? candidate.role === 'last-frame' ? 'last-frame' : 'reference' : !owner ? ['first-frame', 'last-frame', 'style'].includes(candidate.role ?? '') ? candidate.role : 'reference'
         : (candidate.role === 'style' || candidate.role === undefined) && owner.stage === 2 && active(owner) ? 'style' : undefined;
@@ -530,7 +533,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     : ref.role === 'last-frame' ? 'Конечная композиция текущего плана.' : ref.role === 'character' ? canonicalFace(ref)
       ? `Утверждённый образ героя ${ref.label} — основной образец его лица и внешности. Воспроизведи узнаваемые черты этого конкретного героя, а не похожий типаж. Он важнее исходных прообразов и стилизации. Не копируй позу или фон; костюм и текущее состояние задаёт постановка.`
       : `Исходный прообраз героя ${ref.label}, вспомогательный референс. Если приложен утверждённый образ этого героя, его лицо и внешность имеют приоритет. Не смешивай лица, не копируй позу или фон.`
-    : ref.role === 'location' ? `Локация ${ref.label}; не переноси посторонних персонажей.` : ref.role === 'style' ? 'Только техника изображения, свет и цвет; не переносить чужих героев или композицию.' : 'Выбранный режиссёром прообраз только для текущего плана.', true);
+    : ref.role === 'location' ? `Локация ${ref.label}; не переноси посторонних персонажей.` : ref.role === 'style' ? 'Только техника изображения, свет и цвет; не переносить чужих героев или композицию.' : portrait ? 'Выбранный режиссёром прообраз этого героя. Используй внешность; не копируй фон, окружение и других персонажей фотографии.' : 'Выбранный режиссёром прообраз только для текущего плана.', true);
   if (input.kind === 'video' && references.some(ref => ref.role === 'last-frame') && duration !== undefined && duration !== capability.duration!.requestedSeconds)
     warnings.push(`Модель запрашивается на ${capability.duration!.requestedSeconds} сек, а план рассчитан на ${duration} сек. Конечный кадр закреплён в конце полного клипа. Обрезка конца может убрать выбранную композицию; проверьте фактическое время перед монтажом.`);
   if (capability.adapter.nativeAudio === 'possible') warnings.push('Модель может создать свой звук. Утверждённая озвучка накладывается отдельно; промпт запрещает самостоятельную речь и пение.');
