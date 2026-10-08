@@ -40,6 +40,9 @@ import { speechInfo, assertSpeech } from '@/lib/speech-mode';
 import { saveAnimatic, approveAnimatic } from '@/lib/animatic';
 import { archiveJournal } from '@/lib/journal';
 import {actorProfileSchema,locationProfileSchema,assertLocationAssets} from '@/lib/world-assets';
+import {screenplayEmotionalArcSchema} from '@/lib/script-workflow';
+import {storyMeaningsSchema} from '@/lib/story-meaning';
+const screenplayMetadataSchema=z.object({emotionalArcs:z.array(screenplayEmotionalArcSchema).max(12).optional(),storyMeanings:storyMeaningsSchema.optional()}).strict();
 const character = z.object({name:z.string().trim().min(1).max(100),appearance:z.string().trim().max(160).default(''),
   description:z.string().trim().max(4000).default(''),instructions:z.string().trim().max(4000).default(''),locked:z.string().trim().max(4000).optional(),refs:z.array(z.string().uuid()).max(5).default([]),actorProfile:actorProfileSchema.optional()});
 const variant = z.object({
@@ -65,6 +68,7 @@ const variant = z.object({
   voiceId: z.string().max(150).default(''),
   parentVariantId: z.string().uuid().optional(),
   mergedFromIds: z.array(z.string().uuid()).min(2).max(2).optional(),
+  screenplayMetadata:screenplayMetadataSchema.optional(),
 });
 const approvalSelection=z.object({itemId:z.string().uuid(),variantId:z.string().uuid(),keyframes:keyframeSelectionSchema.optional()});
 // Older open tabs send all manifest sources again in refs. Accept the full
@@ -310,11 +314,30 @@ export const PATCH = api(async (req, ctx) => {
     }
     case 'saveAnimatic':
     case 'addVariant': {
-      const v = variant.parse(d);
+      const {screenplayMetadata,...v} = variant.parse(d);
       const versionItem=getItem(p,body.itemId!);
+      if(screenplayMetadata!==undefined&&(versionItem.stage!==0||v.kind!=='text'))throw Error('Эмоциональные линии и смыслы доступны только текстовому варианту общего сценария.');
       if(v.parentVariantId&&!versionItem.variants.some(x=>x.id===v.parentVariantId))throw Error('Исходная версия не найдена в этой карточке.');
       if(v.mergedFromIds?.some(id=>!versionItem.variants.some(x=>x.id===id)))throw Error('Объединяемый вариант больше не находится в этой карточке.');
       const versionInfo={...captureVersionInfo(p,versionItem,v,undefined,'Правки режиссёра'),...(v.parentVariantId?{parentVariantId:v.parentVariantId}:{}),...(v.mergedFromIds?{mergedFromIds:v.mergedFromIds}:{})};
+      if(versionItem.stage===0&&v.kind==='text'){
+        const parent=versionItem.variants.find(x=>x.id===versionInfo.parentVariantId),raw=parent?.versionInfo?.settings;
+        const settings=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw as Record<string,unknown>:{};
+        const metadata:Record<string,unknown>={},inherited:string[]=[];
+        for(const field of ['emotionalArcs','storyMeanings'] as const){
+          const explicit=screenplayMetadata?.[field];
+          const previous=screenplayMetadataSchema.shape[field].safeParse(settings[field]);
+          if(explicit!==undefined)metadata[field]=structuredClone(explicit);
+          else if(parent?.kind==='text'&&previous.success&&previous.data!==undefined){metadata[field]=structuredClone(previous.data);inherited.push(field);}
+        }
+        // Preserve the edited candidate's structured context without copying
+        // old workflow receipts or approving the live director's meaning map.
+        // This provenance note is advisory; it is not a completed review.
+        const priorReview=settings.screenplayMetadataReview as {required?:boolean}|undefined;
+        if(inherited.length&&(parent?.text!==v.text||v.mergedFromIds?.length||priorReview?.required))
+          metadata.screenplayMetadataReview={sourceVariantId:parent!.id,fields:inherited,required:true};
+        if(Object.keys(metadata).length)versionInfo.settings=metadata;
+      }
       if (v.speechType) assertSpeech(speechInfo(v),v.dialogue);
       if(v.kind==='audio'&&v.speechType==='character'&&!getItem(p,body.itemId!).sourceShot) throw new Error('Для реплик героев используйте отдельные карточки: «Подготовить озвучку по планам».');
       if (v.assetId) {
