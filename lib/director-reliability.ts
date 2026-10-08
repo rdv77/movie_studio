@@ -39,7 +39,12 @@ function cleanDirection(value:any):any{
   return copy;
 }
 /** Only unambiguous syntax cleanup. Unknown IDs, duplicates, missing rows and timing conflicts stay errors. */
-export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:string|undefined,answer:unknown):unknown{const copy=structuredClone(answer) as any;if(!copy||!Array.isArray(copy.shots))return copy;if(role==='camera'||role==='story')for(const shot of copy.shots)if(shot.direction)shot.direction=cleanDirection(shot.direction);
+export function normalizeDirectorAnswer(p:Project,role:DirectorRole,sceneId:string|undefined,answer:unknown):unknown{const copy=structuredClone(answer) as any;
+  // Scene generation supplies an outline, so an omitted plan list is empty.
+  // Explicit invalid/nonempty values remain visible to response validation.
+  if(role==='scenes'&&Array.isArray(copy?.scenes))for(const scene of copy.scenes)
+    if(scene&&typeof scene==='object'&&!Array.isArray(scene)&&!Object.hasOwn(scene,'shots'))scene.shots=[];
+  if(!copy||!Array.isArray(copy.shots))return copy;if(role==='camera'||role==='story')for(const shot of copy.shots)if(shot.direction)shot.direction=cleanDirection(shot.direction);
   // Some actor responses include neighbours marked as context. Drop only IDs
   // belonging to another known scene, never unknown/new or unrequested current shots.
   if(role==='performance'&&sceneId){const contextIds=new Set(p.directing?.scenes.filter(s=>s.id!==sceneId).flatMap(s=>s.shots.map(v=>v.id)));copy.shots=copy.shots.filter((s:any)=>!contextIds.has(s.id));}
