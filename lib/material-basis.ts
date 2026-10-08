@@ -2,6 +2,7 @@ import type { Project,Item,Variant } from './domain';
 import {boundCharacterId,shotBindsCharacter} from './character-bindings';
 import type { VersionSource } from './creative-versions';
 import {creativeFoundationBrief} from './creative-foundation';
+import {storyMeaningsForShot} from './story-meaning';
 // Semantic dependencies are used only for newly created production materials.
 // Existing snapshots keep their original approval behaviour until reviewed.
 function stable(v:any):string{return Array.isArray(v)?'['+v.map(stable).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}':JSON.stringify(v)??'null';}
@@ -84,7 +85,15 @@ export function materialBasisV2(p:Project,item:Item,variant:Partial<Variant>={})
   const frame=frameSources.length?frameSources.map(s=>sourceValue(p,s)):
     (variant.refs??[]).map(asset=>({asset}));
   const bindings=(shot.cast??[]).flatMap((name:string)=>{const id=boundCharacterId(p,name);return id?[{name,id}]:[];});
+  // A linked meaning changes what an image/video must make visible even when
+  // the action text stays the same. Track only this published shot's links and
+  // their definitions: a global map signature would stale unrelated material.
+  // No field for unlinked legacy shots; voice dependencies return above.
+  const meaningIds=[5,7].includes(item.stage)&&shot.meaningIds?.length
+    ? [...new Set<string>(shot.meaningIds)].sort() : [];
+  const storyMeaning=meaningIds.length?{ids:meaningIds,meanings:storyMeaningsForShot(p,{meaningIds}).sort((a,b)=>a.id.localeCompare(b.id))}:undefined;
   return 'v2:'+stable({format:p.format,brief,cast:castIds.length?castIds:shot.characterIds??shot.cast,...(bindings.length?{characterBindings:bindings}:{}),
+    ...(storyMeaning?{storyMeaning}:{}),
     story:shot.description,camera:shot.camera,design:shot.productionDesign,stateIn:shot.stateIn,
     ...(shot.direction?{direction:shot.direction}:{}),
     continuity:shot.stateIn===undefined?shot.continuity:undefined,sceneContinuity:continuity,priorChanges,

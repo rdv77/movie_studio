@@ -1,0 +1,72 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+await build({stdin:{resolveDir:process.cwd(),contents:`export * as R from './lib/media-review';export * as S from './lib/video-samples';export * as D from './lib/domain';export {generateMediaReview} from './lib/media-review-provider';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/media-review-meaning.mjs'});
+const {R,S,D,generateMediaReview}=await import('../work/tests/media-review-meaning.mjs');
+const p=D.newProject('SECRET FILM TITLE'),item=p.items.find(i=>i.stage===5),script=p.items.find(i=>i.stage===4);
+p.limit=null;
+const meaning={id:'climax',title:'SECRET CLIMAX',kind:'climax',priority:'required',viewerBefore:'Башня устойчива',viewerAfter:'Башня разрушена',event:'SECRET EVENT',stakes:'Герой лишился убежища',evidence:['Обломки вместо целой башни']};
+p.directing={brief:{},scenes:[],runs:[],issues:[],patches:[],storyMeanings:[meaning]};
+const shot={id:'s1',meaningIds:['climax'],title:item.title,duration:10,direction:{timing:{revealAt:7},actionBeats:[{start:6,end:8,action:'SECRET ACTION'}]}};
+const scriptVariant=D.makeVariant(p,script,{text:JSON.stringify({shots:[shot]})});script.variants.push(scriptVariant);script.approvedId=scriptVariant.id;
+item.sourceShot={scriptId:script.id,shotId:'s1',title:item.title};
+const v=D.makeVariant(p,item,{kind:'image',assetId:D.id(),text:'SECRET GENERATION INTENT'});item.variants.push(v);
+const samples=[{assetId:v.assetId,role:'target'}];
+const blind=R.mediaObservationPrompt(samples,'image');
+for(const secret of [p.title,meaning.title,meaning.event,shot.direction.actionBeats[0].action,v.text,v.assetId])assert(!blind.includes(secret),'Blind observation must not include intended story, prompt or asset identifiers');
+assert.match(blind,/неподвижное изображение/);assert.match(blind,/нельзя утверждать/);
+const observation={summary:'Целая башня',observations:[{id:'o1',sampleIndices:[1],visible:'В центре стоит целая башня; обломков не видно.',interpretation:'Возможно, место спокойно.',uncertainties:['События до и после неизвестны']}],limitations:['Одно изображение; движение не проверено']};
+assert.deepEqual(R.parseMediaObservation(JSON.stringify(observation),samples),observation);
+assert.throws(()=>R.parseMediaObservation(JSON.stringify({...observation,observations:[{...observation.observations[0],sampleIndices:[2]}]}),samples),/неизвестный/);
+assert.throws(()=>R.parseMediaObservation(JSON.stringify({...observation,observations:[...observation.observations,...observation.observations]}),samples),/неизвестный/);
+assert.throws(()=>R.parseMediaObservation(JSON.stringify(observation),[{...samples[0],role:'reference'}]),/нецелевой/);
+const review={id:D.id(),jobId:D.id(),observationJobId:undefined,itemId:item.id,variantId:v.id,basis:R.reviewBasis(p,item,v),kind:'image',created:D.now(),model:'grok-4.7',samples,meaningTargets:[structuredClone(meaning)],observation};review.observationJobId=review.jobId;
+p.mediaReviews=[review];p.jobs=[{id:review.jobId,status:'failed',mediaReviewPhase:'observe'}];
+assert.match(R.mediaReviewComparisonIssue(p,review),/дождитесь/,'A failed observation cannot start comparison even if stale observation data exists');
+p.jobs[0].status='done';assert.equal(R.mediaReviewComparisonIssue(p,review),'');
+const comparison=R.mediaComparisonPrompt(p,item,v,review);
+assert(comparison.includes(meaning.event));assert(comparison.includes(observation.observations[0].visible));assert.match(comparison,/нет новых изображений/);
+const result={summary:'Кульминация не подтверждается',meaningChecks:[{meaningId:'climax',result:'fail',evidence:'В o1 кадр 1 показывает целую башню.',observationIds:['o1'],sampleIndices:[1],missingEvidence:'Нет видимых обломков',correction:'Покажите обломки башни в центре кадра, сохранив масштаб и ориентиры.'}],issues:[],checks:[],limitations:['Движение по одному кадру не проверено']};
+assert.deepEqual(R.parseMediaComparison(JSON.stringify(result),review),result);
+assert.equal(R.parseMediaComparison(JSON.stringify({...result,meaningChecks:[]}),review).meaningChecks[0].result,'uncertain','Omitted goals cannot disappear or pass');
+for(const patch of [{meaningId:'invented'},{observationIds:['made-up']},{sampleIndices:[8]},{observationIds:[],sampleIndices:[]},{correction:''}])assert.throws(()=>R.parseMediaComparison(JSON.stringify({...result,meaningChecks:[{...result.meaningChecks[0],...patch}]}),review));
+review.result=result;assert.match(R.mediaReviewCorrection(review,'climax'),/обломки башни/);assert.equal(R.mediaReviewCorrection(review,'unknown'),'');
+meaning.viewerAfter='SECRET CHANGED INTENT';assert(!R.mediaReviewCurrent(p,review),'Changing intended meaning invalidates review');meaning.viewerAfter='Башня разрушена';
+const times=S.videoSampleTimes(10,R.mediaReviewSamplingPlan(p,item));assert(times.length<=6);assert(times.includes(7));assert(times.some(t=>t<7&&t>6.5));assert(times.some(t=>t>7&&t<7.5));assert.equal(times[0],0);assert.equal(times.at(-1),9.95);
+assert(S.videoSampleTimes(.02,{count:8,eventTimes:[-1,NaN,300],intervals:[]}).every(t=>t>=0&&t<=.02));
+assert.equal(new Set(S.videoSampleTimes(10,{count:8,eventTimes:[7,7,7]})).size,S.videoSampleTimes(10,{count:8,eventTimes:[7,7,7]}).length);
+assert.throws(()=>S.videoSampleTimes(10,9));
+const filmProject=structuredClone(p),clip=filmProject.items.find(i=>i.stage===7),film=filmProject.items.find(i=>i.stage===8);
+clip.sourceShot={...item.sourceShot};const clipVariant=D.makeVariant(filmProject,clip,{kind:'video',assetId:D.id(),duration:10});clip.variants.push(clipVariant);clip.approvedId=clipVariant.id;
+const nextClip={...clip,id:D.id(),variants:[{...clipVariant,id:D.id(),assetId:D.id()}]};nextClip.approvedId=nextClip.variants[0].id;filmProject.items.push(nextClip);
+filmProject.mediaDurations={[clipVariant.assetId]:10.02,[nextClip.variants[0].assetId]:10.02};
+const filmVariant=D.makeVariant(filmProject,film,{kind:'video',assetId:D.id(),duration:20});film.variants.push(filmVariant);
+assert(SafePlan(filmProject).eventTimes.includes(10),'Full clips floor to 24fps boundaries before the next cut');
+filmProject.assemblyCuts=[{itemId:clip.id,variantId:clipVariant.id,trim:0,duration:4.02}];filmVariant.deps=D.dependencies(filmProject,8);
+assert(SafePlan(filmProject).eventTimes.includes(97/24),'Custom cuts ceil to 24fps boundaries');
+filmVariant.deps='old assembly';assert.deepEqual(SafePlan(filmProject),{count:8,eventTimes:[],intervals:[]},'Old film files cannot borrow current assembly event offsets');
+function SafePlan(project){return R.mediaReviewSamplingPlan(project,film,filmVariant);}
+
+// Exercise actual endpoint admission and explicit second-phase creation with an in-memory store.
+await build({stdin:{resolveDir:process.cwd(),contents:`export {POST} from './app/api/projects/[id]/media-review/route';`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/media-review-meaning-route.mjs',plugins:[{name:'test-store',setup(b){
+  b.onResolve({filter:/^@\/lib\/server$/},()=>({path:'server',namespace:'test-store'}));
+  b.onLoad({filter:/.*/,namespace:'test-store'},()=>({contents:`export const api=fn=>fn;export const owner=async()=> 'owner';export const loadProject=async()=>structuredClone(globalThis.reviewTestProject);export const getKey=async()=> 'test-key';export const asset=async()=>({mime:'image/png',size:1});export const saveProject=async(user,p,revision)=>{if(revision!==globalThis.reviewTestProject.revision)throw Error('revision');p.revision++;globalThis.reviewTestProject=p;return p;};`}));
+}}]});
+const {POST}=await import('../work/tests/media-review-meaning-route.mjs');
+globalThis.reviewTestProject={...p,jobs:[],mediaReviews:[]};
+const invoke=body=>POST(new Request('http://local.test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({revision:globalThis.reviewTestProject.revision,...body})}),{params:Promise.resolve({id:p.id})});
+await invoke({itemId:item.id,variantId:v.id,kind:'image',samples});
+let state=globalThis.reviewTestProject,first=state.jobs[0],r=state.mediaReviews[0];assert.equal(state.jobs.length,1);assert.equal(first.mediaReviewPhase,'observe');assert(!first.prompt.includes(meaning.event));assert.equal(first.estimate,null);assert.deepEqual(first.refs,[v.assetId]);
+await assert.rejects(()=>invoke({action:'compare',reviewId:r.id}),/дождитесь/);assert.equal(globalThis.reviewTestProject.jobs.length,1);
+first.status='failed';await assert.rejects(()=>invoke({action:'compare',reviewId:r.id}),/дождитесь/);first.status='unknown';await assert.rejects(()=>invoke({action:'compare',reviewId:r.id}),/дождитесь/);
+first.status='dispatching';R.completeMediaReview(state,first,JSON.stringify(observation));assert.equal(state.jobs.length,1,'Completing observation never creates another paid job');assert.equal(first.status,'done');
+await invoke({action:'compare',reviewId:r.id});state=globalThis.reviewTestProject;r=state.mediaReviews[0];const second=state.jobs[1];
+assert.equal(state.jobs.length,2);assert.equal(second.mediaReviewPhase,'compare');assert.notEqual(second.id,first.id);assert.equal(r.observationJobId,first.id);assert.equal(r.jobId,second.id);assert.deepEqual(second.refs,[]);assert(second.prompt.includes(meaning.event));
+await assert.rejects(()=>invoke({action:'compare',reviewId:r.id}),/уже создано/);assert.equal(globalThis.reviewTestProject.jobs.length,2,'Duplicate clicks cannot repeat a paid phase');
+const approvedBefore=item.approvedId;
+R.completeMediaReview(state,second,JSON.stringify(result));assert.equal(second.status,'done');assert.equal(item.approvedId,approvedBefore);assert.equal(state.jobs.length,2);
+
+// Separate provider calls preserve independent receipts; the comparison sends no images.
+let requests=[];globalThis.fetch=async(url,options)=>{const body=JSON.parse(options.body);requests.push(body);return Response.json({id:'receipt-'+requests.length,status:'completed',usage:{cost_in_usd_ticks:requests.length*11},output:[{type:'message',role:'assistant',content:[{type:'output_text',text:requests.length===1?JSON.stringify(observation):JSON.stringify(result)}]}]});};
+const a=await generateMediaReview(first,'test-key',['data:image/png;base64,aGVsbG8=']),b=await generateMediaReview(second,'test-key',[]);assert.equal(a.requestId,'receipt-1');assert.equal(b.requestId,'receipt-2');assert.equal(a.actual,'11');assert.equal(b.actual,'22');assert.equal(requests[1].input[0].content.length,1);
+await assert.rejects(generateMediaReview({...first,mediaReviewPhase:'observe'},'test-key',[]));assert.equal(requests.length,2);
+console.log('PASS meaning review: blind intent isolation, cited evidence, missing goals uncertain, stale intent, event sampling, independent paid phases, failed/unknown observation admission, duplicate prevention, receipts, manual-only continuation. Mock API only.');

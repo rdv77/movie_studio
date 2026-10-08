@@ -19,6 +19,7 @@ import {effectiveStagingMode,stagingPrompt} from './staging-policy';
 import {effectiveFacialExpression,facialExpressionPrompt} from './facial-expression';
 import {cameraPolicyPrompt} from './camera-policy';
 import {readableNarrativeBeat} from './emotional-dramaturgy';
+import {storyMeaningContext,storyMeaningPublicationCurrent} from './story-meaning';
 
 export const REFERENCE_ROLES = ['first-frame', 'last-frame', 'character', 'location', 'style', 'reference'] as const;
 export type ReferenceRole = typeof REFERENCE_ROLES[number];
@@ -27,6 +28,7 @@ export type CompiledReference = PromptReference & { role: ReferenceRole };
 type Continuity = { character: string; characterId?: string; outfit: string; props: string };
 export type PromptPlan = {
   id?: string; sceneId?: string; title: string; duration: number; cast?: string[]; characterIds?: string[]; locationIds?: string[];
+  meaningIds?: string[];
   description?: string; story?: string; stateIn?: string; stateOut?: string; camera?: string; cinematography?: string;
   productionDesign?: string; continuity?: string; continuityChanges?: string; direction?: ShotDirection;
   dialogue?: string | { speechType: SpeechType; speaker: string; text: string; delivery: string };
@@ -150,6 +152,12 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
     dialogue: fields.dialogue, speechType: fields.speechType, speaker: fields.speaker,
     ...(reviewedAction ? { description: reviewedAction } : {}) } : sourcePlan;
   if ([5, 7].includes(item.stage) && !plan) throw new PromptCompilationError('missing_plan', 'Не найден план утверждённого подробного сценария. Подготовьте и примените сценарий, затем откройте карточку снова.');
+  // Only explicit shot links participate. A scene's map, a later draft shot or
+  // another scene must never expand the scope of a single generated clip.
+  const meaningContext = plan?.meaningIds?.length ? storyMeaningContext(p, plan) : undefined;
+  const meanings = meaningContext?.meanings ?? [];
+  if (meaningContext && (!meaningContext.approved || !storyMeaningPublicationCurrent(p) || plan!.meaningIds!.some(id => !meanings.some(meaning => meaning.id === id))))
+    throw new PromptCompilationError('story_meaning', 'Карта смысла этого плана не утверждена, изменилась или содержит потерянную связь. Проверьте карту смысла и заново подготовьте и примените подробный сценарий перед генерацией.');
   const scene = p.directing?.scenes.find(s => s.id === plan?.sceneId);
   const direction = plan?.direction ? shotDirectionSchema.parse(plan.direction) : undefined;
   const speech = plan && typeof plan.dialogue === 'object' ? speechInfo({ speechType: plan.dialogue.speechType, speaker: plan.dialogue.speaker, dialogue: plan.dialogue.text })
@@ -168,7 +176,8 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   const warnings: string[] = modelId===GROK_VIDEO_1080?['Grok 1080p: передаётся только первый кадр. Конечный кадр и отдельные образы героев исключены; внешний вид задаёт первый кадр.']:[], omitted: PromptExclusion[] = [], sections: PromptSection[] = [];
   const add = (key: string, label: string, text: string | undefined, required: boolean, priority = 0) => {
     if (text?.trim()) sections.push({ key, label, text: /^(?:hero\.|hero-locked\.|continuity\.|location-identity\.|location-layout)/.test(key)?compactPromptText(text):text.trim(), required, priority,
-      ...(input.kind==='video'&&(['camera-movement','camera-legacy','framing','narrative-beat'].includes(key)||key.startsWith('performance.'))?{verbatim:true}:{}) });
+      ...(input.kind==='video'&&(['camera-movement','camera-legacy','framing','narrative-beat'].includes(key)||key.startsWith('performance.')||key.startsWith('story-meaning.'))||
+        input.kind==='image'&&meanings.length>0&&(['state','keyframe'].includes(key)||key.startsWith('meaning-evidence.'))?{verbatim:true}:{}) });
   };
   const optional = (key: string, label: string, text: string | undefined, priority: number) =>
     paragraphs(text ?? '').forEach((text, n) => add(`${key}.${n}`, label, text, false, priority));
@@ -212,7 +221,7 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
   // scene ledger describes the whole scene, so replaying its prop history can
   // put objects back or reveal a character before the current shot starts.
   // Legacy calls without a declared keyframe keep their historical context.
-  const currentStillState = stillPlan && input.keyframe === 'start' && !!plan?.stateIn?.trim() && !!direction?.startFrame?.trim();
+  const currentStillState = stillPlan && (input.keyframe === 'start' || meanings.length > 0 && keyframe === 'start') && !!plan?.stateIn?.trim() && !!direction?.startFrame?.trim();
   const anchoredStill = stillPlan && keyframe !== 'start' && !!(input.startFrameId || input.references?.some(ref => typeof ref !== 'string' && ref.role === 'first-frame'));
   const exclude = (key: string, label: string, text: string | undefined) => {
     if (text?.trim()) omitted.push({key, label, reason: 'irrelevant', characters: text.length});
@@ -251,12 +260,31 @@ export function compilePrompt(p: Project, item: Item, modelId: string, input: Pr
       }
       if (keyframe === 'end') add('changes', 'Обоснованные изменения этого плана к концу', plan.continuityChanges, true);
       if (!plan.stateIn && keyframe === 'start' || !plan.stateOut && keyframe === 'end') add('legacy-action', 'Состояние по описанию плана', plan.description ?? plan.story, true);
+      // Meaning evidence may describe a reveal that happens later. Only exact
+      // evidence that is itself an approved still snapshot can be added. A
+      // substring can sit inside a negation, so matching isolated words is not
+      // proof of visibility. More detailed evidence stays in the locked snapshot.
+      const snapshots = keyframe === 'start' ? [plan.stateIn, direction?.startFrame]
+        : keyframe === 'end' ? [plan.stateOut, direction?.endFrame] : [];
+      for (const meaning of meanings) {
+        const visibleEvidence = meaning.evidence.filter(evidence => snapshots.some(snapshot => snapshot && normalized(snapshot) === normalized(evidence)));
+        if (visibleEvidence.length) add(`meaning-evidence.${meaning.id}`, 'Видимые смысловые признаки только этого момента', visibleEvidence.join('\n'), true);
+      }
     } else {
       add('action', 'Действие только текущего плана', plan.description ?? plan.story, true);
       add('state-in', 'Начало', plan.stateIn, true); add('state-out', 'Конец', plan.stateOut, true);
       add('start-frame', 'Начальная композиция', direction?.startFrame, true);
       add('end-frame', 'Конечная композиция', direction?.endFrame, true);
       add('changes', 'Изменения в действии, сохраняющиеся после плана', plan.continuityChanges, true);
+      for (const meaning of meanings) add(`story-meaning.${meaning.id}`, 'Смысл текущего плана — передать наблюдаемым действием', [
+        `Смысл: ${meaning.title}.`,
+        `Зритель до: ${meaning.viewerBefore}`,
+        `Зритель после: ${meaning.viewerAfter}`,
+        `Событие и его причина: ${meaning.event}`,
+        `Что поставлено на карту: ${meaning.stakes}`,
+        `Конкретные видимые доказательства:\n${meaning.evidence.join('\n')}`,
+        'Сохрани причинную связь, пространственные отношения и момент раскрытия. Покажи только вклад текущего плана в этот смысл по его началу, действию и концу; не повторяй уже показанные события и не переноси сюда будущие. Передай понимание через видимые признаки, без объясняющих надписей или придуманной речи.',
+      ].join('\n'), true);
       add('shot-duration', 'Время действия', duration === undefined ? undefined : staging ? `Распредели описанное действие и короткую реакцию на ${duration} сек. Не замирай в финальной позе: сохраняй естественное микродвижение; пауза только если явно задана. Не добавляй новые события.` : `Заверши описанное действие за ${duration} сек; затем удерживай итоговую позу до конца клипа. Не добавляй новые события.`, true);
     }
   }

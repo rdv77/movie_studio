@@ -4,6 +4,7 @@ import {dialogueSchema,directingShotSchema,shotApproved,type Scene,type Directin
 import {validateScenePlan} from './shot-direction';
 import type {BatchCandidate,BatchScope} from './batch-scope';
 import {unresolvedJobBlocks} from './job-wait';
+import {assertStoryMeaningCoverage} from './story-meaning';
 
 export const directorScopeSchema=z.object({
   scope:z.enum(['all','selected','remaining','attention']).optional(),
@@ -18,8 +19,10 @@ const REQUIRED=[['story','Сценарий'],['cinematography','Оператор
  * remain compatible; they are not silently revoked by newly required fields. */
 export function directingShotReadiness(p:Project,scene:Scene,shot:DirectingShot,force=false):ShotReadiness{
   const approved=shotApproved(scene,shot,p);
-  if(approved&&!force){const conflicts=[...validateScenePlan(scene).filter(i=>i.severity==='conflict'&&(!i.shotId||i.shotId===shot.id)).map(i=>i.message),...(p.directing?.issues??[]).filter(i=>i.severity==='conflict'&&!i.resolved&&(!i.shotId||i.shotId===shot.id)&&(!i.sceneId||i.sceneId===scene.id)).map(i=>'Конфликт редактора: '+i.message)];return {sceneId:scene.id,shotId:shot.id,title:shot.title,status:conflicts.length?'conflict':'approved',missing:[],conflicts,changed:false};}
-  const missing:string[]=REQUIRED.filter(([key])=>!shot[key]?.trim()).map(([,label])=>label),conflicts:string[]=[];
+  const meaningConflicts:string[]=[];
+  try{assertStoryMeaningCoverage(p,scene,shot);}catch(e){meaningConflicts.push((e as Error).message);}
+  if(approved&&!force){const conflicts=[...meaningConflicts,...validateScenePlan(scene).filter(i=>i.severity==='conflict'&&(!i.shotId||i.shotId===shot.id)).map(i=>i.message),...(p.directing?.issues??[]).filter(i=>i.severity==='conflict'&&!i.resolved&&(!i.shotId||i.shotId===shot.id)&&(!i.sceneId||i.sceneId===scene.id)).map(i=>'Конфликт редактора: '+i.message)];return {sceneId:scene.id,shotId:shot.id,title:shot.title,status:conflicts.length?'conflict':'approved',missing:[],conflicts,changed:false};}
+  const missing:string[]=REQUIRED.filter(([key])=>!shot[key]?.trim()).map(([,label])=>label),conflicts:string[]=[...meaningConflicts];
   if(shot.dialogue.speechType!=='none'&&!shot.dialogue.text.trim())missing.push('Произносимая реплика');
   const parsed=directingShotSchema.safeParse(shot);if(!parsed.success)conflicts.push(...parsed.error.issues.map(i=>i.message));
   const dialogue=dialogueSchema.safeParse(shot.dialogue);if(!dialogue.success)conflicts.push(...dialogue.error.issues.map(i=>i.message));

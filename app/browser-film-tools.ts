@@ -12,7 +12,7 @@ import {editPlan} from '@/lib/render';
 // These are the same authenticated application actions as the visible controls.
 // No URL, HTTP method, identity, API key or destructive command is accepted.
 export const PROJECT_BROWSER_ACTIONS=['addVariant','addItem','renameItem','select','approve','approveBatch','approveReview','reapproveStyle','reapproveScript','reapproveStoryboard','reapproveUnchangedStoryboard','saveCharacter','importLibrary','bindPlanCharacter','prepareShots','speechMode','setAnimaticSettings','selectAnimatic','approveAnimatic','allowNewSeries'] as const;
-export const DIRECTING_BROWSER_ACTIONS=['brief','runtimePolicy','acceptRuntime','importScript','saveScene','approveScenes','saveShot','approveShots','planPolicy','savePlanCards','choosePlanSet','approvePlanSets','run','scriptRun','importScriptCandidate','useAlternative','applyPatch','applySolution','applyAllSolutions','publish','repairSavedAnswer','retry','resolveIssue'] as const;
+export const DIRECTING_BROWSER_ACTIONS=['saveStoryMeanings','approveStoryMeanings','brief','runtimePolicy','acceptRuntime','importScript','saveScene','approveScenes','saveShot','approveShots','planPolicy','savePlanCards','choosePlanSet','approvePlanSets','run','scriptRun','importScriptCandidate','useAlternative','applyPatch','applySolution','applyAllSolutions','publish','repairSavedAnswer','retry','resolveIssue'] as const;
 const targetSchema=z.object({projectId:z.string().uuid(),revision:z.number().int().nonnegative()});
 const createSchema=z.object({title:z.string().trim().min(1).max(100),stagingMode:stagingModeSchema,framePolicy:framePolicySchema,cameraPolicy:cameraPolicySchema.optional()}).strict();
 const editSchema=z.discriminatedUnion('operation',[

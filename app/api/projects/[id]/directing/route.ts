@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import {saveStoryMeanings,approveStoryMeanings,assertMeaningLinks} from '@/lib/story-meaning';
 import {freezeExistingKeyframeModes} from '@/lib/keyframes';
 import { createScriptWorkflowRun,importScriptWorkflowCandidate,isRecoverableUnsentScriptRun,resumeUnsentScriptRun,scriptRoleSchema,scriptPromptOverridesSchema,CINEMA_METHOD_IDS } from '@/lib/script-workflow';
 import { recordCreativeVersion, restoreCreativeVersion, restoreSceneVersion, relevantHeroItems, relevantLocationItems } from '@/lib/creative-versions';
 import { api, owner, loadProject, saveProject, getKey } from '@/lib/server';
 import { model } from '@/lib/models';
-import { id, makeVariant } from '@/lib/domain';
+import { id, makeVariant, isApproved } from '@/lib/domain';
 import { runDirectorStep } from '@/lib/director-runner';
 import { ensureDirecting, creativeBriefSchema, sceneSchema, directingShotSchema, dialogueSchema, newDirectorRun, directorRunActive, scenesBasis, shotApproval, shotFoundationBasis, directorBasis, editorBasis, type DirectorRole } from '@/lib/directing';
 import { setProductionOrder } from '@/lib/production-order';
@@ -29,9 +30,11 @@ export const POST=api(async(req,ctx)=>{
   const d=ensureDirecting(p),v=body.data??{};
   const running=d.runs.some(directorRunActive);
   if(running&&!['stop','retry','importScriptCandidate','repairSavedAnswer'].includes(body.action))throw Error('Дождитесь проработки или остановите её перед изменением основы.');
-  const tracksHistory=['planPolicy','choosePlanSet','savePlanCards','restorePlanCard','approvePlanSets','brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
+  const tracksHistory=['saveStoryMeanings','approveStoryMeanings','planPolicy','choosePlanSet','savePlanCards','restorePlanCard','approvePlanSets','brief','runtimePolicy','importScript','saveScene','removeScene','saveShot','applyPatch','applySolution','applyAllSolutions','applyMontageOperation','applyAllMontageOperations'].includes(body.action);
   if(tracksHistory)recordCreativeVersion(p,'До изменения: '+body.action);
   switch(body.action){
+    case 'saveStoryMeanings':saveStoryMeanings(p,v.meanings);break;
+    case 'approveStoryMeanings':if(!p.items.some(i=>i.stage===0&&isApproved(p,i)))throw Error('Сначала утвердите общий сценарий.');approveStoryMeanings(p);break;
     case 'planPolicy':setPlanPolicy(p,planPolicySchema.parse(v.policy),z.string().optional().parse(v.sceneId));break;
     case 'choosePlanSet':choosePlanningProposal(p,z.string().uuid().parse(v.proposalId));break;
     case 'savePlanCards':replacePlanCards(p,z.string().parse(v.sceneId),z.array(planSketchSchema).min(1).max(40).parse(v.cards));break;
@@ -87,7 +90,7 @@ export const POST=api(async(req,ctx)=>{
       d.brief=brief;if(v.productionOrder)setProductionOrder(p,z.enum(['voice-first','video-first']).parse(v.productionOrder));break;
     }
     case 'run':{
-      const s=z.object({model:z.string(),execution:directorExecutionSchema.optional(),mode:z.enum(['plan-shots','critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
+      const s=z.object({model:z.string(),execution:directorExecutionSchema.optional(),mode:z.enum(['plan-shots','critic','scenes','develop','role','editor']),sceneId:z.string().optional(),shotId:z.string().optional(),role:z.enum(['story-meaning','story','camera','art','dialogue','performance','scene-expressive-reviewer']).optional()}).extend(directorScopeSchema.shape).parse(v);
       const scoped=s.scope!==undefined||s.sceneIds!==undefined||s.shotIds!==undefined?{scope:s.scope,sceneIds:s.sceneIds,shotIds:s.shotIds}:undefined;
       if(model(s.model).kind!=='text'||!['openai','xai','minimax'].includes(model(s.model).provider))throw Error('Выберите текстовую модель OpenAI, Grok или MiniMax.');
       await getKey(user,model(s.model).provider);
@@ -104,7 +107,7 @@ export const POST=api(async(req,ctx)=>{
       prepareDirectorRetry(p,r,t);break;
     }
     case 'saveScene':{
-      const scene=sceneSchema.parse(v.scene);assertSceneLocations(p,scene);const old=d.scenes.find(s=>s.id===scene.id);
+      const scene=sceneSchema.parse(v.scene);assertSceneLocations(p,scene);assertMeaningLinks(p,scene.meaningIds);const old=d.scenes.find(s=>s.id===scene.id);
       if(!old){if(d.scenes.length>=24)throw Error('Максимум 24 сцены.');d.scenes.push({...scene,id:id(),shots:[]});}
       else Object.assign(old,{...scene,shots:old.shots});break;
     }
@@ -113,7 +116,7 @@ export const POST=api(async(req,ctx)=>{
     case 'saveShot':{
       const scene=d.scenes.find(s=>s.id===v.sceneId);if(!scene)throw Error('Сцена не найдена.');
       const shot=directingShotSchema.parse(v.shot),old=scene.shots.find(s=>s.id===shot.id);
-      const conflict=validateShotDirection(shot).find(i=>i.severity==='conflict');if(conflict)throw Error(conflict.message);
+      assertMeaningLinks(p,shot.meaningIds);const conflict=validateShotDirection(shot).find(i=>i.severity==='conflict');if(conflict)throw Error(conflict.message);
       if(old)Object.assign(old,{...shot,direction:shot.direction,approved:undefined});else scene.shots.push({...shot,id:id()});break;
     }
     case 'approveShots':{

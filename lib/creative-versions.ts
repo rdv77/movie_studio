@@ -21,6 +21,8 @@ export type CreativeSnapshot = {
   brief: DirectingState['brief']; durationMode?: DirectingState['durationMode'];
   productionOrder?: Project['productionOrder']; scenes: Scene[]; scenesApproved?: string;
   shotPlanning?: DirectingState['shotPlanning'];
+  storyMeanings?: DirectingState['storyMeanings'];
+  storyMeaningsApproved?: string;
 };
 export type CreativeVersion = {
   id: string; parentId?: string; restoredFromId?: string; created: string;
@@ -93,10 +95,10 @@ export function stampGenerationVersions(p:Project,jobs:Job[]) {
 }
 export function creativeSnapshot(p:Project):CreativeSnapshot|undefined {
   const d=p.directing;if(!d)return undefined;
-  return structuredClone({brief:d.brief,durationMode:d.durationMode,productionOrder:p.productionOrder,scenes:d.scenes,scenesApproved:d.scenesApproved,...(d.shotPlanning?{shotPlanning:{...d.shotPlanning,proposals:[]}}:{})});
+  return structuredClone({brief:d.brief,durationMode:d.durationMode,productionOrder:p.productionOrder,scenes:d.scenes,scenesApproved:d.scenesApproved,...(d.shotPlanning?{shotPlanning:{...d.shotPlanning,proposals:[]}}:{}),...(d.storyMeanings!==undefined?{storyMeanings:d.storyMeanings,storyMeaningsApproved:d.storyMeaningsApproved}:{})});
 }
 function snapshotBasis(snapshot:CreativeSnapshot) {
-  return versionSignature({...snapshot,scenesApproved:undefined,scenes:snapshot.scenes.map(s=>({...s,shots:s.shots.map(shot=>{
+  return versionSignature({...snapshot,...(snapshot.storyMeanings!==undefined?{storyMeaningsApproved:undefined}:{}),scenesApproved:undefined,scenes:snapshot.scenes.map(s=>({...s,shots:s.shots.map(shot=>{
     const {approved,approvedFoundation,approvalVersion,imagePrompt,videoPrompt,promptBasis,...content}=shot;
     return content;
   })}))});
@@ -114,6 +116,7 @@ export function restoreCreativeVersion(p:Project,versionId:string):CreativeVersi
   recordCreativeVersion(p,'before-restore');
   const parent=p.creativeVersionId,s=structuredClone(source.snapshot),d=p.directing;
   d.shotPlanning=s.shotPlanning?{...s.shotPlanning,proposals:d.shotPlanning?.proposals??[]}:undefined;d.brief=s.brief;d.scenes=s.scenes;d.scenesApproved=s.scenesApproved;d.durationMode=s.durationMode;p.productionOrder=s.productionOrder;
+  d.storyMeanings=s.storyMeanings;d.storyMeaningsApproved=s.storyMeaningsApproved;
   d.editorBasis=undefined;d.patchesBasis=undefined;d.acceptedRuntime=undefined;d.issues=[];d.patches=[];
   // Restoration is a new branch, not a rewind of paid jobs or other choices.
   const entry:CreativeVersion={id:crypto.randomUUID(),parentId:parent,restoredFromId:source.id,created:new Date().toISOString(),reason:'restore',basis:snapshotBasis(s),snapshot:creativeSnapshot(p)!};

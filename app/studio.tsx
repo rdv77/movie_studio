@@ -306,12 +306,14 @@ function Workspace() {
   const [panel, setPanel] = useState<
     'stage' | 'budget' | 'connections' | 'library'
   >('stage');
+  const [generationCorrection,setGenerationCorrection]=useState<{projectId:string;itemId:string;text:string}>();
   const [dialog, setDialogState] = useState<string | null>(null);
   const dialogEpoch = useRef(0);
   const openedDialogEpoch = dialogEpoch.current;
   function setDialog(value: string | null) {
     dialogEpoch.current++;
     setDialogState(value);
+    if(value!=='generate')setGenerationCorrection(undefined);
   }
   const closeDialog = () => {
     if (activeProject.current === projectId && dialogEpoch.current === openedDialogEpoch) setDialog(null);
@@ -1038,7 +1040,7 @@ function Workspace() {
               {step===5&&item&&<div id="storyboard-keyframe-editor" tabIndex={-1}><KeyframeEditor p={p} item={item} busy={busy} saveConfig={async mode=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'mode',data:{mode}}));}} select={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'select',data:{role,variantId}}));}} approve={async(selection,reviewChanged)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'approve',data:{selection,reviewChanged}}));}} reviewFrame={async(role,variantId)=>{replace(await request(`/api/projects/${p.id}/keyframes`,'POST',{revision:p.revision,itemId:item.id,action:'review',data:{role,variantId}}));}} runFrame={role=>{setFrameRole(role);setDialog('generate');}}/></div>}
               {step===5&&<KeyframeBatchEditor key={p.id+':'+(keyframeBatchRequest?.projectId===p.id?keyframeBatchRequest.serial:0)} initiallyOpen={keyframeBatchRequest?.projectId===p.id} p={p} permitMissingFrames={(role,itemIds)=>action('allowMissingAdditionalFrames',{role,itemIds},'')} openPlan={id=>{setItemId(id);revealStoryboard();}} connections={cq.data} busy={busy} submit={async data=>{replace(await request(`/api/projects/${p.id}/generate-storyboard`,'POST',data));}}/>}
               {step===8&&item&&selected?.kind==='video'&&selected.assetId&&<AudioQcEditor p={p} itemId={item.id} variantId={selected.id} busy={busy} onSave={async report=>{await action('recordAudioQc',report);}}/>}
-              {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
+              {[1,2,3,5,7,8].includes(step)&&item&&<MediaReviewPanel p={p} item={item} variant={selected} busy={busy} useCorrection={[1,2,3,5,7].includes(step)?text=>{setGenerationCorrection({projectId:p.id,itemId:item.id,text});setFrameRole(selected?.keyframe??'start');setDialog('generate');}:undefined} upload={upload} apply={async(reviewId,index)=>{await action('applyMontageProposal',{reviewId,index});}} run={async data=>replace(await request(`/api/projects/${p.id}/media-review`,'POST',{revision:p.revision,...data}))}/>}
               {currentShot && (
                 <div className="editor-surface p-5 mb-5">
                   <strong>{currentShot.title} · {currentShot.duration} сек · из утверждённого сценария</strong>
@@ -1586,7 +1588,7 @@ function Workspace() {
         />
       )}
       {p && item && dialog === 'generate' && (
-        <GenerateDialog key={`${p.id}:${item.id}`}
+        <GenerateDialog key={`${p.id}:${item.id}`} initialCorrection={generationCorrection?.projectId===p.id&&generationCorrection.itemId===item.id?generationCorrection.text:undefined}
           frameRole={step===5?frameRole:undefined}
           allowNewSeries={(jobId:string)=>action('allowNewSeries',{jobId})}
           referenceAction={(assetId:string,restore=false)=>action(restore?'restoreReference':'hideReference',{assetId})}
@@ -1994,6 +1996,7 @@ function VariantEditor({
   );
 }
 function GenerateDialog({
+  initialCorrection,
   frameRole,
   allowNewSeries,
   referenceAction,
@@ -2050,15 +2053,15 @@ function GenerateDialog({
       const preferred=k==='audio'&&MODELS.some(m=>m.id===p.preferredVoice?.model&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))?p.preferredVoice:undefined;
       const first=frameRole&&frameRole!=='start'?selectedKeyframe(item,'start'):undefined;
       setModels(first?.jobId&&MODELS.some(m=>m.id===first.model)?[first.model]:preferred?[preferred.model]:[]);
-      setCount(frameRole&&frameRole!=='start'?1:k === 'audio'?1:k === 'video' ? 2 : 3);
+      setCount(initialCorrection?1:frameRole&&frameRole!=='start'?1:k === 'audio'?1:k === 'video' ? 2 : 3);
       setPrompt(
-        k === 'text'
+        (k === 'text'
           ? item.stage === 0
             ? scenarioGenerationInstruction(p)
             : 'Предложи доработанный вариант текущего материала с учетом утвержденной основы. Сохрани ключевые решения и учти мои правки.'
           : item.character ? 'Создай один вариант образа героя по сохранённой карточке. Учти исходные изображения и указания режиссёра.'
           : k === 'video' ? videoPrompt(p, item) : k === 'image' && item.stage === 5 && videoShot(p, item)
-            ? frameRole && frameRole !== 'start' ? keyframeRoleInstruction(p, item, frameRole) : storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.',
+            ? frameRole && frameRole !== 'start' ? keyframeRoleInstruction(p, item, frameRole) : storyboardPrompt(p, item) : v?.text ?? 'Предложи самостоятельный вариант для текущего материала.') + (initialCorrection?'\n\nУточнение после визуальной проверки (сохранить утверждённый замысел):\n'+initialCorrection:''),
       );
       const imageDefaults = [5,7].includes(item.stage)?planReferenceIds(p,item):item.character ? [] : v?.refs?.length ? v.refs
         : approvedCharacters(p).length ? [] : p.items

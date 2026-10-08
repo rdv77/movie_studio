@@ -18,6 +18,8 @@ function optimizationBudget(sections:PromptSection[],cap:PromptCapacity){
   const byteLimit=cap.unit==='tokens'||cap.maxUtf8Bytes?Math.floor(((cap.maxUtf8Bytes??cap.limit)-tokenUpperBound(suffix))*.8):undefined;
   if(limit<=0||byteLimit!==undefined&&byteLimit<=0){
     const acting=locked.some(s=>s.key.startsWith('performance.'));
+    const meaning=locked.some(s=>s.key.startsWith('story-meaning.')||s.key.startsWith('meaning-evidence.'));
+    if(meaning)throw Error(`Защищённый блок смысла плана и видимых доказательств вместе с остальной обязательной постановкой не оставляет места для других деталей в лимите выбранной модели (${cap.limit} ${promptUnit(cap.unit)}). Смысл, причина, пространственная связь и момент раскрытия не обрезаны. Выберите модель с большим лимитом или сократите формулировки, сохранив эти связи. Запрос генерации не отправлен.`);
     throw Error(`Защищённый блок мимики, постановки и камеры${acting?' вместе с актёрским заданием':''} не оставляет места для остальных деталей в лимите выбранной модели (${cap.limit} ${promptUnit(cap.unit)}). ${acting?'Цель, подтекст, смена эмоций и видимая реакция сохранены полностью. Выберите модель с большим лимитом или сократите формулировки актёрского и операторского задания, сохранив причину и переход эмоций.':'Он не обрезан. Выберите модель с большим лимитом или сократите настройки и операторское задание.'} Запрос генерации не отправлен.`);
   }
   return {locked,editable,limit,byteLimit};

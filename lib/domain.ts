@@ -105,6 +105,7 @@ export type Item = {
   approvedId?: string;
 };
 export type Job = {
+  mediaReviewPhase?: 'observe'|'compare';
   timings?: import('./job-progress').JobTimings;
   pollRetry?: import('./job-progress').PollRetry;
   promptSections?: import('./prompt-compiler').PromptSection[];

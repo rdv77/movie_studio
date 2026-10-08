@@ -11,7 +11,7 @@ import {runVoiceWorkflowStep} from '@/lib/voice-design-runner';
 import {generateDirectedSpeech,VoiceSpeechResponseError} from '@/lib/voice-tts';
 import {videoPreparationIssue} from '@/lib/video-from-animatic';
 import {keyframeQueueIssue} from '@/lib/keyframes';
-import {mediaReviewCurrent,parseMediaReview} from '@/lib/media-review';
+import {mediaReviewCurrent,mediaReviewForJob,completeMediaReview} from '@/lib/media-review';
 import {generateMediaReview} from '@/lib/media-review-provider';
 import { retrieveGoogle } from '@/lib/google-provider';
 import {waitExpired,stopJobWait,resumeJobWait} from '@/lib/job-wait';
@@ -140,7 +140,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
         throw new Error('Попытка уже обрабатывается.');
       if(job.videoPreparationBasis){const issue=videoPreparationIssue(p,getItem(p,job.itemId),job);if(issue){job.status='cancelled';job.actual='0';job.error=issue;return;}}
       const i = job.purpose==='voice-test'||job.purpose==='media-review'||isMusicJob(job)?undefined:getItem(p, job.itemId);
-      if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review||review.removedAt||!mediaReviewCurrent(p,review)){job.status='cancelled';job.actual='0';job.actualSource='Материал проверки изменился до отправки';return;}}
+      if(job.purpose==='media-review'){const review=mediaReviewForJob(p,job.id);if(!review||review.removedAt||!mediaReviewCurrent(p,review)){job.status='cancelled';job.actual='0';job.actualSource='Материал проверки изменился до отправки';return;}if(job.mediaReviewPhase==='compare'&&(!review.observation||p.jobs.find(j=>j.id===review.observationJobId)?.status!=='done')){job.status='cancelled';job.actual='0';job.error='Сначала нужны завершённые независимые наблюдения.';return;}if(p.limit!==null){job.status='cancelled';job.actual='0';job.error='Стоимость проверки неизвестна заранее; установленный лимит не позволяет отправить запрос.';return;}}
       if(job.keyframe){const issue=keyframeQueueIssue(p,job);if(issue){job.status='cancelled';job.actual='0';job.actualSource='Основа ключевого кадра изменилась до отправки';job.error=issue;return;}}
       if(isMusicJob(job)&&job.deps!==musicBasis(p)){job.status='cancelled';job.actual='0';job.actualSource='Сценарий или стиль изменились до отправки';return;}
       if (i && (!jobCurrent(p,i,job) || !stageReady(p, i.stage))) {
@@ -203,7 +203,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
     // Gemini Omni can return inline video bytes, so its poll stays in the
     // binary slot. Other installed adapters return only small JSON receipts.
     const read=()=>scope&&j!.model!==GOOGLE_OMNI?scope.outside(readProvider):readProvider();
-    const result: Result = j.purpose==='media-review'?await generateMediaReview(j,key,refs):directed??(refreshZen ? await read() : saving
+    const result: Result = j.purpose==='media-review'?(saving?j.output!:await generateMediaReview(j,key,refs)):directed??(refreshZen ? await read() : saving
       ? j.output!
       : j.lipsync ? await (polling ? read() : (async () => {
           // Transfer private files directly; never grant public access to the asset library.
@@ -291,7 +291,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
       job.timings={...job.timings,finishedAt:now()};
       // A late, valid result is still retained after stopping local waiting.
       job.waitStoppedAt=undefined;job.waitStopReason=undefined;job.resumeStatus=undefined;
-      if(job.purpose==='media-review'){const review=p.mediaReviews?.find(r=>r.jobId===job.id);if(!review)throw Error('Проверка не найдена.');try{review.result=parseMediaReview(result.text??job.output?.text??'');}catch(e){throw new ProviderError(e instanceof Error?e.message:'Некорректный ответ визуального редактора.',true);}job.status='done';job.error=undefined;return;}
+      if(job.purpose==='media-review'){try{completeMediaReview(p,job,result.text??job.output?.text??'');}catch(e){throw new ProviderError(e instanceof Error?e.message:'Некорректный ответ визуального редактора.',true);}return;}
       if(isMusicJob(job)){
         p.music??={variants:[],settings:{...DEFAULT_MUSIC}};
         if(job.purpose==='music-ideas'){
@@ -323,6 +323,7 @@ export async function executeMediaJob(user:string,id:string,jobId:string,recover
       if(received?.pollingUrl)job.pollingUrl=received.pollingUrl;
       if(received?.actual!=null){job.actual=received.actual;job.actualSource='Ответ API';}
       if(received?.usage)job.usage=received.usage;
+      if(job.purpose==='media-review'&&received?.text)job.output={text:received.text};
       if(received?.requestId&&!polling&&!saving)job.timings={...job.timings,providerAcceptedAt:providerResponseAt};
       if(received?.url&&!received.error){job.output={url:received.url,mime:received.mime};job.timings={...job.timings,providerCompletedAt:job.timings?.providerCompletedAt??providerResponseAt,savingStartedAt:job.timings?.savingStartedAt??now()};}
       if(e instanceof VoiceSpeechResponseError){job.requestId=e.receipt.requestId??job.requestId;job.actual=e.receipt.actual??null;job.usage=e.receipt.usage;}
