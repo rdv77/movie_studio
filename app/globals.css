@@ -613,6 +613,44 @@ small {
 }
 .project-list button {
   justify-content: flex-start;
+  flex-shrink: 0;
+  height: auto;
+  min-height: 40px;
+  white-space: normal;
+  text-align: left;
+}
+.project-picker {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+}
+.project-picker-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.project-picker .project-list {
+  max-height: none;
+  overflow: visible;
+}
+.project-title {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.project-create {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.project-create summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.project-create form {
+  margin-top: 12px;
 }
 .item-bar {
   display: flex;

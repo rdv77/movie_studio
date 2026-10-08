@@ -1513,27 +1513,33 @@ function Workspace() {
         open={dialog === 'projects'}
         onOpenChange={(v) => !v && setDialog(null)}
       >
-        <DialogContent>
+        <DialogContent className="project-picker sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Ваши фильмы</DialogTitle>
             <DialogDescription>
               Переключитесь на проект или начните новую историю.
             </DialogDescription>
           </DialogHeader>
+          <div className="project-picker-body">
           <div className="project-list">
             {projects.data?.map((x) => (
               <Button
                 key={x.id}
+                type="button"
                 variant={x.id === projectId ? 'secondary' : 'ghost'}
+                aria-current={x.id === projectId ? 'true' : undefined}
                 onClick={() => {
                   switchProject(x.id);
                 }}
               >
                 <Film />
-                {x.title}
+                <span className="project-title">{x.title}</span>
+                {x.id === projectId && <Check aria-label="Текущий фильм" />}
               </Button>
             ))}
           </div>
+          <details className="project-create">
+            <summary>Создать новый фильм</summary>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1561,6 +1567,8 @@ function Workspace() {
               Создать фильм
             </Button>
           </form>
+          </details>
+          </div>
         </DialogContent>
       </Dialog>
       {p && item && dialog === 'variant' && (
