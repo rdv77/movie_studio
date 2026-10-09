@@ -1,13 +1,10 @@
 'use client';
-import { useState,useEffect,useRef } from 'react';
-import { CreativeStrengthControls,SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
-import {FacialExpressionControl} from './facial-expression-control';
-import {CameraPolicyControl} from './camera-policy-control';
+import { useState,useEffect } from 'react';
+import { SceneCreativeControls,SceneCreativeSettings } from './creative-controls';
 import {CAMERA_POLICY_LABELS} from '@/lib/camera-policy';
-import {StagingModeControl,FramePolicyControl} from './staging-policy-controls';
 import {STAGING_MODE_LABELS,FRAME_POLICY_LABELS} from '@/lib/staging-policy';
 import {FACIAL_EXPRESSION_LABELS} from '@/lib/facial-expression';
-import { GENRE_OPTIONS,renderCreativeInstructions } from '@/lib/creative-brief';
+import { renderCreativeInstructions } from '@/lib/creative-brief';
 import {ShotDirectionEditor,ShotDirectionSummary,directionEditorIssues} from './shot-direction-editor';
 import {SceneCausalEditor,SceneCausalSummary,NarrativeBeatSummary,sceneCausalText,sceneCausalIssues} from './emotional-causality-editor';
 import {StoryMeaningPanel,MeaningLinks,MeaningSummary} from './story-meaning-panel';
@@ -16,6 +13,7 @@ import {BatchScopeSelector} from './batch-scope-selector';
 import {directingReadiness,directingSceneCandidates,directingShotCandidates} from '@/lib/directing-workflow';
 import {readableShotDirection} from '@/lib/shot-direction';
 import { VersionComparison } from './version-comparison';
+import {GeneralScenarioBrief} from './general-scenario-brief';
 import {DirectorExecutionControls,DirectorRunStatus} from './director-execution-controls';
 import type {DirectorExecution} from '@/lib/director-reliability';
 import {allPlanSetsApproved,planSetApproved} from '@/lib/shot-planning';
@@ -25,21 +23,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { Tabs,TabsList,TabsTrigger,TabsContent } from '@/components/ui/tabs';
 import type { Project } from '@/lib/domain';
-import { money } from '@/lib/domain';
 import { MODELS } from '@/lib/models';
 import {runtimeMode,plannedRuntime,runtimeAcceptanceBasis} from '@/lib/runtime-policy';
-import { DEFAULT_BRIEF,DIRECTOR_PRESETS,ROLE_NAMES,directorPrompt,directorRunActive,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
+import { DEFAULT_BRIEF,directorRunActive,EDITOR_SECTION_NAMES,shotApproved,scenesBasis,type EditorPatch,type Scene,type DirectingShot,type DirectorRole } from '@/lib/directing';
 
 type Props={p:Project;stage:number;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;open:(stage:number)=>void;generateScenario?:()=>void};
 const F=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
 export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Props){
   const d=p.directing;
   const [brief,setBriefState]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
-  const [briefDirty,setBriefDirty]=useState(false),draftVersion=useRef(0);
-  const setBrief=(value:typeof brief)=>{draftVersion.current++;setBriefDirty(true);setBriefState(value);};
-  const [order,setOrderState]=useState(p.productionOrder??'voice-first');
-  const setOrder=(value:typeof order)=>{draftVersion.current++;setBriefDirty(true);setOrderState(value);};
-  const savedBrief=JSON.stringify(d?.brief);useEffect(()=>{if(!briefDirty&&d){setBriefState(d.brief);setOrderState(p.productionOrder??'voice-first');}},[p.id,savedBrief,p.productionOrder,briefDirty]);
+  const savedBrief=JSON.stringify(d?.brief);useEffect(()=>{if(d)setBriefState(d.brief);},[p.id,savedBrief]);
   const [model,setModel]=useState(MODELS.find(m=>m.kind==='text'&&m.provider==='openai')!.id);
   const [execution,setExecution]=useState<DirectorExecution>({});
   const [sceneId,setSceneId]=useState(d?.scenes[0]?.id??'');
@@ -69,15 +62,19 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
   const selectScene=(id:string,checked:boolean)=>setSelectedSceneIds(ids=>checked?[...new Set([...ids,id])]:ids.filter(v=>v!==id));
   const selectShot=(id:string,checked:boolean)=>setSelectedShotIds(ids=>checked?[...new Set([...ids,id])]:ids.filter(v=>v!==id));
   const roles:{id:DirectorRole;label:string}[]=[{id:'story',label:'Сценарий'},{id:'camera',label:'Оператор'},{id:'art',label:'Художник'},{id:'dialogue',label:'Реплики'},{id:'performance',label:'Актёрская работа'},{id:'scene-expressive-reviewer',label:'Выразительность сцены'}];
-  const saveBrief=async()=>{const version=draftVersion.current;await call('brief',{brief,productionOrder:order});if(version===draftVersion.current)setBriefDirty(false);};
-  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId),version=draftVersion.current;await call('restoreCreativeVersion',{versionId});if(v&&version===draftVersion.current){setBriefDirty(false);setBriefState(v.snapshot.brief);setOrderState(v.snapshot.productionOrder??'voice-first');}};
+  const chooseHistory=async(versionId:string)=>{const v=p.creativeHistory?.find(v=>v.id===versionId);await call('restoreCreativeVersion',{versionId});if(v)setBriefState(v.snapshot.brief);};
   const sceneText=(s:Scene)=>[s.title,`Задача: ${s.purpose}`,`Локация: ${s.location}`,`Конфликт: ${s.conflict}`,`Поворот: ${s.turn}`,`Начало: ${s.stateIn}`,`Конец: ${s.stateOut}`,sceneCausalText(s.causalChain),...s.continuity.map(c=>`${c.character}: ${c.outfit}; ${c.props}`),...s.shots.map(shot=>`${shot.title} · ${shot.duration} сек\n${shot.story}\nОператор: ${shot.cinematography}\nХудожник: ${shot.productionDesign}\nРечь: ${shot.dialogue.speaker}: ${shot.dialogue.text}\nПодача: ${shot.dialogue.delivery}\nНачало: ${shot.stateIn}\nКонец: ${shot.stateOut}${shot.direction?'\n'+readableShotDirection(shot.direction):''}`)].join('\n\n');
   const shotField=(key:keyof DirectingShot,value:unknown)=>setShotEdit(e=>e?{...e,shot:{...e.shot,[key]:value}}:e);
   const patchPreview=(patch:EditorPatch)=>{const target=scenes.find(s=>s.shots.some(v=>v.id===patch.shotId)),shot=target?.shots.find(s=>s.id===patch.shotId);return <details key={patch.id} className="border rounded p-3"><summary>{target?.title} · {shot?.title??'План'} · {EDITOR_SECTION_NAMES[patch.section]} {patch.applied&&'✓ Применено'}</summary><p>{patch.reason}</p><p className="whitespace-pre-wrap"><b>Было:</b> {patch.before||'Пусто'}</p><p className="whitespace-pre-wrap"><b>Предложение:</b> {patch.after||'Пусто'}</p></details>;};
+  if(stage===0)return <>
+    <GeneralScenarioBrief key={p.id} p={p} busy={busy} submit={submit} generateScenario={generateScenario}/>
+    <section className="editor-surface p-5 mb-5" aria-label="Смыслы общего сценария"><StoryMeaningPanel p={p} busy={locked} submit={call} editable showCoverage={false}/>
+      {run?.tasks.some(t=>t.role==='story-meaning')&&<DirectorRunStatus p={p} run={{...run,tasks:run.tasks.filter(t=>t.role==='story-meaning')}} busy={busy} submit={call}/>}</section>
+  </>;
   return <section className="editor-surface p-5 mb-6 space-y-5" aria-label="Команда сценаристов и режиссёров">
-    <div className="row spread wrap"><div><div className="eyebrow">РЕЖИССЁРСКАЯ ГРУППА</div><h2>{stage===0?'Творческое задание':stage===12?'Структура сцен':'Проработка всех планов'}</h2></div>
-      {stage!==0&&<F label="Модель команды"><select className="rounded border p-2 bg-background" aria-label="Модель режиссёрской группы" value={model} disabled={locked} onChange={e=>{setModel(e.target.value);setExecution({...execution,parallelModels:[]});}}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></F>}</div>
-    <p className="muted">{stage===0?'Сохраните задание → создайте варианты по жанру и режиссёрскому подходу → выберите и утвердите текст в карточках ниже → перейдите к специалистам для дальнейшей доработки. Число вариантов и модель задаются в окне генерации.':'Один вариант по умолчанию. Специалисты работают параллельно; утверждение остаётся за вами. Стоимость каждого вызова — в журнале проекта.'}</p>
+    <div className="row spread wrap"><div><div className="eyebrow">РЕЖИССЁРСКАЯ ГРУППА</div><h2>{stage===12?'Структура сцен':'Проработка всех планов'}</h2></div>
+      <F label="Модель команды"><select className="rounded border p-2 bg-background" aria-label="Модель режиссёрской группы" value={model} disabled={locked} onChange={e=>{setModel(e.target.value);setExecution({...execution,parallelModels:[]});}}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></F></div>
+    <p className="muted">Один вариант по умолчанию. Специалисты работают параллельно; утверждение остаётся за вами. Стоимость каждого вызова — в журнале проекта.</p>
     {!!p.creativeHistory?.length&&[12,4].includes(stage)&&<details><summary>Сравнить версии сцен в двух окнах</summary>{stage===4&&<p>Сравнивается выбранная ниже сцена. Выбор переносит только её; остальные сцены и оплаченные материалы сохраняются.</p>}<VersionComparison disabled={locked}
       title={stage===4?`Версии: ${scene?.title??'сцена'}`:'Версии структуры сцен'} selectedId={p.creativeVersionId}
       versions={p.creativeHistory.filter(v=>stage!==4||v.snapshot.scenes.some(s=>s.id===scene?.id)).map(v=>({id:v.id,label:`${new Date(v.created).toLocaleString('ru-RU')} · ${v.reason}`,text:v.snapshot.scenes.filter(s=>stage!==4||s.id===scene?.id).map(sceneText).join('\n\n'),metadata:{origin:v.reason,created:v.created,settings:v.snapshot.brief}}))}
@@ -90,30 +87,7 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
       {seconds>0&&runtimeMode(p)==='free'&&<Button variant="outline" disabled={locked||timingAccepted||scenes.some(s=>!s.shots.length)} onClick={()=>call('acceptRuntime')}>{timingAccepted?'✓ Расчётная длительность принята':'Принять расчётную длительность'}</Button>}
       {!!d?.issues.some(i=>!i.resolved&&!i.category)&&<p className="muted">Есть замечания прежней проверки. Нажмите «Предложить решения / проверить заново», чтобы редактор оценил их с учётом выбранного режима.</p>}
     </div>
-    {stage===0&&<>
-      <div className="grid gap-4 md:grid-cols-2">
-        <F label="Жанр"><Input list="director-genres" value={brief.genre} onChange={e=>setBrief({...brief,genre:e.target.value})}/><datalist id="director-genres">{GENRE_OPTIONS.map(s=><option key={s} value={s}/>)}</datalist></F>
-        <F label="Режиссёрский подход"><select className="w-full rounded border p-2 bg-background" value={brief.director} onChange={e=>setBrief({...brief,director:e.target.value,techniques:DIRECTOR_PRESETS[e.target.value]})}>{Object.keys(DIRECTOR_PRESETS).map(s=><option key={s}>{s}</option>)}</select></F>
-        <F label="Аудитория"><Input value={brief.audience} onChange={e=>setBrief({...brief,audience:e.target.value})}/></F>
-        <F label="Ориентир длительности, сек"><Input type="number" min={10} max={3600} value={brief.targetSeconds} onChange={e=>setBrief({...brief,targetSeconds:Number(e.target.value)})}/></F>
-        <F label="Какое чувство должен вызвать фильм"><Textarea value={brief.effect} onChange={e=>setBrief({...brief,effect:e.target.value})}/></F>
-        <F label="Приёмы — можно изменить"><Textarea value={brief.techniques} onChange={e=>setBrief({...brief,techniques:e.target.value})}/></F>
-        <F label="Что нельзя менять"><Textarea value={brief.locked} onChange={e=>setBrief({...brief,locked:e.target.value})}/></F>
-        <F label="Порядок производства"><select className="w-full rounded border p-2 bg-background" value={order} onChange={e=>setOrder(e.target.value as typeof order)}><option value="voice-first">Сначала голоса и аниматик, затем видео</option><option value="video-first">Сначала видео, затем голоса под его длительность</option></select><small>При озвучке после видео проверяем фактическую длину файлов. Речь не обрезается и не ускоряется.</small></F>
-      </div>
-      <CreativeStrengthControls value={brief.strengths} disabled={locked} onChange={strengths=>setBrief({...brief,strengths})}/>
-      <StagingModeControl value={brief.stagingMode} disabled={locked} onChange={stagingMode=>setBrief({...brief,stagingMode})}/>
-      <CameraPolicyControl value={brief.cameraPolicy} disabled={locked} onChange={cameraPolicy=>setBrief({...brief,cameraPolicy})}/>
-      <FramePolicyControl value={brief.framePolicy} disabled={locked} onChange={framePolicy=>setBrief({...brief,framePolicy})}/>
-      <p className="muted text-sm">Новые настройки применяются к дальнейшей проработке и генерации. Утверждённые материалы и выбранные комплекты кадров сохраняются. Чтобы изменить готовый план, откройте его правки и заново проработайте нужное действие.</p>
-      <FacialExpressionControl value={brief.facialExpression} disabled={locked} onChange={facialExpression=>setBrief({...brief,facialExpression})}/>
-      <p className="muted text-sm">Мимика применяется при новой проработке актёрской игры и генерации кадров и видео. Готовые материалы сохраняются. В отдельном плане можно выбрать другую манеру.</p>
-      <F label="Дополнительные инструкции для сценаристов"><Textarea value={brief.promptNotes??''} onChange={e=>setBrief({...brief,promptNotes:e.target.value})}/></F>
-      <label className="row"><input type="checkbox" checked={brief.factual} onChange={e=>setBrief({...brief,factual:e.target.checked})}/>Неигровое кино: сохранять факты, отмечать сведения для проверки</label>
-      <div className="row wrap"><Button disabled={locked} onClick={saveBrief}>Сохранить творческое задание</Button>{generateScenario&&<Button disabled={locked||!d||briefDirty} onClick={generateScenario}>Создать варианты по заданию</Button>}<Button variant="outline" disabled={locked||!d||briefDirty||!p.items.some(i=>i.stage===0&&!i.removedAt&&!i.planArchive&&i.variants.some(v=>v.id===i.selectedId&&v.kind==='text'&&!!v.text.trim()))} onClick={()=>open(13)}>Доработать сценарий со специалистами</Button><Button variant="outline" onClick={()=>open(12)}>Перейти к сценам</Button></div>
-      {briefDirty&&<p role="status">Есть несохранённые настройки. Сохраните творческое задание перед запуском команды.</p>}
-    </>}
-    {[0,12,4].includes(stage)&&<StoryMeaningPanel p={p} busy={locked} submit={call} editable={stage===0} onOpenShot={stage===4?(sceneId,shotId)=>{const target=scenes.find(s=>s.id===sceneId),shot=target?.shots.find(s=>s.id===shotId);if(shot){setSceneId(sceneId);editShot(sceneId,shot);}}:undefined}/>}
+    {[12,4].includes(stage)&&<StoryMeaningPanel p={p} busy={locked} submit={call} onOpenShot={stage===4?(sceneId,shotId)=>{const target=scenes.find(s=>s.id===sceneId),shot=target?.shots.find(s=>s.id===shotId);if(shot){setSceneId(sceneId);editShot(sceneId,shot);}}:undefined}/>}
     {stage===12&&<>
       {!scenes.length&&<Button variant="outline" disabled={locked} onClick={()=>call('importScript')}>Перенести текущий подробный сценарий без генерации</Button>}
       <div className="row wrap"><Button disabled={locked} onClick={()=>generate('scenes',{replaceScenes:!!scenes.length})}>{scenes.length?'Заново разделить сценарий на сцены':'Создать весь этап · разделить на сцены'}</Button><Button variant="outline" disabled={locked} onClick={()=>editScene({id:'new',title:'Новая сцена',purpose:'',location:'',conflict:'',turn:'',stateIn:'',stateOut:'',continuity:[],shots:[]})}>Добавить сцену вручную</Button><Button disabled={locked||!scenes.length} variant="outline" onClick={()=>call('approveScenes')}>{d?.scenesApproved===scenesBasis(p)?'✓ Структура сцен утверждена':'Утвердить структуру сцен'}</Button></div>
@@ -174,6 +148,6 @@ export function DirectingEditor({p,stage,busy,submit,open,generateScenario}:Prop
       {d.issues.map(i=>{const patches=d.patches.filter(p=>p.issueId===i.id||p.relatedIssueIds?.includes(i.id)),operations=(d.montageOperations??[]).filter(op=>op.issueId===i.id||op.relatedIssueIds?.includes(i.id));return <div key={i.id} className="border rounded p-3 space-y-3"><p>{i.resolved?'✓':i.severity==='conflict'?'Конфликт':'Замечание'}: {i.message}</p>{i.solution&&<p><b>Решение редактора:</b> {i.solution}</p>}{patches.map(patchPreview)}{operations.map(op=><MontageOperationPreview key={op.id} p={p} operation={op}/>)}{[...patches,...operations].some(p=>!p.applied)&&<Button size="sm" disabled={locked} onClick={()=>call('applySolution',{issueId:i.id})}>Применить решение</Button>}{!i.resolved&&!patches.length&&!operations.length&&<p className="muted">Готовая правка не приложена. Нажмите «Предложить решения / проверить заново» — это новый запрос к выбранной модели. Если нужен ваш творческий выбор, редактор объяснит его.</p>}{i.resolution&&<small>{i.resolution}</small>}{!i.resolved&&<details><summary>Решить вручную</summary><F label="Как решено замечание"><Input value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Как вы исправили план или почему оставляете его"/></F><Button size="sm" variant="outline" disabled={locked||!resolution.trim()} onClick={()=>call('resolveIssue',{issueId:i.id,resolution})}>Зафиксировать решение</Button></details>}</div>;})}</div>}
     {!!d?.patches.some(p=>!p.issueId)&&<div className="space-y-3"><h3>Другие предложенные правки</h3>{d.patches.filter(p=>!p.issueId).map(patch=><div key={patch.id}>{patchPreview(patch)}<Button size="sm" disabled={locked||patch.applied} onClick={()=>call('applyPatch',{patchId:patch.id})}>Применить правку</Button></div>)}</div>}
     {!!d?.montageOperations?.length&&<div className="space-y-3"><h3>Монтажные решения</h3><p className="muted">Можно изменить время, исключить, переставить или объединить соседние планы. Несовместимые решения выбирайте отдельно. Файлы и расходы сохраняются.</p><Button disabled={locked||!d.montageOperations.some(op=>!op.applied)} onClick={()=>call('applyAllMontageOperations')}>Применить все монтажные решения</Button>{d.montageOperations.map(op=><div key={op.id} className="space-y-2"><MontageOperationPreview p={p} operation={op}/><Button size="sm" disabled={locked||op.applied} onClick={()=>call('applyMontageOperation',{operationId:op.id})}>Применить это монтажное решение</Button></div>)}</div>}
-    {(stage!==0||run?.tasks.some(t=>t.role==='story-meaning'))&&<DirectorRunStatus p={p} run={run} busy={busy} submit={call}/>}
+    <DirectorRunStatus p={p} run={run} busy={busy} submit={call}/>
   </section>;
 }
