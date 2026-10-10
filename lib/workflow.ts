@@ -4,6 +4,7 @@ import { STAGES, chosen, isApproved, independentApproval, participates, stageRea
 import { animaticApproved } from './animatic';
 import { musicSettings, musicIssue } from './music';
 import {allPlanSetsApproved} from './shot-planning';
+import {stageEditing,pendingStageBefore} from './stage-review-state';
 
 // UI order is separate from persisted stage IDs: existing video dependencies
 // and projects keep their original IDs when the animatic page is added.
@@ -11,10 +12,12 @@ export const WORKFLOW=[{id:0,title:STAGES[0]},{id:13,title:'Доработка �
 export function projectWorkflow(p?:Project){if(p?.productionOrder!=='video-first')return WORKFLOW;const stages=WORKFLOW.filter(s=>s.id!==7);const at=stages.findIndex(s=>s.id===6);return [...stages.slice(0,at),{id:7,title:STAGES[7]},...stages.slice(at)];}
 export const stageTitle=(stage:number)=>WORKFLOW.find(s=>s.id===stage)?.title??'';
 export const nextStage=(stage:number,p?:Project)=>projectWorkflow(p)[projectWorkflow(p).findIndex(s=>s.id===stage)+1]?.id;
-export const workflowReady=(p:Project,stage:number)=>stage===14?true:stage===13?true:stage===12?true:stage===11?true:stage===10?p.items.some(i=>i.stage===5&&participates(p,i)):stageReady(p,stage===9?(p.animaticSettings?.sound==='silent'?5:6):stage);
-export function stageComplete(p:Project,stage:number) {
+export const workflowReady=(p:Project,stage:number)=>pendingStageBefore(p,stage)!==undefined?false:stage===14?true:stage===13?true:stage===12?true:stage===11?true:stage===10?p.items.some(i=>i.stage===5&&participates(p,i)):stageReady(p,stage===9?(p.animaticSettings?.sound==='silent'?5:6):stage);
+export function stageComplete(p:Project,stage:number):boolean {
+  if(stageEditing(p,stage))return false;
+  if(p.stageReviews?.[stage]?.status==='skipped'&&(stage===13||stage===10&&!p.captions?.some(c=>c.enabled&&c.text.trim())||stage===6&&silentFilm(p)))return true;
   if(stage===14)return allPlanSetsApproved(p);
-  if(stage===13)return stageComplete(p,0);
+  if(stage===13)return p.stageReviews?.[13]?.status==='approved'&&stageComplete(p,0);
   if(stage===12)return !!p.directing?.scenesApproved&&p.directing.scenesApproved===scenesBasis(p);
   if(stage===11)return (!!p.music||readSoundscape(p).enabled)&&(!musicSettings(p).enabled||!musicIssue(p))&&(!readSoundscape(p).enabled||readSoundscape(p).layers.filter(l=>!l.removedAt&&l.settings.enabled).every(soundLayerApproved));
   if(stage===10)return !!p.captions?.some(c=>c.enabled&&c.text.trim()&&p.items.some(i=>i.id===c.planId&&participates(p,i)));

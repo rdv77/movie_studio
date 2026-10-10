@@ -30,10 +30,10 @@ const callback=()=>{writes++;throw Error('Rendering changed the film');};
 try{
   const html=renderToStaticMarkup(createElement(GeneralScriptComparison,{p,busy:false,onAction:callback,onContinue:callback}));
   assert.match(html,/id="general-script-comparison"/);
-  assert.equal((html.match(/<select /g)||[]).length,2);
-  assert.equal((html.match(/<option /g)||[]).length,6,'All versions in both selectors');
-  assert(html.includes('Утвердить этот вариант'));
-  for(const action of ['Правки → новая версия','Переименовать','Происхождение и промпт','Удалить вариант','К доработке сценария'])assert(html.includes(action),action);
+  assert.equal((html.match(/<select /g)||[]).length,1);
+  assert.equal((html.match(/<option /g)||[]).length,3,'All versions stay available on the alternative side');
+  assert(html.includes('Утвердить'));
+  assert(html.includes('Действия с вариантом:'));assert(!html.includes('Выбрать для проекта'));assert(html.includes('Перейти дальше'));
   assert.equal((html.match(/overflow-y-auto/g)||[]).length,2);
   assert(!html.includes('Нет абзаца'),'Full-text mode avoids empty comparison cards');
   assert.deepEqual(p,initial);assert.equal(writes,0);assert.equal(requests,0);

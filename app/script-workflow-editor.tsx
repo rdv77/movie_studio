@@ -9,6 +9,7 @@ import {directorRunActive} from '@/lib/directing';
 import {VersionComparison,type ComparisonVersion} from './version-comparison';
 import {scriptComparisonVersions} from '@/lib/script-comparison';
 import {scriptVariantLabel} from '@/lib/script-labels';
+import {generalScriptSource} from '@/lib/general-script-source';
 import {SCRIPT_SPECIALIST_ROLES,SCRIPT_ROLE_NAMES,scriptTaskChain,CINEMA_METHODS,CINEMA_METHOD_IDS,CINEMA_METHODS_NOTE,
   isScriptWorkflowRun,isRecoverableUnsentScriptRun,scriptWorkflowResultSchema,createScriptWorkflowRun,scriptWorkflowPrompt,type ScriptRole,type ScriptWorkflowRun} from '@/lib/script-workflow';
 import type {CinemaMethodId} from '@/lib/cinema-methods';
@@ -18,14 +19,14 @@ export function ScriptWorkflowEditor({p,model,busy,submit,openScenario}:Props){
   const uid=useId();
   const item=p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive);
   const sources=item?.variants.filter(v=>v.kind==='text'&&!!v.text.trim())??[];
-  const [sourceVariantId,setSourceVariantId]=useState(item?.selectedId??sources[0]?.id??'');
+  const [sourceVariantId,setSourceVariantId]=useState(generalScriptSource(p)?.variant.id??'');
   const [roles,setRoles]=useState<ScriptRole[]>([...SCRIPT_SPECIALIST_ROLES]);
   const [methodologyIds,setMethodologyIds]=useState<CinemaMethodId[]>([...CINEMA_METHOD_IDS]);
   const [promptOverrides,setPromptOverrides]=useState<Partial<Record<ScriptRole,string>>>({});
   const [branch,setBranch]=useState<{taskId:string;label:string;sourceVariantId:string}>();
   const [operation,setOperation]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [promptPreview,setPromptPreview]=useState('');
-  useEffect(()=>{setSourceVariantId(item?.selectedId??sources[0]?.id??'');setBranch(undefined);setError('');setNotice('');},[p.id]);
+  useEffect(()=>{setSourceVariantId(generalScriptSource(p)?.variant.id??'');setBranch(undefined);setError('');setNotice('');},[p.id,item?.approvedId]);
   const preferredSourceId=item?.selectedId??sources[0]?.id??'';
   useEffect(()=>{setSourceVariantId(current=>current||preferredSourceId);},[preferredSourceId]);
   useEffect(()=>{setPromptPreview('');},[p,model,sourceVariantId,branch?.taskId,roles,methodologyIds,promptOverrides]);

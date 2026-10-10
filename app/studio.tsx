@@ -40,6 +40,9 @@ import { DirectingEditor } from './directing-editor';
 import { ScriptDevelopmentEditor } from './script-development-editor';
 import { CinemaReferencesPanel } from './cinema-references-panel';
 import { GeneralScenarioWorkspace } from './general-scenario-workspace';
+import {StageActionBar} from './stage-action-bar';
+import {pendingStageBefore} from '@/lib/stage-review-state';
+import {generalScriptSource,screenplayModel} from '@/lib/general-script-source';
 import {FilmSettingsFields} from './film-settings-fields';
 import {scriptVariantLabel} from '@/lib/script-labels';
 import {promptFor} from '@/lib/domain';
@@ -305,7 +308,7 @@ function Workspace() {
   const activeProject = useRef('');
   const projectEpoch = useRef(0);
   const uploads = useRef(new Set<AbortController>());
-  const [step, setStep] = useState(0);
+  const [step, setStepValue] = useState(0);
   const [itemId, setItemId] = useState('');
   const [panel, setPanel] = useState<
     'stage' | 'budget' | 'connections' | 'library'
@@ -354,6 +357,26 @@ function Workspace() {
     refetchInterval: query => query.state.data?.generalScenario?.runs.some(r=>['preparing','generating','reviewing'].includes(r.status))||query.state.data?.generalScenario?.preparations.some(x=>['queued','running'].includes(x.status))?10000:false,
   });
   const p = pq.data;
+  function setStep(target:number){
+    const current=qc.getQueryData<Project>(['project',activeProject.current]);
+    const previous=current&&pendingStageBefore(current,target);
+    if(previous!==undefined){setError(`Сначала завершите доработку и утвердите этап «${stageTitle(previous)}».`);return;}
+    setError('');
+    setStepValue(target);
+  }
+  function generateStage(){
+    if(!p)return;
+    if([4,12,13,14].includes(step)){
+      void perform(async()=>{
+        const data=step===13?{model:screenplayModel(p),roles:['script-critic','script-dramaturg','script-control'],sourceVariantId:generalScriptSource(p)?.variant.id}:{model:screenplayModel(p),mode:step===12?'scenes':step===14?'plan-shots':'develop',scope:'all',...(step===12?{replaceScenes:true}:{})};
+        replace(await request(`/api/projects/${p.id}/directing`,'POST',{revision:p.revision,action:step===13?'scriptRun':'run',data}));
+      });return;
+    }
+    if(step===9||step===8){void perform(()=>assemble(step===9));return;}
+    if(step===11){document.getElementById('music-generation-controls')?.scrollIntoView({behavior:'smooth'});return;}
+    if(step===3){document.getElementById('location-generation-controls')?.scrollIntoView({behavior:'smooth'});return;}
+    setDialog(step===5?'storyboard-batch':step===7?'remaining-video':step===6?'speech-batch':'generate');
+  }
   const aq = useQuery<Asset[]>({
     queryKey: ['assets', projectId],
     queryFn: () => request('/api/assets?projectId=' + encodeURIComponent(projectId)),
@@ -875,10 +898,15 @@ function Workspace() {
                   )}
                 </div>}
               </div>
+              {step!==0&&<StageActionBar key={p.id+':stage-actions:'+step} p={p} stage={step} busy={busy} canGenerate={ready}
+                onAction={async operation=>{await action('stageAction',{stage:step,operation});}}
+                onGenerate={step===10?undefined:generateStage}
+                generationLabel={[8,9].includes(step)?'Собрать этап':step===3?'Настроить генерацию локаций':step===11?'Настроить генерацию музыки':'Сгенерировать этап с ИИ'}
+                onContinue={()=>{setStep(nextStage(step,p)??step);setItemId('');}}/>}
               {[6,11].includes(step)&&<VoiceStudioShell p={p} busy={busy} soundStage={step===11} onOpenCatalog={()=>{setStep(6);setVoiceView('casting');setItemId('');}} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
+              {step===11&&<div id="music-generation-controls"/>}
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===0&&<GeneralScenarioWorkspace key={p.id+':general-scenario'} p={p} busy={busy}
-                onAddSource={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setEditing(undefined);setDialog('variant');}}
                 onContinue={()=>{setStep(13);setItemId('');}}
                 submit={async(a,data)=>{const epoch=projectEpoch.current,current=qc.getQueryData<Project>(['project',p.id])??p;const next=await request(`/api/projects/${p.id}/general-scenario`,'POST',{action:a,data,revision:current.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');replace(next);return next;}}
                 directingSubmit={async(a,data)=>{const epoch=projectEpoch.current,current=qc.getQueryData<Project>(['project',p.id])??p;const next=await request(`/api/projects/${p.id}/directing`,'POST',{action:a,data,revision:current.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');replace(next);}}
@@ -1461,7 +1489,7 @@ function Workspace() {
                             variant="ghost"
                             className="full-width"
                             disabled={busy}
-                            onClick={() => perform(() => action('unapprove'))}
+                            onClick={() => perform(() => action('stageAction',{stage:step,operation:'rework'}))}
                           >
                             Вернуть на доработку
                           </Button>
@@ -3380,6 +3408,7 @@ function SettingsDialog({ open, close, p, busy, perform, save }: any) {
                 durationMode: f.get('durationMode'),
                 productionOrder: f.get('productionOrder'),
                 framePolicy: f.get('framePolicy'),
+                screenplayModel: f.get('screenplayModel'),
                 format: f.get('format'),
                 limit: f.get('limit') ? ticks(String(f.get('limit'))) : null,
               });

@@ -5,6 +5,8 @@ import type {Project} from '@/lib/domain';
 import {plannedRuntime,runtimeMode} from '@/lib/runtime-policy';
 import {Input} from '@/components/ui/input';
 import {FramePolicyControl} from './staging-policy-controls';
+import {MODELS} from '@/lib/models';
+import {screenplayModel} from '@/lib/general-script-source';
 
 const Field=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
 
@@ -15,6 +17,7 @@ export function FilmSettingsFields({p,busy=false}:{p:Project;busy?:boolean}){
   const complete=scenes.length>0&&scenes.every(scene=>scene.shots.length>0);
   return <fieldset disabled={busy} className="space-y-5" aria-label="Технические параметры фильма">
     <Field label="Название"><Input name="title" defaultValue={p.title} required maxLength={100}/></Field>
+    <Field label="Модель сценариста и драматурга"><select name="screenplayModel" defaultValue={screenplayModel(p)} className="w-full rounded border p-2 bg-background">{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
     <div className="grid gap-4 sm:grid-cols-2">
       <Field label="Режим хронометража"><select name="durationMode" className="w-full rounded border p-2 bg-background" value={mode} onChange={e=>setMode(e.target.value as typeof mode)}><option value="free">Свободная длительность</option><option value="strict">Строгий хронометраж</option></select></Field>
       <Field label="Ориентир длительности, сек"><Input type="number" name="seconds" min={10} max={3600} step="any" defaultValue={p.directing?.brief.targetSeconds??Math.max(10,p.seconds)} required/></Field>

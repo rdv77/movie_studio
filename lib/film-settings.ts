@@ -12,6 +12,7 @@ import {validateAnimaticManifest} from './animatic-manifest';
 import {editPlan} from './render';
 import {videoPreparationIssue} from './video-from-animatic';
 import {videoPreparationCurrent} from './video-preparation-basis';
+import {MODELS} from './models';
 
 export const filmSettingsSchema=z.object({
   title:z.string().trim().min(1).max(100),format:z.enum(['16:9','9:16']),
@@ -19,6 +20,7 @@ export const filmSettingsSchema=z.object({
   durationMode:z.enum(['free','strict']).optional(),
   productionOrder:z.enum(['voice-first','video-first']).optional(),
   framePolicy:z.union([framePolicySchema,z.literal('')]).optional(),
+  screenplayModel:z.string().refine(id=>MODELS.some(m=>m.id===id&&m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)),'Выберите доступную текстовую модель.').optional(),
 }).superRefine((v,ctx)=>{
   if(v.seconds<10&&(v.durationMode!==undefined||v.productionOrder!==undefined||v.framePolicy!==undefined))
     ctx.addIssue({code:'custom',path:['seconds'],message:'Ориентир длительности — от 10 до 3600 секунд.'});
@@ -102,6 +104,7 @@ export function applyFilmSettings(p:Project,input:unknown):void{
   }
   if(p.format!==s.format)next.configVersion++;
   Object.assign(next,{title:s.title,format:s.format,seconds:s.seconds,limit:s.limit});
+  if(s.screenplayModel!==undefined){next.screenplayModel=s.screenplayModel;if(next.generalScenario?.config)next.generalScenario.config.model=s.screenplayModel;}
   if(preserveTiming&&next.directing){
     const d=next.directing;
     if(sceneApproval)d.scenesApproved=scenesBasis(next);

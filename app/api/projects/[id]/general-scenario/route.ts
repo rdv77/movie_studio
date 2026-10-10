@@ -1,4 +1,8 @@
 import {z} from 'zod';
+import {applyStageAction} from '@/lib/stage-actions';
+import {assertGeneralScriptSource,generalScriptSource} from '@/lib/general-script-source';
+import {addVariant} from '@/lib/domain';
+import {stageEditing} from '@/lib/stage-review-state';
 import {api,owner,loadProject,saveProject,getKey} from '@/lib/server';
 import {model} from '@/lib/models';
 import {advanceGeneralScenario,runGeneralScenarioJob} from '@/lib/general-scenario-runner';
@@ -7,6 +11,8 @@ import {GENERAL_SCENARIO_SECTIONS,generalScenarioConfigSchema,generalCandidateAc
 const requestId=z.string().min(1).max(200),section=z.enum(GENERAL_SCENARIO_SECTIONS);
 const preparation=z.object({requestId,section,sourceVariantId:z.string().uuid(),model:z.string().min(1).max(200),cinemaModel:z.enum(['gpt-6-astra','grok-4.7']).optional(),question:z.string().max(3000).optional()}).strict();
 const schema=z.discriminatedUnion('action',[
+  z.object({action:z.literal('rework'),revision:z.number().int()}).passthrough(),
+  z.object({action:z.literal('initialText'),revision:z.number().int(),data:z.object({text:z.string().trim().min(1).max(50000)})}).strict(),
   z.object({action:z.literal('advance')}).passthrough(),
   z.object({action:z.literal('configure'),revision:z.number().int(),data:generalScenarioConfigSchema}).strict(),
   z.object({action:z.literal('prepare'),revision:z.number().int(),data:preparation}).strict(),
@@ -25,6 +31,8 @@ export const POST=api(async(req,ctx)=>{
   if(body.action==='generate'){const requestId=body.data.requestId;if(p.generalScenario?.runs.some(r=>r.requestId===requestId))return Response.json(p);}
   if(body.action==='prepare'||body.action==='savePreparation'){const requestId=body.data.requestId;if(p.generalScenario?.preparations.some(r=>r.requestId===requestId))return Response.json(p);}
   if(body.revision!==p.revision)throw Error('Проект изменился. Обновите данные и повторите действие.');
+  if(['configure','prepare','savePreparation','generate'].includes(body.action))assertGeneralScriptSource(p,(body as {data:{sourceVariantId:string}}).data.sourceVariantId);
+  if(body.action==='generate'&&generalScriptSource(p)?.item.approvedId&&!stageEditing(p,0))throw Error('Нажмите «Доработать», чтобы снять утверждение и подготовить новую версию.');
   if(body.action==='retry'){
     const key=body.data.runId,run=p.generalScenario?.runs.find(r=>r.id===key),jobIds=new Set([...(p.generalScenario?.preparations.filter(prep=>prep.id===key||Object.values(run?.preparationIds??{}).includes(prep.id)).map(prep=>prep.jobId)??[]),...(run?.scriptRun?.tasks.map(t=>t.jobId)??[])]);
     // Check a retained paid response before admitting an explicitly requested
@@ -39,6 +47,12 @@ export const POST=api(async(req,ctx)=>{
     if(body.action==='generate'&&body.data.options.cinema)await checkModel(body.data.cinemaModel);
   }
   switch(body.action){
+    case 'rework':applyStageAction(p,{stage:0,operation:'rework'});break;
+    case 'initialText':{
+      if(generalScriptSource(p))throw Error('Исходный текст уже сохранён. Для правок нажмите «Доработать».');
+      const item=p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive);if(!item)throw Error('Карточка сценария не найдена.');
+      addVariant(p,item.id,{title:'Авторский вариант',kind:'text',text:body.data.text});break;
+    }
     case 'configure':configureGeneralScenario(p,body.data);break;
     case 'prepare':prepareGeneralScenario(p,body.data);break;
     case 'savePreparation':saveGeneralPreparation(p,body.data);break;

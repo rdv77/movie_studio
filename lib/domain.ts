@@ -1,3 +1,4 @@
+import {pendingStageBefore} from './stage-review-state';
 import type {AudioQcReport} from './audio-qc';
 import type {CinemaReferenceState} from './cinema-references';
 import {soundLayerApproved} from './soundscape';
@@ -183,6 +184,8 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  stageReviews?:Record<number,import('./stage-review-state').StageReview>;
+  screenplayModel?:string;
   generalScenario?:import('./general-scenario-workflow').GeneralScenarioState;
   cinemaReferences?:CinemaReferenceState;
   characterBindings?:Record<string,string>;
@@ -288,6 +291,7 @@ export function dependencies(p: Project, stage: number): string {
   ]);
 }
 export function stageReady(p: Project, stage: number): boolean {
+  if(pendingStageBefore(p,stage)!==undefined)return false;
   if(stage===8&&(musicIssue(p)||p.soundscape?.enabled&&p.soundscape.layers.some(l=>!l.removedAt&&l.settings.enabled&&!soundLayerApproved(l))))return false;
   if (productionPrecedes(p,6,stage) && p.speechMode === 'plans' && !p.items.some(i => i.stage === 6 && i.sourceShot && participates(p,i)) && !silentFilm(p)) return false;
   return p.items

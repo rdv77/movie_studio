@@ -21,7 +21,11 @@ export type VersionComparisonProps = {
   onMerge?: (result: ComparisonMerge) => void | Promise<void>;
   initialMode?: 'full' | 'diff';
   allowFullText?: boolean;
-  renderActions?: (version: ComparisonVersion) => React.ReactNode;
+  fixedLeftId?: string;
+  leftLabel?:string;
+  rightLabel?:string;
+  description?:string;
+  renderActions?: (version: ComparisonVersion,side:'left'|'right') => React.ReactNode;
 };
 
 /** Changing the viewed pair has no persistence side effects. */
@@ -29,19 +33,21 @@ export function VersionComparison(props: VersionComparisonProps) {
   const uid = useId();
   const [leftId, setLeftId] = useState(props.initialLeftId ?? props.versions[0]?.id);
   const [rightId, setRightId] = useState(props.initialRightId ?? props.versions[1]?.id ?? props.versions[0]?.id);
-  const { left, right } = comparisonPair(props.versions, leftId, rightId);
+  const { left, right } = comparisonPair(props.versions, props.fixedLeftId??leftId, rightId);
   return <section className="space-y-4" aria-label={props.title ?? 'Сравнение вариантов'}>
     <h3>{props.title ?? 'Сравнение вариантов'}</h3>
-    <p className="text-sm text-muted-foreground">Выберите версии для просмотра. Выбор для проекта сохраняется отдельной кнопкой.</p>
+    <p className="text-sm text-muted-foreground">{props.description??'Выберите версии для просмотра. Выбор для проекта сохраняется отдельной кнопкой.'}</p>
     {!left || !right ? <p className="text-sm text-muted-foreground">Пока нет версий для сравнения.</p> : <>
       <div className="grid gap-4 md:grid-cols-2">
         {(['left', 'right'] as const).map(side => <label className="block space-y-2" key={side} htmlFor={`${uid}-${side}`}>
-          <span className="text-sm font-medium">{side === 'left' ? 'Левый вариант' : 'Правый вариант'}</span>
+          <span className="text-sm font-medium">{side === 'left' ? props.leftLabel??'Левый вариант' : props.rightLabel??'Правый вариант'}</span>
+          {side==='left'&&props.fixedLeftId?<div className="rounded border border-primary/40 bg-primary/5 p-2 text-sm break-words">{left.label}</div>:<>
           <select id={`${uid}-${side}`} className="w-full rounded border border-input bg-background p-2 text-sm"
             value={(side === 'left' ? left : right).id}
             onChange={event => (side === 'left' ? setLeftId : setRightId)(event.target.value)}>
             {props.versions.map(version => <option key={version.id} value={version.id}>{version.label}</option>)}
           </select>
+          </>}
         </label>)}
       </div>
       <ComparisonContent key={comparisonKey(left, right)} {...props} left={left} right={right}/>
@@ -106,7 +112,7 @@ function ComparisonContent({ left, right, ...props }: VersionComparisonProps & {
               </div>;
             })}</>}
           </div>
-          {props.renderActions?.(version)}
+          {props.renderActions?.(version,side)}
         </article>;
       })}
     </div>

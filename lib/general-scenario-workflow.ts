@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {markStageApproved} from './stage-review-state';
 import {id,now,makeVariant,approve,dependencies,deleteVariant,restoreVariant,type Project,type Job,type Variant} from './domain';
 import {ensureDirecting,creativeBriefSchema} from './directing';
 import {versionSignature} from './creative-versions';
@@ -203,6 +204,7 @@ export function generalCandidateAction(p:Project,raw:unknown){
     state(p).approvedItemId=item.id;
     for(const other of p.items)if(other.stage===0&&other.id!==item.id)other.approvedId=undefined;
     item.selectedId=variant.id;variant.deps=dependencies(p,0);approve(p,item.id);
+    markStageApproved(p,0);
     const d=ensureDirecting(p),meanings=variantStoryMeanings(variant);
     if(meanings?.length){d.storyMeanings=structuredClone(meanings);approveStoryMeanings(p);}
     // Mapless legacy/manual candidates keep the existing map and its old seal.

@@ -1,5 +1,6 @@
 import {allowMissingAdditionalFrames} from '@/lib/keyframe-batch';
 import {applyFilmSettings} from '@/lib/film-settings';
+import {applyStageAction,stageActionSchema} from '@/lib/stage-actions';
 import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
 import {setCharacterBinding} from '@/lib/character-bindings';
 import {applyMontageProposal} from '../../../../lib/montage-review';
@@ -108,6 +109,14 @@ export const PATCH = api(async (req, ctx) => {
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.planArchive&&body.action!=='restorePlan')throw new Error('Эта карточка сохранена в истории. Откройте актуальный план из сценария.');
   if(body.itemId&&p.items.find(i=>i.id===body.itemId)?.removedAt&&body.action!=='restoreCharacter')throw new Error('Сначала восстановите удалённую карточку героя.');
   switch (body.action) {
+    case 'stageAction': {
+      const input=stageActionSchema.parse(d);
+      const proposal=structuredClone(p);applyStageAction(proposal,input);
+      if(input.operation==='approve')for(const item of proposal.items.filter(i=>i.stage===input.stage&&!i.removedAt&&!i.planArchive)){
+        if(item.approvedId)await checkApprovalAssets(user,proposal,item.id,item.approvedId);
+      }
+      Object.assign(p,proposal);break;
+    }
     case 'bindPlanCharacter': {
       const binding=z.object({name:z.string().trim().min(1).max(100),characterId:z.string().uuid().nullable()}).parse(d);
       setCharacterBinding(p,binding.name,binding.characterId);break;

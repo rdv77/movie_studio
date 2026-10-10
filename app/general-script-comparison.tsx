@@ -10,6 +10,9 @@ import { MODELS } from '@/lib/models';
 import { scriptVariantLabel } from '@/lib/script-labels';
 import { isScriptWorkflowRun, scriptTaskChain, scriptWorkflowResultSchema } from '@/lib/script-workflow';
 import { VersionComparison, type ComparisonVersion } from './version-comparison';
+import {generalScriptSource} from '@/lib/general-script-source';
+import {stageEditing} from '@/lib/stage-review-state';
+import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from '@/components/ui/dropdown-menu';
 
 export type GeneralScriptTarget =
   | { kind: 'variant'; itemId: string; variantId: string }
@@ -24,6 +27,7 @@ export type GeneralScriptComparisonProps = {
   onAction?: (action: GeneralScriptAction, target: GeneralScriptTarget, data?: GeneralScriptActionData) => Promise<void>;
   onContinue?: () => void;
   focusVariantId?: string;
+  onRework?:()=>Promise<void>;
 };
 export type GeneralScriptEntry = {
   target: GeneralScriptTarget; version: ComparisonVersion; title: string;
@@ -42,7 +46,7 @@ export function generalScriptEntries(p: Project): GeneralScriptEntry[] {
   const items = p.items.filter(item => item.stage === 0 && !item.removedAt && !item.planArchive);
   const sources = new Map(p.items.flatMap(item => item.variants).map(variant => [variant.id, variant]));
   const entries: GeneralScriptEntry[] = items.flatMap(item => {
-    const current = isApproved(p, item);
+    const current = isApproved(p, item)&&!stageEditing(p,0);
     return item.variants.filter(variant => variant.kind === 'text').map(variant => {
       const selected = item.selectedId === variant.id, approved = item.approvedId === variant.id && current;
       const staleApproval = item.approvedId === variant.id && !current;
@@ -104,14 +108,15 @@ export function generalScriptEntries(p: Project): GeneralScriptEntry[] {
 }
 
 /** Viewing a pair stays local; choosing and approving are separate explicit actions. */
-export function GeneralScriptComparison({ p, busy, onChoose, onAction, onContinue, focusVariantId }: GeneralScriptComparisonProps) {
+export function GeneralScriptComparison({ p, busy, onChoose, onAction, onContinue, focusVariantId,onRework }: GeneralScriptComparisonProps) {
   const [working, setWorking] = useState(false), [error, setError] = useState('');
   const [modal, setModal] = useState<{ action: 'edit' | 'rename' | 'details'; entry: GeneralScriptEntry }>();
   const [title, setTitle] = useState(''), [text, setText] = useState('');
   const pending = useRef(false), entries = generalScriptEntries(p);
-  const left = entries.find(entry => entry.approved) ?? entries.find(entry => entry.selected) ?? entries[0];
+  const source=generalScriptSource(p),editing=stageEditing(p,0);
+  const left = entries.find(entry=>entry.target.kind==='variant'&&entry.target.itemId===source?.item.id&&entry.target.variantId===source.variant.id)??entries[0];
   const focused = entries.find(entry => entry.version.id === focusVariantId || (entry.target.kind === 'variant' && entry.target.variantId === focusVariantId));
-  const right = focused ?? [...entries].reverse().find(entry => entry.version.id !== left?.version.id) ?? left;
+  const right = focused&&focused!==left?focused:[...entries].reverse().find(entry => entry.version.id !== left?.version.id) ?? left;
   const approved = entries.filter(entry => entry.approved);
   const deleted = (p.removedVariants ?? []).filter(entry => p.items.some(item => item.id === entry.itemId && item.stage === 0 && !item.removedAt && !item.planArchive) && entry.variant.kind === 'text');
   const locked = busy || working;
@@ -126,15 +131,18 @@ export function GeneralScriptComparison({ p, busy, onChoose, onAction, onContinu
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить изменение. Попробуйте ещё раз.'); }
     finally { pending.current = false; setWorking(false); }
   };
-  const open = (action: 'edit' | 'rename' | 'details', entry: GeneralScriptEntry) => {
+  const open = async(action: 'edit' | 'rename' | 'details', entry: GeneralScriptEntry) => {
+    if(action==='edit'&&!editing&&onRework){setWorking(true);try{await onRework();}catch(e){setError((e as Error).message);return;}finally{setWorking(false);}}
     setModal({ action, entry }); setTitle((entry.title + (action === 'edit' ? ' · правки' : '')).slice(0, 200)); setText(entry.version.text); setError('');
   };
   return <div id="general-script-comparison" className="editor-surface space-y-3 p-4" data-testid="general-script-comparison">
-    {entries.length === 1 && <p className="text-sm text-muted-foreground">Пока сохранён один вариант: он показан с обеих сторон. После добавления новой версии её можно выбрать в любом списке.</p>}
-    <VersionComparison key={p.id + ':' + (focusVariantId ?? '')} title="Сравнение общего сценария"
+    {entries.length === 1 && <p className="text-sm text-muted-foreground">Пока сохранён один вариант. После доработки новый текст появится справа.</p>}
+    <VersionComparison key={p.id + ':' + left?.version.id + ':' + entries.length + ':' + (focusVariantId ?? '')} title="Сравнение общего сценария"
+      fixedLeftId={left?.version.id} leftLabel={editing&&source?.item.approvedId?'Предыдущий утверждённый вариант':left?.approved?'Утверждённый вариант':'Исходный текст · ещё не утверждён'} rightLabel={editing?'Альтернативный вариант · на доработке':'Альтернативный вариант'}
+      description="Новые генерации используют текст слева. Справа можно выбрать любой сохранённый вариант. После утверждения он станет основным."
       versions={entries.map(entry => entry.version)} initialLeftId={left?.version.id} initialRightId={right?.version.id}
       initialMode="full" allowFullText disabled={locked}
-      renderActions={version => {
+      renderActions={(version,side) => {
         const entry = entries.find(candidate => candidate.version.id === version.id);
         if (!entry) return null;
         const canAct = !!onAction || (!!onChoose && entry.target.kind === 'variant');
@@ -149,33 +157,29 @@ export function GeneralScriptComparison({ p, busy, onChoose, onAction, onContinu
             </div></details>
           </div>}
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant={entry.selected ? 'secondary' : 'outline'} disabled={locked || entry.selected || !canAct} onClick={() => void perform('choose', entry.target)}>{entry.selected ? '✓ Выбран для проекта' : 'Выбрать для проекта'}</Button>
-            {!!onAction && <Button type="button" size="sm" disabled={locked || entry.approved || !entry.version.text.trim()} onClick={() => void perform('approve', entry.target)}>{entry.approved ? '✓ Утверждён' : 'Утвердить этот вариант'}</Button>}
-            {!onAction && entry.approved && <span className="status-pill approved">✓ Утверждён</span>}
-            <details className="relative" aria-label={`Меню варианта: ${entry.title}`}>
-              <summary className="cursor-pointer rounded border px-3 py-1 text-sm" aria-label={`Действия с вариантом: ${entry.title}`}>⋯</summary>
-              <div className="absolute right-0 z-20 mt-1 min-w-64 space-y-1 rounded border border-border bg-background p-2 shadow-lg">
-                {!!onAction && <>
-                  <Button type="button" className="w-full justify-start" size="sm" variant="ghost" disabled={locked} onClick={() => open('edit', entry)}>Правки → новая версия</Button>
-                  <Button type="button" className="w-full justify-start" size="sm" variant="ghost" disabled={locked} onClick={() => open('rename', entry)}>Переименовать</Button>
-                </>}
-                <Button type="button" className="w-full justify-start" size="sm" variant="ghost" onClick={() => open('details', entry)}>Происхождение и промпт</Button>
-                {!!onAction && <Button type="button" className="w-full justify-start text-destructive" size="sm" variant="ghost" disabled={locked} onClick={() => void perform('delete', entry.target)}>Удалить вариант</Button>}
-              </div>
-            </details>
+            {!!onAction&&!entry.approved&&side==='right'&&<Button type="button" size="sm" disabled={locked||!entry.version.text.trim()} onClick={()=>void perform('approve',entry.target)}>Утвердить</Button>}
+            {side==='left'&&onRework&&!editing&&<Button type="button" size="sm" variant="outline" disabled={locked} onClick={()=>{setWorking(true);void onRework().catch(e=>setError(e.message)).finally(()=>setWorking(false));}}>Доработать</Button>}
+            <DropdownMenu><DropdownMenuTrigger aria-label={`Действия с вариантом: ${entry.title}`} disabled={locked} className="rounded border px-3 py-1 text-sm">⋯</DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)]">
+                {!!onAction&&<DropdownMenuItem onClick={()=>void open('edit',entry)}>Правки текста</DropdownMenuItem>}
+                {!!onAction&&<DropdownMenuItem onClick={()=>void open('rename',entry)}>Переименовать</DropdownMenuItem>}
+                <DropdownMenuItem onClick={()=>void open('details',entry)}>Происхождение и промпт</DropdownMenuItem>
+                {!!onAction&&entry!==left&&<DropdownMenuItem variant="destructive" onClick={()=>void perform('delete',entry.target)}>Удалить вариант</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          {entry.staleApproval && <p className="text-xs text-muted-foreground">Утверждение требует пересмотра. Проверьте текст и утвердите этот же вариант для текущего фильма.</p>}
+          {entry.staleApproval && <p className="text-xs text-muted-foreground">{editing?'Утверждение этапа снято. Можно доработать текст или утвердить прежнюю версию без изменений.':'Утверждение требует пересмотра. Проверьте текст и утвердите этот же вариант для текущего фильма.'}</p>}
         </div>;
       }}/>
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3" aria-label="Сценарий для дальнейшей работы">
-      <p className="text-sm">{approved.length ? <>Утверждён для дальнейшей работы: <strong>{approved.map(entry => entry.title).join('; ')}</strong></> : 'Сценарий ещё не утверждён. Выберите подходящий текст в любом окне и нажмите «Утвердить этот вариант».'}</p>
-      {!!onContinue && <Button type="button" variant="outline" disabled={locked || !approved.length} onClick={onContinue}>К доработке сценария →</Button>}
+      <p className="text-sm">{approved.length ? <>Утверждён для дальнейшей работы: <strong>{approved.map(entry => entry.title).join('; ')}</strong></> : editing?'На доработке. Утвердите подходящий вариант перед переходом дальше.':'Сценарий ещё не утверждён. Проверьте текст и нажмите «Утвердить».'}</p>
+      {!!onContinue && <Button type="button" variant="outline" disabled={locked || !approved.length} onClick={onContinue}>Перейти дальше →</Button>}
     </div>
     {!!deleted.length && !!onAction && <details className="text-sm"><summary className="cursor-pointer">Удалённые сценарии · {deleted.length}</summary><div className="mt-2 space-y-2">{deleted.map(entry => <div className="flex flex-wrap items-center justify-between gap-2" key={entry.itemId + ':' + entry.variant.id}><span>{entry.variant.title} · {timestamp(entry.variant.created)}</span><Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => void perform('restore', { kind: 'variant', itemId: entry.itemId, variantId: entry.variant.id })}>Восстановить</Button></div>)}</div></details>}
     {!!error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <Dialog open={!!modal} onOpenChange={value => !value && !working && setModal(undefined)}><DialogContent className="sm:max-w-3xl modal-scroll"><DialogHeader>
       <DialogTitle>{modal?.action === 'edit' ? 'Правки → новая версия сценария' : modal?.action === 'rename' ? 'Название варианта' : 'Происхождение и фактически отправленный промпт'}</DialogTitle>
-      <DialogDescription>{modal?.action === 'edit' ? 'Исходный и утверждённый сценарии сохранятся. Новый вариант нужно будет выбрать и утвердить.' : modal?.action === 'rename' ? 'Название изменится, текст и утверждение сохранятся.' : modal?.entry.title}</DialogDescription>
+      <DialogDescription>{modal?.action === 'edit' ? 'Прежний текст сохранён. Правки создадут альтернативу справа; её нужно будет утвердить.' : modal?.action === 'rename' ? 'Название изменится, текст и утверждение сохранятся.' : modal?.entry.title}</DialogDescription>
     </DialogHeader>
     {modal?.action === 'details' ? <div className="space-y-4">
       <p className="text-sm">{modal.entry.version.metadata?.origin} · {timestamp(modal.entry.version.metadata?.created ?? '')}</p>

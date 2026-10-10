@@ -70,8 +70,8 @@ try{
   assert(stage0.includes('Настройки общего сценария'));
   assert(stage0.includes('Что должен понять зритель'));
   assert(stage0.includes('Карта используется при разработке сцен и планов'));
-  assert(stage0.includes('Модель сценариста и драматурга'));
-  assert.match(stage0,/<option value="gpt-6-astra" selected="">/,'Script preparation defaults to GPT-6 Astra');
+  assert(!stage0.includes('Модель сценариста и драматурга'));assert(tech.includes('Модель сценариста и драматурга'));
+  assert.match(tech,/<option value="gpt-6-astra" selected="">/,'Script preparation defaults to GPT-6 Astra');
   assert.equal((stage0.match(/role="switch"/g)||[]).length,3,'Creative, meaning and cinema preparation are optional; technical parameters stay manual');
   assert.equal((stage0.match(/aria-expanded="false"/g)||[]).length,3,'Optional sections begin collapsed');
   assert.equal((stage0.match(/aria-label="Сравнение общего сценария"/g)||[]).length,1,'There is one comparison workspace');
@@ -79,8 +79,8 @@ try{
   const comparisonAt=stage0.indexOf('id="general-script-comparison"'),creativeAt=stage0.indexOf('aria-label="Жанр, режиссёрский подход и выразительность"'),meaningAt=stage0.indexOf('aria-label="Что должен понять зритель"'),cinemaAt=stage0.indexOf('aria-label="Кинореференсы: учиться у мастеров"');
   assert(comparisonAt>=0&&comparisonAt<creativeAt&&creativeAt<meaningAt&&meaningAt<cinemaAt,'Comparison is followed by creative, meaning and cinema controls');
   for(const removed of ['Творческое задание · технические параметры','Режим хронометража','Ориентир длительности','Порядок производства','Опорные изображения'])assert(!stage0.includes(removed),`Technical field leaked into screenplay workspace: ${removed}`);
-  assert.equal((stage0.match(/>Сгенерировать новый сценарий<\/button>/g)||[]).length,1,'One main generation action');
-  assert(stage0.includes('Исходник для нового сценария'),'Generation source is independent of compared panes');
+  assert(!stage0.includes('Сгенерировать ещё вариант'));assert(stage0.includes('Для нового прохода нажмите'));
+  assert(!stage0.includes('Исходник для нового сценария'),'The fixed left pane is the only generation source');
   assert(!stage0.includes('Карточки вариантов'),'Legacy variant cards are removed from screenplay workspace');
   for(const text of ['Сравнить версии сцен в двух окнах','Сохранённые версии задания и сцен','История структуры до правки','Проверка редактора','Маркер замечания редактора','Распределено по планам','Маркер ошибки оператора','Модель режиссёрской группы'])assert(!stage0.includes(text),`Stage 0 leaked later-stage UI: ${text}`);
   assert(!/<details\b[^>]*\sopen(?:=|\s|>)/.test(stage0),'Brief and meaning blocks start collapsed');
@@ -95,21 +95,21 @@ try{
 
   const comparisonProps={p,busy:false,onChoose:onAction};
   const comparison=render(GeneralScriptComparison,comparisonProps);
-  assert.equal((comparison.match(/<select /g)||[]).length,2);
-  assert.equal((comparison.match(/<option /g)||[]).length,4);
+  assert.equal((comparison.match(/<select /g)||[]).length,1);
+  assert.equal((comparison.match(/<option /g)||[]).length,2);
   assert(comparison.includes('Анна читает письмо.\n\nАнна возвращается домой.'),'Full original text is the default view');
   assert(comparison.includes('Анна замечает старую дату.\n\nАнна берёт ключ от дома.'),'Full alternative text is the default view');
   assert.equal((comparison.match(/overflow-y-auto/g)||[]).length,2,'Each text has its own bounded scrolling region');
-  for(const text of ['✓ Выбран для проекта','✓ Утверждён','Источник','Уточнена причинность','Модель','GPT-6 Astra','Создано'])assert(comparison.includes(text),text);
+  for(const text of ['Утверждённый вариант','Альтернативный вариант','Источник','Уточнена причинность','Модель','GPT-6 Astra','Создано'])assert(comparison.includes(text),text);
   assert(stage0.indexOf('general-script-comparison')<stage0.indexOf('Настройки общего сценария'));
   assert.deepEqual(p,before);
 
   const blank=D.newProject('Пустой фильм'),blankBefore=structuredClone(blank);
   assert(render(GeneralScriptComparison,{...comparisonProps,p:blank}).includes('Пока нет версий для сравнения'));
   const blankWorkspace=render(GeneralScenarioWorkspace,workspaceProps(blank));
-  assert(blankWorkspace.includes('Добавить исходный текст'));
+  assert(blankWorkspace.includes('Сохранить исходный вариант'));assert(!blankWorkspace.includes('Добавить исходный текст'));
   assert(blankWorkspace.includes('Не используется'));
-  assert.match(blankWorkspace,/<button[^>]*disabled=""[^>]*>Сгенерировать новый сценарий<\/button>/,'Empty project cannot launch a request before source text');
+  assert.match(blankWorkspace,/<button[^>]*disabled=""[^>]*>Сгенерировать этап с ИИ<\/button>/,'Empty project cannot launch a request before source text');
   assert.deepEqual(blank,blankBefore,'Opening an old project cannot create a directing state');
   const blankSettings=render(FilmSettingsFields,{p:blank});
   assert(blankSettings.includes('После разработки планов'));
@@ -122,9 +122,9 @@ try{
   multiple.items.push({...structuredClone(sourceItem),id:'archive-card',planArchive:{reason:'removed'},variants:[{...sourceItem.variants[0],title:'Архивный вариант'}]});
   sourceItem.variants.push({...sourceItem.variants[0],id:'image',kind:'image',title:'Изображение вместо сценария'});
   const multipleBefore=structuredClone(multiple),all=render(GeneralScriptComparison,{...comparisonProps,p:multiple,focusVariantId:JSON.stringify(['alternate-card',sourceItem.variants[0].id])});
-  assert.equal((all.match(/<option /g)||[]).length,6,'Both selectors must include text variants from every active general-script card');
+  assert.equal((all.match(/<option /g)||[]).length,3,'Alternative selector includes every saved candidate');
   assert(all.includes('Другая карточка сценария')&&all.includes('Полный текст из другой карточки.'));
-  assert.equal((all.match(/✓ Выбран для проекта/g)||[]).length,2,'Each card keeps its real selection even if legacy variant IDs repeat');
+  assert(!all.includes('Выбран для проекта'),'No redundant selection buttons');
   for(const hidden of ['Удалённый вариант','Архивный вариант','Изображение вместо сценария'])assert(!all.includes(hidden),hidden);
   assert.deepEqual(multiple,multipleBefore);
   multiple.configVersion++;

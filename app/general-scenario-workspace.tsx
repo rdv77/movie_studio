@@ -2,7 +2,8 @@
 import {useEffect,useRef,useState} from 'react';
 import type {Project} from '@/lib/domain';
 import {MODELS} from '@/lib/models';
-import {scriptVariantLabel} from '@/lib/script-labels';
+import {generalScriptSource,screenplayModel} from '@/lib/general-script-source';
+import {stageEditing} from '@/lib/stage-review-state';
 import {variantStoryMeanings} from '@/lib/story-meaning';
 import {currentGeneralPreparation,GENERAL_SCENARIO_SECTIONS,type GeneralScenarioSection,type GeneralScenarioConfig,type GeneralPreparationResult} from '@/lib/general-scenario-workflow';
 import {Button} from '@/components/ui/button';
@@ -13,20 +14,21 @@ import {CinemaReferencesPanel} from './cinema-references-panel';
 import {ScenarioOption} from './scenario-option';
 import {ScenarioMeaningDraft} from './scenario-meaning-draft';
 
-type Props={p:Project;busy:boolean;submit:(action:string,data?:unknown)=>Promise<Project>;directingSubmit:(action:string,data?:unknown)=>Promise<void>;cinemaSubmit:(action:string,data:unknown)=>Promise<void>;onContinue:()=>void;onAddSource:()=>void};
+type Props={p:Project;busy:boolean;submit:(action:string,data?:unknown)=>Promise<Project>;directingSubmit:(action:string,data?:unknown)=>Promise<void>;cinemaSubmit:(action:string,data:unknown)=>Promise<void>;onContinue:()=>void};
 const labels:Record<GeneralScenarioSection,string>={creative:'Жанр, режиссёрский подход и выразительность',meaning:'Что должен понять зритель',cinema:'Кинореференсы: учиться у мастеров'};
 const statuses:Record<string,string>={queued:'В очереди',running:'Идёт генерация',preparing:'Подготовка выбранных опций',generating:'Создание сценария',reviewing:'Проверка нового сценария',ready:'Готово',error:'Требует внимания'};
 
-export function GeneralScenarioWorkspace({p,busy,submit,directingSubmit,cinemaSubmit,onContinue,onAddSource}:Props){
+export function GeneralScenarioWorkspace({p,busy,submit,directingSubmit,cinemaSubmit,onContinue}:Props){
   const items=p.items.filter(i=>i.stage===0&&!i.removedAt&&!i.planArchive),variants=items.flatMap(i=>i.variants.filter(v=>v.kind==='text'&&v.text.trim()));
-  const initialSource=items.find(i=>variants.some(v=>v.id===i.selectedId))?.selectedId??items.find(i=>variants.some(v=>v.id===i.approvedId))?.approvedId??variants[0]?.id??'';
-  const [config,setConfig]=useState<GeneralScenarioConfig>(()=>p.generalScenario?.config??{sourceVariantId:initialSource,model:'gpt-6-astra',cinemaModel:'gpt-6-astra',options:{creative:false,meaning:false,cinema:false},question:''});
+  const baseline=generalScriptSource(p),initialSource=baseline?.variant.id??'',editing=stageEditing(p,0);
+  const [configDraft,setConfig]=useState<GeneralScenarioConfig>(()=>p.generalScenario?.config??{sourceVariantId:initialSource,model:screenplayModel(p),cinemaModel:'gpt-6-astra',options:{creative:false,meaning:false,cinema:false},question:''});
+  const config={...configDraft,sourceVariantId:initialSource,model:screenplayModel(p)};
+  const [initialText,setInitialText]=useState('');
   const [working,setWorking]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false),[briefDirty,setBriefDirty]=useState(false),[meaningDirty,setMeaningDirty]=useState(false),[creativeDirty,setCreativeDirty]=useState(false),[cinemaDirty,setCinemaDirty]=useState(false);
   const pending=useRef(false),requestKeys=useRef(new Map<string,string>());
   const lock=busy||working;
   const latest=p.generalScenario?.runs.at(-1),active=p.generalScenario?.runs.some(r=>['preparing','generating','reviewing'].includes(r.status));
   const source=variants.find(v=>v.id===config.sourceVariantId);
-  useEffect(()=>{if(!source&&variants.length){setConfig(c=>({...c,sourceVariantId:initialSource}));setDirty(true);}},[source?.id,initialSource]);
   const getPrep=(section:GeneralScenarioSection)=>source?currentGeneralPreparation(p,source.id,section,config.model,config.cinemaModel,config.question):undefined;
   const call=async(action:string,data?:unknown)=>{if(pending.current)throw Error('Дождитесь сохранения предыдущего действия.');pending.current=true;setWorking(true);setError('');try{return await submit(action,data);}catch(e){setError((e as Error).message);throw e;}finally{pending.current=false;setWorking(false);}};
   // Keep the same idempotency key after a lost response. A successful response
@@ -62,13 +64,9 @@ export function GeneralScenarioWorkspace({p,busy,submit,directingSubmit,cinemaSu
   const creativePrep=getPrep('creative');
   const unsaved=briefDirty||(config.options.meaning&&meaningDirty)||(config.options.creative&&creativeDirty)||(config.options.cinema&&cinemaDirty);
   return <div className="space-y-5">
-    <GeneralScriptComparison p={p} busy={lock} focusVariantId={latest?.importedVariantId} onContinue={onContinue} onAction={async(operation,target,data)=>{await call('candidate',{operation,target,...data});}}/>
-    <div className="flex flex-wrap items-end gap-4">
-      <label className="flex-1 min-w-48 space-y-2"><span className="text-sm font-medium">Исходник для нового сценария</span><select className="w-full rounded border p-2 bg-background" disabled={lock} value={config.sourceVariantId} onChange={e=>update({...config,sourceVariantId:e.target.value})}>{variants.map(v=><option key={v.id} value={v.id}>{scriptVariantLabel(p,v)} · {new Date(v.created).toLocaleString('ru-RU')}</option>)}</select></label>
-      <label className="space-y-2"><span className="text-sm font-medium">Модель сценариста и драматурга</span><select className="block rounded border p-2 bg-background" disabled={lock} value={config.model} onChange={e=>update({...config,model:e.target.value})}>{MODELS.filter(m=>m.kind==='text'&&['openai','xai','minimax'].includes(m.provider)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-      <Button type="button" variant="ghost" disabled={lock} onClick={onAddSource}>Добавить исходный текст</Button>
-    </div>
-    <p className="text-sm text-muted-foreground">Выберите исходник и включите нужные опции. Переключатель запускает подготовку с ИИ; общий запуск создаёт новый сценарий с выбранными опциями. Просмотр двух текстов выше не меняет исходник.</p>
+    <GeneralScriptComparison p={p} busy={lock||!!active||unsaved} onContinue={onContinue} onRework={async()=>{await call('rework');}} onAction={async(operation,target,data)=>{await call('candidate',{operation,target,...data});}}/>
+    {!source&&<section className="editor-surface p-4 space-y-3" aria-label="Первый исходный текст"><label className="block">Исходный текст<Textarea rows={8} value={initialText} disabled={lock} onChange={e=>setInitialText(e.target.value)} placeholder="Опишите историю — этот текст станет исходным вариантом слева."/></label><Button type="button" disabled={lock||!initialText.trim()} onClick={()=>void call('initialText',{text:initialText}).catch(()=>{})}>Сохранить исходный вариант</Button></section>}
+    <p className="text-sm text-muted-foreground">Включите нужные опции. Переключатель запускает подготовку с ИИ; общий запуск создаёт альтернативу на основе текста слева.</p>
     <GeneralScenarioBrief p={p} busy={lock} submit={directingSubmit} onDirtyChange={setBriefDirty} renderCreative={children=>option('creative',<>{children}<CreativeSupplement key={config.sourceVariantId} value={creativePrep?.result} busy={lock||briefDirty} save={result=>saveResult('creative',result)} onDirtyChange={setCreativeDirty}/></>)}/>
     {option('meaning',<ScenarioMeaningDraft key={config.sourceVariantId} value={meanings} busy={lock||briefDirty||!source} save={rows=>saveResult('meaning',{meanings:rows})} onDirtyChange={setMeaningDirty}/>)}
     {option('cinema',<>
@@ -79,8 +77,8 @@ export function GeneralScenarioWorkspace({p,busy,submit,directingSubmit,cinemaSu
     <div className="editor-surface p-5 space-y-4">
       <p className="text-sm">В новый вариант войдут: {GENERAL_SCENARIO_SECTIONS.filter(s=>config.options[s]).map(s=>labels[s]).join(' · ')||'исходный сценарий и сохранённое творческое задание'}.</p>
       {unsaved&&<p role="status">Примените правки внутри изменённых разделов перед запуском.</p>}
-      <Button type="button" size="lg" className="w-full h-auto min-h-12 whitespace-normal" disabled={lock||active||!source||unsaved} onClick={()=>{void request('generate',{...config}).then(()=>setDirty(false)).catch(()=>{});}}>Сгенерировать новый сценарий</Button>
-      <p className="text-xs text-muted-foreground">Используются сохранённые API-подключения; запросы могут быть платными. Утверждённый сценарий сохраняется до вашего выбора.</p>
+      {(editing||!baseline?.item.approvedId&&variants.length<=1)?<Button type="button" size="lg" className="w-full h-auto min-h-12 whitespace-normal" disabled={lock||active||!source||unsaved} onClick={()=>{void request('generate',{...config}).then(()=>setDirty(false)).catch(()=>{});}}>Сгенерировать этап с ИИ</Button>:<p className="text-sm">Для нового прохода нажмите «Доработать» над настройками. Готовый вариант можно сразу утвердить в сравнении.</p>}
+      <p className="text-xs text-muted-foreground">Модель: {MODELS.find(m=>m.id===config.model)?.name??config.model} · выбор в «Параметрах фильма». Запросы могут быть платными. Все предыдущие версии сохраняются.</p>
       {latest&&<div role="status" className="space-y-2"><strong>{statuses[latest.status]}</strong>{latest.status==='ready'&&<p>Новый вариант появился в сравнении справа. Проверьте его и утвердите, если он подходит.</p>}{latest.error&&<p role="alert">{latest.error}</p>}{latest.reviewWarnings?.map((w,n)=><p key={n}>{w}</p>)}
         {latest.status==='error'&&<div className="flex flex-wrap gap-2"><Button type="button" disabled={lock} onClick={()=>{void retry(latest.id).catch(()=>{});}}>{retryUnknown(latest.id)?'Повторить · возможна повторная оплата':'Повторить неудавшийся шаг'}</Button>{GENERAL_SCENARIO_SECTIONS.filter(s=>latest.preparationIds[s]&&!latest.omittedSections.includes(s)&&p.generalScenario?.preparations.find(x=>x.id===latest.preparationIds[s])?.status==='error').map(section=><Button key={section} type="button" variant="outline" disabled={lock} onClick={()=>{void call('continueWithout',{runId:latest.id,sections:[section]}).catch(()=>{});}}>Продолжить без «{labels[section]}»</Button>)}</div>}
       </div>}
