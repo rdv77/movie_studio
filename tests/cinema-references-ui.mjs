@@ -9,18 +9,32 @@ globalThis.fetch=()=>{throw Error('Rendering cannot send research or paid reques
 try{
   const p=D.newProject('Космическая станция');p.limit=null;R.ensureDirecting(p);
   const script=p.items.find(i=>i.stage===0);D.addVariant(p,script.id,{text:'Вера обнаруживает неизвестный корабль у станции.'});D.approve(p,script.id);
-  const render=()=>renderToStaticMarkup(React.createElement(UI.CinemaReferencesPanel,{p,stage:0,busy:false,submit:()=>{throw Error('Rendering cannot mutate a project')}}));
+  const render=(props={})=>renderToStaticMarkup(React.createElement(UI.CinemaReferencesPanel,{p,stage:0,busy:false,submit:()=>{throw Error('Rendering cannot mutate a project')},...props}));
   let html=render();A.match(html,/Найти и предложить/);A.match(html,/Найти и применить в новом варианте/);A.match(html,/Новый вариант · утверждён/);
   const run=C.createCinemaReferenceRun(p,{scope:{kind:'script',variantId:script.approvedId},mode:'propose',model:'gpt-6-astra',question:'Первый контакт'});
   p.jobs.find(j=>j.id===run.jobId).status='done';
   const candidate={id:'arrival',title:'Отложенное раскрытие',film:{title:'Пример для теста',year:null,director:null,screenwriter:null},sourceScene:'Наблюдаемая деталь предшествует общему виду.',technique:'Дозированное раскрытие',effect:'Любопытство',adaptation:'На иллюминаторе меняется отражение; затем Вера видит корабль.',screenEvidence:['В отражении появляется силуэт.'],changes:['Изменить точку раскрытия.'],additionalShots:1,additionalLocations:[],limitations:[],sources:[{title:'Источник из поиска',url:'https://example.org/film',support:'Описание последовательности.',verification:'tool-source'}]};
   run.result={summary:'Предложен приём.',candidates:[candidate,{...candidate,id:'uncertain',title:'Неподтверждённая идея',sources:[{title:'Непроверенная страница',url:'javascript:alert(1)',support:'Нет доказательства.',verification:'unverified'}]}],limitations:[]};
-  html=render();A.match(html,/href="https:\/\/example.org\/film"/);A(!html.includes('href="javascript:'));A.match(html,/источник не подтверждён поиском/);A.match(html,/Режиссёр: не установлен/);A.match(html,/Наша адаптация/);A.match(html,/Дополнительные планы: 1/);
-  const unverified=html.slice(html.indexOf('Неподтверждённая идея')-130,html.indexOf('Неподтверждённая идея'));A.match(unverified,/disabled/,'Unverified references cannot be selected for application');
+  html=render();A.match(html,/href="https:\/\/example.org\/film"/);A(!html.includes('href="javascript:'));A.match(html,/источник не подтверждён поиском/);A.match(html,/Режиссёр: не установлен/);A.match(html,/Дополнительные планы: 1/);
+  A.match(html,/<input[^>]*aria-label="Использовать: Неподтверждённая идея"[^>]*disabled=""/,'Unverified references cannot be selected for application');
+  const proposal=html.slice(html.indexOf('aria-label="Предложение: Отложенное раскрытие"'),html.indexOf('aria-label="Предложение: Неподтверждённая идея"'));
+  A(proposal.indexOf(candidate.adaptation)<proposal.indexOf('<details>'),'Concrete adaptation must precede collapsed research details');
+  A(proposal.indexOf('<details>')<proposal.indexOf(candidate.film.title),'Film/source prose must be collapsed');
+  A.match(html,/Применить выбранные предложения/);
   run.mode='apply';run.result.draft={title:'Встреча через отражение',text:'Вера замечает отражение корабля в стекле.',candidateIds:['arrival'],changes:[]};
-  html=render();A.match(html,/Левый вариант/);A.match(html,/Правый вариант/);A.match(html,/Добавить как вариант сценария/);A.equal(script.approvedId,script.selectedId,'Preview does not change approvals');
-  p.directing.brief.genre='Хоррор';html=render();A.match(html,/Исходный материал изменился/);A.match(html,/<button[^>]*disabled=""[^>]*>Добавить как вариант сценария/);
+  const before=structuredClone(p);html=render();A(!html.includes('Левый вариант'));A(!html.includes('Правый вариант'));A(!html.includes('Добавить как вариант сценария'));A.match(html,/href="#general-script-comparison"/);
+  A(!/<details\b[^>]*\sopen(?:=|\s|>)/.test(html),'All explanations/config/history are collapsed');
+  A.equal(script.approvedId,script.selectedId,'Preview does not change approvals');A.deepEqual(p,before,'Rendering does not import or choose a candidate');
+  const later=render({stage:13});A.match(later,/Левый вариант/);A.match(later,/Правый вариант/);A.match(later,/Добавить как вариант сценария/,'Later workflow keeps its existing application controls');
+  const embedded=render({embedded:true,sourceVariantId:script.approvedId});A(!embedded.includes('aria-label="Кинореференсы: учиться у мастеров"'),'Unified section can embed contents without a second frame');A(!embedded.includes('Исходный вариант сценария'),'Unified source selector is not duplicated');
+  p.generalScenario={runs:[],preparations:[{id:'prepared',section:'cinema',status:'ready',result:{runId:run.id,candidateIds:['arrival']}}]};
+  A.match(render(),/<input[^>]*aria-label="Использовать: Отложенное раскрытие"[^>]*checked=""/,'Default prepared suggestions must look selected if generation will use them');
+  run.selectedCandidateIds=[];A(!/<input[^>]*aria-label="Использовать: Отложенное раскрытие"[^>]*checked=""/.test(render()),'Explicit uncheck-all must win over default preparation choices');delete run.selectedCandidateIds;delete p.generalScenario;
+  p.directing.brief.genre='Хоррор';html=render();A.match(html,/Исходный материал изменился/);A.match(render({stage:13}),/<button[^>]*disabled=""[^>]*>Добавить как вариант сценария/);
   p.limit='10000000000';html=render();A.match(html,/жёсткий лимит бюджета/);A.match(html,/<button[^>]*disabled=""[^>]*>Найти и предложить/);
+  const another=D.makeVariant(p,script,{kind:'text',text:'Другой сценарий о возвращении корабля.',title:'Возвращение'});script.variants.push(another);
+  html=render({sourceVariantId:another.id});A.match(html,/Пока нет предложений для выбранного сценария/);A(html.indexOf('История и исследования других материалов')<html.indexOf(candidate.title),'Research for another source is relegated to collapsed history');
+  p.jobs.find(j=>j.id===run.jobId).error='Временная ошибка исследования';p.jobs.find(j=>j.id===run.jobId).status='failed';html=render();A.match(html,/role="alert"[^>]*>Временная ошибка исследования/);
   A.deepEqual(run.scope,{kind:'script',variantId:script.approvedId});
-  console.log('PASS cinema UI: two modes, source labels, safe links, before/after, stale and budget guards, render has no requests/mutations');
+  console.log('PASS cinema UI: concrete proposals first; collapsed research details/config/history; one general comparison; preserved later-stage application; source/URL/budget/stale guards; no rendering requests or mutations');
 }finally{globalThis.fetch=fetchBefore;}

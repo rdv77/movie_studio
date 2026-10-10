@@ -136,7 +136,7 @@ export type Job = {
   saveFailures?: number;
   zenCreditsEstimate?: number;
   journalArchivedAt?: string;
-  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review' | 'prompt-optimization' | 'cinema-research';
+  purpose?: 'voice-test' | 'voice-design' | 'music' | 'music-ideas' | 'directing' | 'media-review' | 'prompt-optimization' | 'cinema-research' | 'general-scenario';
   voiceName?: string;
   speechType?: SpeechType;
   speaker?: string;
@@ -183,6 +183,7 @@ export type Job = {
   usage?: unknown;
 };
 export type Project = {
+  generalScenario?:import('./general-scenario-workflow').GeneralScenarioState;
   cinemaReferences?:CinemaReferenceState;
   characterBindings?:Record<string,string>;
   audioQc?:AudioQcReport[];
@@ -317,6 +318,7 @@ export function approvalCurrent(p: Project, item: Item): boolean {
   return !item.removedAt && !item.planArchive && !!variant && variantCurrent(p, item, variant);
 }
 export function participates(p: Project, i: Item): boolean {
+  if(i.stage===0&&p.generalScenario?.approvedItemId&&p.generalScenario.approvedItemId!==i.id)return false;
   return !i.removedAt && !i.planArchive && (i.stage !== 6 || (p.speechMode === 'plans' ? !!i.sourceShot : !i.sourceShot && (i.variants.some(v=>v.kind==='audio')||!silentFilm(p))));
 }
 export function silentFilm(p:Project) {
@@ -389,7 +391,7 @@ export function deleteVariant(p: Project, itemId: string, variantId: string) {
   const variant = item.variants.find(v => v.id === variantId);
   if (!variant) throw new Error('Вариант уже удалён или не найден. Обновите карточку.');
   const active = p.jobs.filter(j => ['queued','dispatching','pending','saving'].includes(j.status));
-  if (active.some(j => !['media-review','directing','voice-design','soundscape','cinema-research'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
+  if (active.some(j => !['media-review','directing','voice-design','soundscape','cinema-research','general-scenario'].includes(j.purpose??'')&&(j.itemId === item.id || (j.lipsync?.inputType === 'image' ? j.lipsync.imageVariantId : j.lipsync?.videoVariantId) === variantId || j.lipsync?.audioVariantId === variantId || j.sourceFrameVariantId===variantId || (variant.assetId&&j.endFrameAssetId===variant.assetId) ||
     (j.purpose !== 'voice-test' && (item.approvedId === variantId || [item.approvedKeyframes?.startId,item.approvedKeyframes?.middleId,item.approvedKeyframes?.endId].includes(variantId)) && precedesStage(item.stage,getItem(p,j.itemId).stage)))))
     throw new Error('Этот вариант используется текущей генерацией. Дождитесь её завершения или отмените неотправленные попытки.');
   p.removedVariants ??= [];

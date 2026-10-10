@@ -3,6 +3,7 @@ import {id,now,makeVariant,type Project,type Job} from './domain';
 import {versionSignature,recordCreativeVersion} from './creative-versions';
 import {sceneSchema,directingShotSchema,directorRunActive,type Scene,type DirectingShot} from './directing';
 import {unresolvedJobBlocks} from './job-wait';
+import {storyMeaningsApproved,variantStoryMeanings} from './story-meaning';
 
 export const CINEMA_RESEARCH_MODELS=[
   {id:'gpt-6-astra',name:'GPT-6 Astra · поиск в интернете',provider:'openai' as const},
@@ -33,7 +34,7 @@ const responseSchema=z.object({summary:z.string().max(3000),candidates:z.array(c
 export type CinemaReferenceCandidate=Omit<z.infer<typeof candidateSchema>,'sources'>&{sources:(z.infer<typeof sourceSchema>&{verification:'tool-source'|'unverified'})[]};
 export type CinemaReferenceResult={summary:string;candidates:CinemaReferenceCandidate[];draft?:z.infer<typeof draftSchema>;limitations:string[]};
 export type CinemaReferenceInput={sourceTitle:string;text:string;screenplayText:string;brief:unknown;filmTitle:string;format:string;durationMode:'free'|'strict';seconds:number;sourceItemId:string;sourceVariantId?:string;scene?:Scene;shot?:DirectingShot;neighbors?:unknown[];characters:unknown[];storyMeanings:unknown[]};
-export type CinemaReferenceRun={id:string;jobId:string;created:string;model:string;mode:'propose'|'apply';scope:CinemaReferenceScope;question:string;basis:string;input:CinemaReferenceInput;reusedFrom?:{runId:string;candidateIds:string[]};reusedCandidates?:CinemaReferenceCandidate[];sources?:{url:string;title?:string}[];searchPerformed?:boolean;result?:CinemaReferenceResult;importedVariantId?:string;appliedAt?:string;};
+export type CinemaReferenceRun={selectedCandidateIds?:string[];id:string;jobId:string;created:string;model:string;mode:'propose'|'apply';scope:CinemaReferenceScope;question:string;basis:string;input:CinemaReferenceInput;reusedFrom?:{runId:string;candidateIds:string[]};reusedCandidates?:CinemaReferenceCandidate[];sources?:{url:string;title?:string}[];searchPerformed?:boolean;result?:CinemaReferenceResult;importedVariantId?:string;appliedAt?:string;};
 export type CinemaReferenceState={runs:CinemaReferenceRun[];selections:{runId:string;candidateIds:string[];scope:CinemaReferenceScope;basis:string;created:string}[]};
 export type CinemaReferenceInstruction={id:string;technique:string;adaptation:string;intendedEffect:string;screenEvidence:string[];sceneId?:string;shotId?:string};
 export const cinemaResearchStartSchema=z.object({scope:cinemaReferenceScopeSchema,mode:z.enum(['propose','apply']),model:z.enum(['gpt-6-astra','grok-4.7']),question:z.string().trim().max(3000).default('')}).strict();
@@ -55,9 +56,10 @@ export function cinemaReferenceInput(p:Project,scope:CinemaReferenceScope):Cinem
   const scene=scope.kind==='script'?undefined:d.scenes.find(s=>s.id===scope.sceneId),shot=scope.kind==='shot'?scene?.shots.find(s=>s.id===scope.shotId):undefined;
   if(scope.kind!=='script'&&!scene||scope.kind==='shot'&&!shot)throw Error('Сцена или план этого проекта не найдены.');
   const sceneIndex=scene?d.scenes.indexOf(scene):-1,shotIndex=shot?scene!.shots.indexOf(shot):-1;
+  const canonical=p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive),sourceMeanings=canonical?.id===item.id&&item.approvedId===v.id&&storyMeaningsApproved(p)?d.storyMeanings:variantStoryMeanings(v);
   const neighbors=shot?scene!.shots.slice(Math.max(0,shotIndex-1),shotIndex+2).filter(s=>s.id!==shot.id).map(s=>({id:s.id,title:s.title,story:s.story,stateIn:s.stateIn,stateOut:s.stateOut})):scene?d.scenes.slice(Math.max(0,sceneIndex-1),sceneIndex+2).filter(s=>s.id!==scene.id).map(s=>({id:s.id,title:s.title,purpose:s.purpose,stateIn:s.stateIn,stateOut:s.stateOut})):undefined;
   // Full sources remain frozen for faithful adaptation; media and unrelated history never enter research.
-  return JSON.parse(JSON.stringify({sourceTitle:shot?.title??scene?.title??v.title,text:shot?cinemaTargetText(shot):scene?cinemaTargetText(scene):v.text,screenplayText:v.text,brief:d.brief,filmTitle:p.title,format:p.format,durationMode:d.durationMode??'free',seconds:d.brief.targetSeconds,sourceItemId:item.id,sourceVariantId:v.id,...(scene?{scene:sceneSchema.parse(scene)}:{}),...(shot?{shot:directingShotSchema.parse(shot)}:{}),...(neighbors?{neighbors}:{}),characters:p.items.filter(i=>i.stage===1&&!i.removedAt&&!i.planArchive).map(i=>{const a=i.variants.find(v=>v.id===i.approvedId),c=a?.character??i.character;return c?{id:i.id,name:c.name,appearance:c.appearance,description:c.description,locked:c.locked}:null;}).filter(Boolean),storyMeanings:d.storyMeanings??[]}));
+  return JSON.parse(JSON.stringify({sourceTitle:shot?.title??scene?.title??v.title,text:shot?cinemaTargetText(shot):scene?cinemaTargetText(scene):v.text,screenplayText:v.text,brief:d.brief,filmTitle:p.title,format:p.format,durationMode:d.durationMode??'free',seconds:d.brief.targetSeconds,sourceItemId:item.id,sourceVariantId:v.id,...(scene?{scene:sceneSchema.parse(scene)}:{}),...(shot?{shot:directingShotSchema.parse(shot)}:{}),...(neighbors?{neighbors}:{}),characters:p.items.filter(i=>i.stage===1&&!i.removedAt&&!i.planArchive).map(i=>{const a=i.variants.find(v=>v.id===i.approvedId),c=a?.character??i.character;return c?{id:i.id,name:c.name,appearance:c.appearance,description:c.description,locked:c.locked}:null;}).filter(Boolean),storyMeanings:scope.kind==='script'?sourceMeanings??[]:d.storyMeanings??[]}));
 }
 export function cinemaReferenceCurrent(p:Project,run:CinemaReferenceRun){try{return versionSignature(cinemaReferenceInput(p,run.scope))===run.basis;}catch{return false;}}
 export function cinemaReferenceRun(p:Project,runId:string){const run=p.cinemaReferences?.runs.find(r=>r.id===runId);if(!run)throw Error('Исследование этого проекта не найдено.');return run;}
@@ -110,9 +112,10 @@ export function parseCinemaReferenceResult(text:string,run:CinemaReferenceRun,so
 }
 export function selectCinemaReferences(p:Project,runId:string,ids:string[]){
   const run=cinemaReferenceRun(p,runId),s=state(p);
-  if(!ids.length){s.selections=s.selections.filter(x=>x.runId!==run.id);return;}
+  if(!ids.length){run.selectedCandidateIds=[];s.selections=s.selections.filter(x=>x.runId!==run.id);return;}
   if(!cinemaReferenceCurrent(p,run))throw Error('Исходный материал изменился. Повторно используйте найденный приём для текущей версии.');
   if(new Set(ids).size!==ids.length||ids.length>6||!ids.every(id=>run.result?.candidates.some(c=>c.id===id&&referenceCanUse(c))))throw Error('Выберите приёмы с источниками, полученными поиском.');
+  run.selectedCandidateIds=[...ids];
   s.selections=s.selections.filter(x=>versionSignature(x.scope)!==versionSignature(run.scope));
   if(ids.length)s.selections.push({runId,candidateIds:[...ids],scope:structuredClone(run.scope),basis:run.basis,created:now()});
 }

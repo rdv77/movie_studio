@@ -1,7 +1,7 @@
 import {build} from 'esbuild';
 import assert from 'node:assert/strict';
 import {mkdir,readFile} from 'node:fs/promises';
-import {createElement,Fragment} from 'react';
+import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 
 await mkdir('work/tests',{recursive:true});
@@ -9,6 +9,7 @@ await build({
   stdin:{resolveDir:process.cwd(),contents:`
     export {GeneralScriptComparison} from './app/general-script-comparison';
     export {GeneralScenarioBrief} from './app/general-scenario-brief';
+    export {GeneralScenarioWorkspace} from './app/general-scenario-workspace';
     export {DirectingEditor} from './app/directing-editor';
     export * as D from './lib/domain';
     export {ensureDirecting} from './lib/directing';
@@ -18,7 +19,7 @@ await build({
   external:['react','react-dom','@ffmpeg/ffmpeg'],
   banner:{js:`import {createRequire} from 'node:module';const require=createRequire(import.meta.url);`},
 });
-const {GeneralScriptComparison,GeneralScenarioBrief,DirectingEditor,D,ensureDirecting,recordCreativeVersion}=await import('../work/tests/general-scenario-layout.mjs');
+const {GeneralScriptComparison,GeneralScenarioBrief,GeneralScenarioWorkspace,DirectingEditor,D,ensureDirecting,recordCreativeVersion}=await import('../work/tests/general-scenario-layout.mjs');
 let writes=0,requests=0;
 const onAction=()=>{writes++;throw Error('Rendering must never save, choose, approve or generate');};
 const originalFetch=globalThis.fetch;
@@ -43,6 +44,7 @@ const fixture=()=>{
   return {p,item,original,revised};
 };
 const editorProps=(p,stage)=>({p,stage,busy:false,submit:onAction,open:onAction,generateScenario:onAction});
+const workspaceProps=p=>({p,busy:false,submit:onAction,directingSubmit:onAction,cinemaSubmit:onAction,onContinue:onAction,onAddSource:onAction});
 try{
   const {p}=fixture(),before=structuredClone(p);
   const brief=render(GeneralScenarioBrief,{p,busy:false,submit:onAction,generateScenario:onAction});
@@ -61,12 +63,21 @@ try{
   assert(!creative.includes('Режим хронометража'),'Runtime settings must stay in the technical block');
   assert.deepEqual(p,before);
 
-  const stage0=render(DirectingEditor,editorProps(p,0));
+  const stage0=render(GeneralScenarioWorkspace,workspaceProps(p));
   assert(stage0.includes('Настройки общего сценария'));
-  assert(stage0.includes('Что должен понять зритель · сохранено'));
-  assert(stage0.includes('Модель выделения смыслов'));
-  const meaningModel=stage0.match(/<select[^>]*aria-label="Модель выделения смыслов"[^>]*>([\s\S]*?)<\/select>/)?.[1];
-  assert.match(meaningModel??'',/<option value="gpt-6-astra" selected="">/,'Meaning extraction defaults to GPT-6 Astra');
+  assert(stage0.includes('Что должен понять зритель'));
+  assert(stage0.includes('Карта используется при разработке сцен и планов'));
+  assert(stage0.includes('Модель сценариста и драматурга'));
+  assert.match(stage0,/<option value="gpt-6-astra" selected="">/,'Script preparation defaults to GPT-6 Astra');
+  assert.equal((stage0.match(/role="switch"/g)||[]).length,3,'Creative, meaning and cinema preparation are optional; technical parameters stay manual');
+  assert.equal((stage0.match(/aria-expanded="false"/g)||[]).length,3,'Optional sections begin collapsed');
+  assert.equal((stage0.match(/aria-label="Сравнение общего сценария"/g)||[]).length,1,'There is one comparison workspace');
+  assert.equal((stage0.match(/<section[^>]*aria-label="Что должен понять зритель"/g)||[]).length,1,'Meaning editor has one frame');
+  const comparisonAt=stage0.indexOf('id="general-script-comparison"'),techAt=stage0.indexOf('aria-label="Технические параметры фильма"'),creativeAt=stage0.indexOf('aria-label="Жанр, режиссёрский подход и выразительность"'),meaningAt=stage0.indexOf('aria-label="Что должен понять зритель"'),cinemaAt=stage0.indexOf('aria-label="Кинореференсы: учиться у мастеров"');
+  assert(comparisonAt>=0&&comparisonAt<techAt&&techAt<creativeAt&&creativeAt<meaningAt&&meaningAt<cinemaAt,'Comparison is followed by technical, creative, meaning and cinema controls');
+  assert.equal((stage0.match(/>Сгенерировать новый сценарий<\/button>/g)||[]).length,1,'One main generation action');
+  assert(stage0.includes('Исходник для нового сценария'),'Generation source is independent of compared panes');
+  assert(!stage0.includes('Карточки вариантов'),'Legacy variant cards are removed from screenplay workspace');
   for(const text of ['Сравнить версии сцен в двух окнах','Сохранённые версии задания и сцен','История структуры до правки','Проверка редактора','Маркер замечания редактора','Распределено по планам','Маркер ошибки оператора','Модель режиссёрской группы'])assert(!stage0.includes(text),`Stage 0 leaked later-stage UI: ${text}`);
   assert(!/<details\b[^>]*\sopen(?:=|\s|>)/.test(stage0),'Brief and meaning blocks start collapsed');
   assert.deepEqual(p,before,'Rendering stage 0 keeps all stored settings, history and approvals');
@@ -86,13 +97,15 @@ try{
   assert(comparison.includes('Анна замечает старую дату.\n\nАнна берёт ключ от дома.'),'Full alternative text is the default view');
   assert.equal((comparison.match(/overflow-y-auto/g)||[]).length,2,'Each text has its own bounded scrolling region');
   for(const text of ['✓ Выбран для проекта','✓ Утверждён','Источник','Уточнена причинность','Модель','GPT-6 Astra','Создано'])assert(comparison.includes(text),text);
-  const combined=renderToStaticMarkup(createElement(Fragment,null,createElement(GeneralScriptComparison,comparisonProps),createElement(DirectingEditor,editorProps(p,0))));
-  assert(combined.indexOf('general-script-comparison')<combined.indexOf('Настройки общего сценария'));
+  assert(stage0.indexOf('general-script-comparison')<stage0.indexOf('Настройки общего сценария'));
   assert.deepEqual(p,before);
 
   const blank=D.newProject('Пустой фильм'),blankBefore=structuredClone(blank);
   assert(render(GeneralScriptComparison,{...comparisonProps,p:blank}).includes('Пока нет версий для сравнения'));
-  assert(render(DirectingEditor,editorProps(blank,0)).includes('Что должен понять зритель · не используется'));
+  const blankWorkspace=render(GeneralScenarioWorkspace,workspaceProps(blank));
+  assert(blankWorkspace.includes('Добавить исходный текст'));
+  assert(blankWorkspace.includes('Не используется'));
+  assert.match(blankWorkspace,/<button[^>]*disabled=""[^>]*>Сгенерировать новый сценарий<\/button>/,'Empty project cannot launch a request before source text');
   assert.deepEqual(blank,blankBefore,'Opening an old project cannot create a directing state');
   const only=structuredClone(p);only.items.find(i=>i.stage===0).variants.splice(1);
   assert(render(GeneralScriptComparison,{...comparisonProps,p:only}).includes('Пока сохранён один вариант'));
@@ -101,7 +114,7 @@ try{
   multiple.items.push({...structuredClone(sourceItem),id:'removed-card',removedAt:'2026-10-09',variants:[{...sourceItem.variants[0],title:'Удалённый вариант'}]});
   multiple.items.push({...structuredClone(sourceItem),id:'archive-card',planArchive:{reason:'removed'},variants:[{...sourceItem.variants[0],title:'Архивный вариант'}]});
   sourceItem.variants.push({...sourceItem.variants[0],id:'image',kind:'image',title:'Изображение вместо сценария'});
-  const multipleBefore=structuredClone(multiple),all=render(GeneralScriptComparison,{...comparisonProps,p:multiple});
+  const multipleBefore=structuredClone(multiple),all=render(GeneralScriptComparison,{...comparisonProps,p:multiple,focusVariantId:JSON.stringify(['alternate-card',sourceItem.variants[0].id])});
   assert.equal((all.match(/<option /g)||[]).length,6,'Both selectors must include text variants from every active general-script card');
   assert(all.includes('Другая карточка сценария')&&all.includes('Полный текст из другой карточки.'));
   assert.equal((all.match(/✓ Выбран для проекта/g)||[]).length,2,'Each card keeps its real selection even if legacy variant IDs repeat');
@@ -114,12 +127,11 @@ try{
 
   // Studio is large and owns live queries: check its real render order and routing without mounting providers.
   const studio=await readFile('app/studio.tsx','utf8');
-  const comparisonAt=studio.indexOf('{step===0&&<GeneralScriptComparison');
-  const directingAt=studio.indexOf('{[0,12,4].includes(step)&&<DirectingEditor');
-  const referencesAt=studio.indexOf('{step===0&&<CinemaReferencesPanel');
-  assert(comparisonAt>=0&&comparisonAt<directingAt&&directingAt<referencesAt,'Stage 0 begins with comparison, then optional brief/meanings, then cinema references');
+  assert(studio.includes('{step===0&&<GeneralScenarioWorkspace'),'Studio uses the unified screenplay workspace');
+  assert(studio.includes('{[12,4].includes(step)&&<DirectingEditor'),'Later scene and shot editors remain separate');
+  assert(!studio.includes('{step===0&&<CinemaReferencesPanel'),'No second screenplay cinema panel');
   assert.match(studio,/\{\[1,4\]\.includes\(step\)&&<TabsContent value="compare"/,'The old compare tab remains for other stages only');
-  assert.match(studio,/<ScenarioVariantArchive enabled=\{step===0\}/,'Original cards remain available in their stage-0 archive');
+  assert.match(studio,/const showCards\s*=.*(?:step\s*!==\s*0|!\[[^\]]*0)/,'Legacy cards are excluded from stage 0');
   assert.equal(writes,0);assert.equal(requests,0);
-  console.log('PASS general scenario layout: top comparison; separate collapsed technical/creative brief; GPT-6 meanings; hidden stage-0 shot/history/editor UI; retained scene/plan tools; no rendering writes or remote requests');
+  console.log('PASS general scenario layout: sole top comparison, three collapsed AI options, independent source, one generation button, no stage-0 legacy/history/editor UI, later scene tools retained, zero render writes');
 }finally{globalThis.fetch=originalFetch;}

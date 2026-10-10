@@ -1,0 +1,63 @@
+import {build} from 'esbuild';
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+
+await mkdir('work/tests',{recursive:true});
+await build({stdin:{resolveDir:process.cwd(),contents:`
+  export {GeneralScriptComparison,generalScriptEntries} from './app/general-script-comparison';
+  export * as D from './lib/domain';
+  export {ensureDirecting} from './lib/directing';
+  export {createScriptWorkflowRun,applyScriptWorkflowResult,importScriptWorkflowCandidate} from './lib/script-workflow';
+`},bundle:true,platform:'node',format:'esm',outfile:'work/tests/general-script-comparison.mjs',external:['react','react-dom'],banner:{js:`import {createRequire} from 'node:module';const require=createRequire(import.meta.url);`}});
+const {GeneralScriptComparison,generalScriptEntries,D,ensureDirecting,createScriptWorkflowRun,applyScriptWorkflowResult,importScriptWorkflowCandidate}=await import('../work/tests/general-script-comparison.mjs');
+const p=D.newProject('Жребий'),item=p.items.find(i=>i.stage===0),original=D.addVariant(p,item.id,{kind:'text',title:'Авторский вариант',text:'Царевич пускает стрелу над городом.',created:'2026-10-10T08:00:00Z'});
+D.approve(p,item.id);ensureDirecting(p);
+const run=createScriptWorkflowRun(p,'gpt-6-astra',['script-critic','script-dramaturg','script-control'],original.id);
+applyScriptWorkflowResult(p,run,run.tasks[0],{title:'Заключение',findings:[]});
+applyScriptWorkflowResult(p,run,run.tasks[1],{title:'Слишком сильный выстрел',text:'Царевич натягивает лук. Стрела перелетает весь город.',changes:['Показан весь город'],findings:[]});
+applyScriptWorkflowResult(p,run,run.tasks[2],{title:'Контроль',findings:[]});
+p.cinemaReferences={runs:[{id:'cinema-1',jobId:'job-cinema-1',created:'2026-10-10T08:30:00Z',model:'gpt-6-astra',mode:'apply',scope:{kind:'script',variantId:original.id},question:'',basis:'fixture',input:{sourceTitle:original.title,sourceItemId:item.id,sourceVariantId:original.id},result:{summary:'Зритель раньше героя замечает промах',candidates:[],limitations:[],draft:{title:'Мимо города',text:'Город остаётся позади. Стрела исчезает в лесу.',candidateIds:[],changes:['Добавлена реакция героя']}}}],selections:[]};
+const initial=structuredClone(p),entries=generalScriptEntries(p);
+assert.equal(entries.length,3,'Original, one writer candidate, and one cinema draft; reviewers do not produce extra duplicate scripts');
+assert(entries.find(entry=>entry.target.kind==='specialist').version.label.includes('Критик сценария → Драматург'));
+assert(entries.find(entry=>entry.target.kind==='cinema').version.text.includes('Город остаётся позади'));
+assert.deepEqual(p,initial,'Listing candidates never imports or selects them');
+let writes=0,requests=0;
+const originalFetch=globalThis.fetch;globalThis.fetch=()=>{requests++;throw Error('Rendering requested a paid/backend action');};
+const callback=()=>{writes++;throw Error('Rendering changed the film');};
+try{
+  const html=renderToStaticMarkup(createElement(GeneralScriptComparison,{p,busy:false,onAction:callback,onContinue:callback}));
+  assert.match(html,/id="general-script-comparison"/);
+  assert.equal((html.match(/<select /g)||[]).length,2);
+  assert.equal((html.match(/<option /g)||[]).length,6,'All versions in both selectors');
+  assert(html.includes('Утвердить этот вариант'));
+  for(const action of ['Правки → новая версия','Переименовать','Происхождение и промпт','Удалить вариант','К доработке сценария'])assert(html.includes(action),action);
+  assert.equal((html.match(/overflow-y-auto/g)||[]).length,2);
+  assert(!html.includes('Нет абзаца'),'Full-text mode avoids empty comparison cards');
+  assert.deepEqual(p,initial);assert.equal(writes,0);assert.equal(requests,0);
+}finally{globalThis.fetch=originalFetch;}
+const imported=importScriptWorkflowCandidate(p,run.id,run.tasks[1].id);
+assert.equal(generalScriptEntries(p).length,3,'Import materializes candidate without a second option');
+D.deleteVariant(p,item.id,imported.id);
+assert.equal(generalScriptEntries(p).length,2,'Deleted imported result cannot reappear as a virtual candidate');
+assert(renderToStaticMarkup(createElement(GeneralScriptComparison,{p,busy:false,onAction:callback})).includes('Удалённые сценарии · 1'));
+D.restoreVariant(p,item.id,imported.id);
+assert.equal(generalScriptEntries(p).length,3);
+assert.equal(item.approvedId,original.id,'Browsing, importing, deleting an alternative and restoring leave original approval intact');
+// Legacy metadata deduplication still works when the old run receipt omitted importedVariantId.
+const legacyCinema=D.makeVariant(p,item,{kind:'text',title:'Сохранённый киновед',text:'Город остался позади.',versionInfo:{created:'2026-10-10T09:00:00Z',sources:[],settings:{cinemaReferenceRunId:'cinema-1'}}});
+item.variants.push(legacyCinema);
+assert.equal(generalScriptEntries(p).filter(entry=>entry.target.kind==='cinema').length,0);
+assert.equal(generalScriptEntries(p).length,3);
+D.deleteVariant(p,item.id,legacyCinema.id);
+assert.equal(generalScriptEntries(p).filter(entry=>entry.target.kind==='cinema').length,0);
+assert.equal(writes,0);assert.equal(requests,0);
+const reviewed=D.makeVariant(p,item,{kind:'text',title:'Сценарий с замечанием',text:'Стрела исчезает без реакции героя.',versionInfo:{created:'2026-10-10T11:00:00Z',sources:[],settings:{review:{title:'Контроль',text:'Стрела исчезает без реакции героя.',changes:[],findings:[{severity:'conflict',evidence:'Не видно, что стрела миновала город.',proposal:'Показать город позади стрелы и тревогу царевича.',requiresDirectorChoice:true}]}}}});
+item.variants.push(reviewed);
+const reviewedHtml=renderToStaticMarkup(createElement(GeneralScriptComparison,{p,busy:false,onAction:callback,focusVariantId:reviewed.id}));
+assert(reviewedHtml.includes('Контроль сценария: конфликтов — 1'),'Conflict count is visible beside candidate before approval');
+assert(reviewedHtml.includes('Не видно, что стрела миновала город.')&&reviewedHtml.includes('Показать город позади стрелы и тревогу царевича.'));
+assert.equal(writes,0,'Control comments never autoapply changes');
+console.log('PASS general script comparison: writer/cinema candidates, reviewer deduplication, direct actions, no render writes, deleted candidates stay deleted, approval preserved');

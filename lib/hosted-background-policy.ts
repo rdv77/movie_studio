@@ -21,7 +21,7 @@ export function hostedQueuedDispatchEligible(job:Job):boolean{
   }
   // These runners await the complete response, even if their selected model's
   // ordinary media adapter supports an asynchronous queue.
-  if(job.purpose==='directing'||job.purpose==='voice-design'||job.soundInput||
+  if(job.purpose==='directing'||job.purpose==='general-scenario'||job.purpose==='voice-design'||job.soundInput||
     job.purpose==='music'||job.purpose==='music-ideas'||job.purpose==='media-review'||job.purpose==='cinema-research')return false;
   if(job.lipsync)return job.kind==='video'&&['sync-3','lipsync-2','lipsync-2-pro'].includes(job.model);
   if(job.model===FAL_QWEN)return job.kind==='image';

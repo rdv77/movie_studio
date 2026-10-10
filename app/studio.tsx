@@ -39,7 +39,7 @@ import { directorRunActive } from '@/lib/directing';
 import { DirectingEditor } from './directing-editor';
 import { ScriptDevelopmentEditor } from './script-development-editor';
 import { CinemaReferencesPanel } from './cinema-references-panel';
-import { GeneralScriptComparison } from './general-script-comparison';
+import { GeneralScenarioWorkspace } from './general-scenario-workspace';
 import {scriptVariantLabel} from '@/lib/script-labels';
 import {promptFor} from '@/lib/domain';
 import {scenarioGenerationInstruction,scenarioVariantInstruction} from '@/lib/scenario-generation';
@@ -248,9 +248,6 @@ function Field({
     </label>
   );
 }
-function ScenarioVariantArchive({enabled,count,children}:{enabled:boolean;count:number;children:React.ReactNode}) {
-  return enabled?<details className="editor-surface p-4"><summary className="cursor-pointer font-semibold">Карточки вариантов · {count} · правки и удаление</summary><p className="muted small">Для сравнения и выбора используйте два окна вверху. Здесь сохранены действия над отдельными вариантами.</p>{children}</details>:<>{children}</>;
-}
 
 function Media({ v }: { v: Variant }) {
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -353,6 +350,7 @@ function Workspace() {
     queryKey: ['project', projectId],
     queryFn: () => request('/api/projects/' + projectId),
     enabled: !!projectId,
+    refetchInterval: query => query.state.data?.generalScenario?.runs.some(r=>['preparing','generating','reviewing'].includes(r.status))||query.state.data?.generalScenario?.preparations.some(x=>['queued','running'].includes(x.status))?10000:false,
   });
   const p = pq.data;
   const aq = useQuery<Asset[]>({
@@ -374,7 +372,7 @@ function Workspace() {
   const balance = p ? totals(p) : { actual: '0', reserved: '0', unknown: 0 };
   const ready = p ? workflowReady(p, step) : false;
   const blockers = p && !ready ? approvalBlockers(p, step===10?5:step===9?6:step) : [];
-  const showCards=step!==14&&step!==13&&step!==12&&step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
+  const showCards=step!==0&&step!==14&&step!==13&&step!==12&&step!==9&&step!==10&&step!==11&&(step!==6||voiceView==='plans');
   const selectedApproved = !!(p && item && selected && item.approvedId === selected.id && isApproved(p, item));
   const staleScript=!!(p&&item&&step===4&&selected&&!variantCurrent(p,item,selected));
   const scriptReason=p&&item&&selected&&staleScript?scriptReapprovalReason(p,item.id,selected.id):'';
@@ -470,10 +468,12 @@ function Workspace() {
     const attempts=jobAttempts.current.get(projectId)??new Map<string,number>();
     jobFlights.current.set(projectId,flights);jobAttempts.current.set(projectId,attempts);
     const checkingWait=new Set<string>();
-    let directorFlights=0;
+    let directorFlights=0,generalScenarioFlights=0,lastGeneralRecovery=0;
     const timer = setInterval(() => {
       const current = qc.getQueryData<Project>(['project', projectId]);
       if(!current)return;
+      const recoverGeneral=Date.now()-lastGeneralRecovery>=30000&&current.jobs.some(j=>j.purpose==='general-scenario'&&j.status==='unknown'&&!j.newSeriesAllowedAt);
+      if(generalScenarioFlights<1&&(recoverGeneral||current.generalScenario?.runs.some(r=>['preparing','generating','reviewing'].includes(r.status))||current.generalScenario?.preparations.some(x=>['queued','running'].includes(x.status)))){generalScenarioFlights++;if(recoverGeneral)lastGeneralRecovery=Date.now();void request(`/api/projects/${projectId}/general-scenario`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);void qc.invalidateQueries({queryKey:['project',projectId]},{cancelRefetch:false});}).finally(()=>{generalScenarioFlights--;});}
       if(directorFlights<2&&current.directing?.runs.some(directorRunActive)){directorFlights++;void request(`/api/projects/${projectId}/directing`,'POST',{action:'advance'}).then(next=>qc.setQueryData<Project>(['project',projectId],previous=>newestProject(previous,next))).catch(e=>{if(activeProject.current===projectId)setError(e.message);void qc.invalidateQueries({queryKey:['project',projectId]},{cancelRefetch:false});}).finally(()=>{directorFlights--;});}
       for(const job of current.jobs.filter(j=>flights.has(j.id)&&!checkingWait.has(j.id)&&Date.now()-(attempts.get(j.id)??Date.now())>=waitLimitMs(j))) {
         checkingWait.add(job.id);
@@ -875,12 +875,16 @@ function Workspace() {
               </div>
               {[6,11].includes(step)&&<VoiceStudioShell p={p} busy={busy} soundStage={step===11} onOpenCatalog={()=>{setStep(6);setVoiceView('casting');setItemId('');}} connections={cq.data} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/voice-design`,'POST',{revision:p.revision,action:a,data}));}}/>}
               {step===11&&<SoundscapeEditor p={p} busy={busy} upload={async f=>(await upload(f)).id} submit={async(a,data)=>{replace(await request(`/api/projects/${p.id}/soundscape`,'POST',{revision:p.revision,action:a,data}));}}/>}
-              {step===0&&<GeneralScriptComparison key={p.id+':general-comparison'} p={p} busy={busy} onChoose={async(itemId,variantId)=>{let ok=false;await perform(async()=>{await action('select',{variantId},itemId);setItemId(itemId);ok=true;});if(!ok)throw Error('Не удалось сохранить выбор сценария.');}}/>}
+              {step===0&&<GeneralScenarioWorkspace key={p.id+':general-scenario'} p={p} busy={busy}
+                onAddSource={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setEditing(undefined);setDialog('variant');}}
+                onContinue={()=>{setStep(13);setItemId('');}}
+                submit={async(a,data)=>{const epoch=projectEpoch.current,current=qc.getQueryData<Project>(['project',p.id])??p;const next=await request(`/api/projects/${p.id}/general-scenario`,'POST',{action:a,data,revision:current.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');replace(next);return next;}}
+                directingSubmit={async(a,data)=>{const epoch=projectEpoch.current,current=qc.getQueryData<Project>(['project',p.id])??p;const next=await request(`/api/projects/${p.id}/directing`,'POST',{action:a,data,revision:current.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');replace(next);}}
+                cinemaSubmit={async(a,data)=>{const epoch=projectEpoch.current,current=qc.getQueryData<Project>(['project',p.id])??p;const next=await request(`/api/projects/${p.id}/cinema-references`,'POST',{action:a,data,revision:current.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения.');replace(next);}}/>}
               {[13,12,4].includes(step)&&<CinemaReferencesPanel key={p.id+':cinema:'+step} p={p} stage={step} busy={busy} submit={async(action,data)=>{replace(await request('/api/projects/'+p.id+'/cinema-references','POST',{action,data,revision:p.revision}));}}/>}
               {step===13&&<ScriptDevelopmentEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===14&&<ShotPlanningEditor key={p.id} p={p} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{let ok=false;await perform(async()=>{replace(await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision}));ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
-              {[0,12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} generateScenario={()=>{setItemId(p.items.find(i=>i.stage===0&&!i.removedAt&&!i.planArchive)?.id??'');setDialog('generate');}} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{const epoch=projectEpoch.current;let ok=false;await perform(async()=>{const next=await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения. Откройте нужный фильм перед продолжением.');replace(next);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
-              {step===0&&<CinemaReferencesPanel key={p.id+':cinema:'+step} p={p} stage={step} busy={busy} submit={async(action,data)=>{replace(await request('/api/projects/'+p.id+'/cinema-references','POST',{action,data,revision:p.revision}));}}/>}
+              {[12,4].includes(step)&&<DirectingEditor key={p.id+':'+step} p={p} stage={step} busy={busy} open={stage=>{setStep(stage);setItemId('');}} submit={async(a,data)=>{const epoch=projectEpoch.current;let ok=false;await perform(async()=>{const next=await request('/api/projects/'+p.id+'/directing','POST',{action:a,data,revision:p.revision});if(epoch!==projectEpoch.current)throw Error('Проект сменился во время сохранения. Откройте нужный фильм перед продолжением.');replace(next);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
               {step===3&&<LocationLibraryEditor key={p.id} p={p} busy={busy} connections={cq.data} onPrepare={()=>worldAction('prepareLocations',{})} onGenerate={async data=>{const epoch=projectEpoch.current;let next:Project|undefined;await perform(async()=>{next=await request('/api/projects/'+p.id+'/generate-locations','POST',data);if(epoch!==projectEpoch.current){next=undefined;throw Error('Проект сменился во время запуска.');}replace(next!);});if(!next)throw Error('Серия не сохранена. Проверьте сообщение об ошибке.');return next;}} onSaveScene={(sceneId,data)=>worldAction('saveSceneLocation',{sceneId,...data})} onSave={(itemId,profile)=>worldAction('saveLocation',{itemId,profile})} onRemove={itemId=>worldAction('removeLocation',{itemId})} onRestore={itemId=>worldAction('restoreLocation',{itemId})} onUpload={async file=>(await upload(file)).id}/>}
               {step===5&&<StoryboardProgress key={p.id} p={p} busy={busy} createStarts={()=>setDialog('storyboard-batch')} open={id=>{setItemId(id);revealStoryboard();}} createEnds={()=>{setKeyframeBatchRequest(previous=>({projectId:p.id,serial:(previous?.serial??0)+1}));revealStoryboard('storyboard-keyframe-batch');}}/>}
               {[5,6,7,8,9].includes(step)&&<ReviewCenter key={p.id+':'+step} p={p} stage={step===5?5:undefined} scope={step===9?'animatic':'all'} busy={busy} open={(stage,id)=>{setStep(stage);setItemId(id);if(stage===5)revealStoryboard();}} submit={async(a,data)=>{let ok=false;await perform(async()=>{await action(a,data);ok=true;});if(!ok)throw Error('Действие не выполнено.');}}/>}
@@ -1219,7 +1223,7 @@ function Workspace() {
                             </footer>
                           </div>
                         ) : (
-                          <ScenarioVariantArchive enabled={step===0} count={visibleVariants(item).length}><div className="variant-grid">
+                          <div className="variant-grid">
                             {visibleVariants(item).map((v, index) => {
                               const {selected:variantSelected,approved,role}=variantChoice(p,item,v);
                               const stale = !variantCurrent(p, item, v);
@@ -1351,7 +1355,7 @@ function Workspace() {
                                 </article>
                               );
                             })}
-                          </div></ScenarioVariantArchive>
+                          </div>
                         )}
                         {!!p.removedVariants?.some(r=>r.itemId===item.id) && <details className="editor-surface p-4 mt-4">
                           <summary>Удалённые варианты · {p.removedVariants.filter(r=>r.itemId===item.id).length}</summary>
@@ -2244,7 +2248,7 @@ function GenerateDialog({
         </div>
         {kind==='text'&&item.stage===0&&<div className="note"><p><b>Творческое задание:</b> {p.directing?.brief.genre??'Сначала сохраните задание'} · {p.directing?.brief.director}</p><details><summary>Полный промпт творческой адаптации · первый вариант</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">{promptFor(p,item,scenarioVariantInstruction(prompt.trim(),1,count),source)}</pre></details></div>}
         {models.includes(GROK_IMAGE_MODEL) && <GrokImageQuality value={imageSettings} onChange={setImageSettings}/>}
-        {kind==='image'&&<ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))} initialEstimate={total} count={count*models.filter(id=>id!==imageRetry.fallbackModel).length} referenceCount={effectiveRefs.length}/>}
+        {kind==='image'&&<ImageRetrySettings value={imageRetry} onChange={setImageRetry} choices={MODELS.filter(m=>m.kind==='image'&&availableForDirecting(m.id)&&connections?.providers?.some((c:any)=>c.id===m.provider&&c.configured))} initialEstimate={total} count={count*models.filter(id=>id!==imageRetry.fallbackModel).length} referenceCount={effectiveRefs.length}/>} 
         {kind === 'text' && source?.text && (
           <Field
             label={item.stage === 0 ? 'Исходный текст для творческой адаптации' : 'Материал для доработки'}
