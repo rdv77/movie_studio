@@ -1,4 +1,5 @@
 import {allowMissingAdditionalFrames} from '@/lib/keyframe-batch';
+import {applyFilmSettings} from '@/lib/film-settings';
 import {audioQcReportSchema,assertAudioQcReportSource} from '../../../../lib/audio-qc';
 import {setCharacterBinding} from '@/lib/character-bindings';
 import {applyMontageProposal} from '../../../../lib/montage-review';
@@ -436,16 +437,7 @@ export const PATCH = api(async (req, ctx) => {
       break;
     }
     case 'settings': {
-      const s = z
-        .object({
-          title: z.string().trim().min(1).max(100),
-          format: z.enum(['16:9', '9:16']),
-          seconds: z.number().int().min(1),
-          limit: z.string().regex(/^\d+$/).nullable(),
-        })
-        .parse(d);
-      if (p.seconds !== s.seconds || p.format !== s.format) p.configVersion++;
-      Object.assign(p, s);
+      applyFilmSettings(p,d);
       break;
     }
     case 'reconcile': {

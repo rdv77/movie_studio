@@ -39,6 +39,6 @@ export function NewProjectPolicyFields({disabled=false}:{disabled?:boolean}){
     <StagingModeControl name="stagingMode" value={stagingMode} allowLegacy={false} disabled={disabled} onChange={setStagingMode}/>
     <CameraPolicyControl name="cameraPolicy" value={cameraPolicy} allowLegacy={false} disabled={disabled} onChange={setCameraPolicy}/>
     <FramePolicyControl name="framePolicy" value={framePolicy} allowLegacy={false} disabled={disabled} onChange={setFramePolicy}/>
-    <p className="text-sm text-muted-foreground">Настройки задаются для нового фильма. Их можно изменить позже в творческом задании или отдельно для плана.</p>
+    <p className="text-sm text-muted-foreground">Опорные изображения можно изменить позже в параметрах фильма, постановку и камеру — в творческом задании или отдельно для плана.</p>
   </div>;
 }

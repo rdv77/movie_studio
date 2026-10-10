@@ -44,7 +44,8 @@
     "test:container": "node tests/container-smoke.mjs",
     "test:zencreator": "node tests/zencreator.mjs",
     "test:cinema": "node tests/cinema-references.mjs && node tests/cinema-references-runner.mjs && node tests/cinema-reference-integration.mjs && node tests/cinema-references-ui.mjs && node tests/character-image-prompt.mjs",
-    "test:general-scenario": "node tests/general-scenario-workflow.mjs && node tests/general-scenario-runner.mjs && node tests/general-script-comparison.mjs && node tests/general-scenario-layout.mjs"
+    "test:general-scenario": "node tests/general-scenario-workflow.mjs && node tests/general-scenario-runner.mjs && node tests/general-script-comparison.mjs && node tests/general-scenario-layout.mjs",
+    "test:film-settings": "node tests/film-settings.mjs && node tests/runtime-policy.mjs && node tests/general-scenario-layout.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

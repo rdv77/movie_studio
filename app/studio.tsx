@@ -40,6 +40,7 @@ import { DirectingEditor } from './directing-editor';
 import { ScriptDevelopmentEditor } from './script-development-editor';
 import { CinemaReferencesPanel } from './cinema-references-panel';
 import { GeneralScenarioWorkspace } from './general-scenario-workspace';
+import {FilmSettingsFields} from './film-settings-fields';
 import {scriptVariantLabel} from '@/lib/script-labels';
 import {promptFor} from '@/lib/domain';
 import {scenarioGenerationInstruction,scenarioVariantInstruction} from '@/lib/scenario-generation';
@@ -752,13 +753,14 @@ function Workspace() {
           </div>
           <div className="row">
             <span className="format-chip">
-              Анимация · {p?.seconds ?? 50} сек · {p?.format ?? '16:9'}
+              Анимация · {p?.directing?.durationMode==='strict'?'до':'≈'} {p?.directing?.brief.targetSeconds ?? p?.seconds ?? 50} сек · {p?.format ?? '16:9'}
             </span>
             {p && (
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label="Настройки фильма"
+                title="Параметры фильма"
                 onClick={() => setDialog('settings')}
               >
                 <Settings2 size={17} />
@@ -3358,16 +3360,16 @@ function Budget({ p, action, perform, replace }: any) {
 function SettingsDialog({ open, close, p, busy, perform, save }: any) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Параметры фильма</DialogTitle>
           <DialogDescription>
-            Изменение хронометража или формата потребует повторного утверждения
-            материалов.
+            Технические параметры для всех этапов фильма. Изменения применяются кнопкой «Сохранить».
           </DialogDescription>
         </DialogHeader>
         <form
-          key={p.revision + String(open)}
+          key={p.id + String(open)}
+          className="space-y-5"
           onSubmit={(e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
@@ -3375,6 +3377,9 @@ function SettingsDialog({ open, close, p, busy, perform, save }: any) {
               await save({
                 title: f.get('title'),
                 seconds: Number(f.get('seconds')),
+                durationMode: f.get('durationMode'),
+                productionOrder: f.get('productionOrder'),
+                framePolicy: f.get('framePolicy'),
                 format: f.get('format'),
                 limit: f.get('limit') ? ticks(String(f.get('limit'))) : null,
               });
@@ -3382,46 +3387,7 @@ function SettingsDialog({ open, close, p, busy, perform, save }: any) {
             });
           }}
         >
-          <Field label="Название">
-            <Input
-              name="title"
-              defaultValue={p.title}
-              required
-              maxLength={100}
-            />
-          </Field>
-          <Field label="Целевой хронометраж, секунд" hint="Ориентир для сценария. Сборка использует фактическую длительность кадров и реплик.">
-            <Input
-              type="number"
-              name="seconds"
-              min="1"
-              defaultValue={p.seconds}
-              required
-            />
-          </Field>
-          <Field label="Формат">
-            <Select name="format" defaultValue={p.format}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="16:9">16:9 · горизонтальный</SelectItem>
-                <SelectItem value="9:16">9:16 · вертикальный</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field
-            label="Лимит расходов, USD"
-            hint="Пустое поле — без ограничения. При лимите серия с неизвестной оценкой не отправляется."
-          >
-            <Input
-              name="limit"
-              defaultValue={
-                p.limit === null ? '' : String(Number(p.limit) / 1e10)
-              }
-              inputMode="decimal"
-            />
-          </Field>
+          <FilmSettingsFields p={p} busy={busy}/>
           <DialogFooter>
             <Button
               type="button"

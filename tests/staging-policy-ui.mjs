@@ -24,8 +24,8 @@ A.deepEqual(UI.patchShotDirection(before,{stagingMode:undefined}),{requiresEndFr
 const project=D.newProject('Старый фильм'),directing=R.ensureDirecting(project);
 delete directing.brief.stagingMode;delete directing.brief.framePolicy;
 const projectBefore=structuredClone(project),briefHtml=html(E.DirectingEditor,{p:project,stage:0,busy:false,submit:onChange,open:onChange});
-A(briefHtml.includes('Способ постановки фильма'));A(briefHtml.includes('Опорные изображения'));
-A(briefHtml.includes('Утверждённые материалы и выбранные комплекты кадров сохраняются'));A.deepEqual(project,projectBefore);
+A(briefHtml.includes('Способ постановки фильма'));A(!briefHtml.includes('Опорные изображения'),'Technical frame policy moved to film settings');
+A.deepEqual(project,projectBefore);
 const app=await readFile('app/studio.tsx','utf8'),frames=await readFile('app/keyframe-editor.tsx','utf8');
 A.match(app,/request\('\/api\/projects',\s*'POST',\s*\{\s*title,\s*stagingMode,\s*framePolicy(?:,\s*cameraPolicy)?\s*\}\)/);
 A(frames.includes('Один кадр · действие по описанию'));A(!frames.includes('Один кадр · статичный план'));

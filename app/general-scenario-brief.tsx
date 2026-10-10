@@ -4,32 +4,29 @@ import {useEffect,useRef,useState} from 'react';
 import type {Project} from '@/lib/domain';
 import {DEFAULT_BRIEF,DIRECTOR_PRESETS,directorRunActive} from '@/lib/directing';
 import {GENRE_OPTIONS,renderCreativeInstructions} from '@/lib/creative-brief';
-import {runtimeMode} from '@/lib/runtime-policy';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {CreativeStrengthControls} from './creative-controls';
 import {FacialExpressionControl} from './facial-expression-control';
 import {CameraPolicyControl} from './camera-policy-control';
-import {StagingModeControl,FramePolicyControl} from './staging-policy-controls';
+import {StagingModeControl} from './staging-policy-controls';
 
 type Props={p:Project;busy:boolean;submit:(action:string,data?:unknown)=>Promise<void>;generateScenario?:()=>void;renderCreative?:(children:React.ReactNode)=>React.ReactNode;onDirtyChange?:(dirty:boolean)=>void};
 const F=({label,children}:{label:string;children:React.ReactNode})=><label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}</label>;
 
-/** One shared draft keeps existing brief fields intact when either section is saved. */
+/** Technical settings are owned by the film settings dialog. */
 export function GeneralScenarioBrief({p,busy,submit,generateScenario,renderCreative,onDirtyChange}:Props){
   const d=p.directing;
   const [brief,setBriefState]=useState(d?.brief??{...DEFAULT_BRIEF,targetSeconds:Math.max(10,p.seconds)});
-  const [order,setOrderState]=useState(p.productionOrder??'voice-first');
   const [dirty,setDirty]=useState(false),[working,setWorking]=useState(false),[error,setError]=useState('');
   const draftVersion=useRef(0);
   useEffect(()=>{onDirtyChange?.(dirty);},[dirty,onDirtyChange]);
   const savedBrief=JSON.stringify(d?.brief);
-  useEffect(()=>{if(!dirty&&d){setBriefState(d.brief);setOrderState(p.productionOrder??'voice-first');}},[savedBrief,p.productionOrder,dirty]);
+  useEffect(()=>{if(!dirty&&d)setBriefState(d.brief);},[savedBrief,dirty]);
   const change=(next:typeof brief)=>{draftVersion.current++;setDirty(true);setBriefState(next);};
-  const changeOrder=(next:typeof order)=>{draftVersion.current++;setDirty(true);setOrderState(next);};
   const locked=busy||working||!!d?.runs.some(directorRunActive);
-  const save=async()=>{const version=draftVersion.current;await submit('brief',{brief,productionOrder:order});if(version===draftVersion.current)setDirty(false);};
+  const save=async()=>{const version=draftVersion.current;await submit('brief',{brief:{...brief,targetSeconds:d?.brief.targetSeconds??Math.max(10,p.seconds),framePolicy:d?.brief.framePolicy}});if(version===draftVersion.current)setDirty(false);};
   const perform=async(action:()=>Promise<void>)=>{setWorking(true);setError('');try{await action();}catch(e){setError(e instanceof Error?e.message:'Не удалось сохранить настройки.');}finally{setWorking(false);}};
   const status=dirty?'есть правки':d?'сохранено':'настройки по умолчанию';
   const saveControls=<div className="space-y-2"><Button type="button" disabled={locked||!dirty&&!!d} onClick={()=>perform(save)}>Применить настройки</Button><p className="text-sm text-muted-foreground">Настройки используются для нового сценария. Сохранённые тексты не изменяются.</p></div>;
@@ -55,17 +52,6 @@ export function GeneralScenarioBrief({p,busy,submit,generateScenario,renderCreat
     </div>;
   return <div className="space-y-4 mb-5" aria-label="Настройки общего сценария">
     {dirty&&<p role="status">Есть несохранённые настройки. Нажмите «Применить настройки» перед генерацией.</p>}
-    <details className="editor-surface p-5 space-y-4" aria-label="Технические параметры фильма">
-      <summary className="cursor-pointer font-semibold">Творческое задание · технические параметры · {status}</summary>
-      <fieldset disabled={locked} className="grid gap-4 md:grid-cols-2 mt-4">
-        <F label="Режим хронометража"><select className="w-full rounded border p-2 bg-background" value={runtimeMode(p)} onChange={e=>{const mode=e.target.value;void perform(()=>submit('runtimePolicy',{mode}));}}><option value="free">Свободная длительность — ориентир без ограничения</option><option value="strict">Строгий хронометраж — не более ориентира</option></select><small>Режим применяется сразу. В свободном режиме ориентир не ограничивает длительность готового фильма.</small></F>
-        <F label="Ориентир длительности, сек"><Input type="number" min={10} max={3600} value={brief.targetSeconds} onChange={e=>change({...brief,targetSeconds:Number(e.target.value)})}/></F>
-        <F label="Порядок производства"><select className="w-full rounded border p-2 bg-background" value={order} onChange={e=>changeOrder(e.target.value as typeof order)}><option value="voice-first">Сначала голоса и аниматик, затем видео</option><option value="video-first">Сначала видео, затем голоса под его длительность</option></select></F>
-      </fieldset>
-      <FramePolicyControl value={brief.framePolicy} disabled={locked} onChange={framePolicy=>change({...brief,framePolicy})}/>
-      <p className="text-sm text-muted-foreground">Утверждённые материалы и выбранные комплекты кадров сохраняются. Новый режим применяется при следующей подготовке; зависимые материалы могут потребовать пересмотра.</p>
-      {saveControls}
-    </details>
     {renderCreative?renderCreative(creativeBody):<details className="editor-surface p-5 space-y-4" aria-label="Жанр и режиссёрский подход"><summary className="cursor-pointer font-semibold">Жанр, режиссёрский подход и выразительность · {status}</summary>{creativeBody}</details>}
     {error&&<p role="alert">{error}</p>}
   </div>;

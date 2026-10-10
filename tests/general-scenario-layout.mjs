@@ -9,6 +9,7 @@ await build({
   stdin:{resolveDir:process.cwd(),contents:`
     export {GeneralScriptComparison} from './app/general-script-comparison';
     export {GeneralScenarioBrief} from './app/general-scenario-brief';
+    export {FilmSettingsFields} from './app/film-settings-fields';
     export {GeneralScenarioWorkspace} from './app/general-scenario-workspace';
     export {DirectingEditor} from './app/directing-editor';
     export * as D from './lib/domain';
@@ -19,7 +20,7 @@ await build({
   external:['react','react-dom','@ffmpeg/ffmpeg'],
   banner:{js:`import {createRequire} from 'node:module';const require=createRequire(import.meta.url);`},
 });
-const {GeneralScriptComparison,GeneralScenarioBrief,GeneralScenarioWorkspace,DirectingEditor,D,ensureDirecting,recordCreativeVersion}=await import('../work/tests/general-scenario-layout.mjs');
+const {GeneralScriptComparison,GeneralScenarioBrief,FilmSettingsFields,GeneralScenarioWorkspace,DirectingEditor,D,ensureDirecting,recordCreativeVersion}=await import('../work/tests/general-scenario-layout.mjs');
 let writes=0,requests=0;
 const onAction=()=>{writes++;throw Error('Rendering must never save, choose, approve or generate');};
 const originalFetch=globalThis.fetch;
@@ -48,16 +49,18 @@ const workspaceProps=p=>({p,busy:false,submit:onAction,directingSubmit:onAction,
 try{
   const {p}=fixture(),before=structuredClone(p);
   const brief=render(GeneralScenarioBrief,{p,busy:false,submit:onAction,generateScenario:onAction});
-  const techStart=brief.indexOf('aria-label="Технические параметры фильма"');
   const creativeStart=brief.indexOf('aria-label="Жанр и режиссёрский подход"');
-  assert(techStart>=0&&creativeStart>techStart,'Technical settings precede the separate creative brief');
-  for(const name of ['Технические параметры фильма','Жанр и режиссёрский подход']){
+  assert(creativeStart>=0&&!brief.includes('Технические параметры фильма'),'Technical parameters live only in the film settings dialog');
+  for(const name of ['Жанр и режиссёрский подход']){
     const opening=brief.match(new RegExp(`<details\\b[^>]*aria-label="${name}"[^>]*>`))?.[0];
     assert(opening,`Missing details block: ${name}`);
     assert(!/\sopen(?:=|\s|>)/.test(opening),`${name} must be collapsed by default`);
   }
-  const tech=brief.slice(techStart,creativeStart),creative=brief.slice(creativeStart);
+  const tech=render(FilmSettingsFields,{p}),creative=brief.slice(creativeStart);
   for(const field of ['Режим хронометража','Ориентир длительности','Порядок производства','Опорные изображения'])assert(tech.includes(field),field);
+  assert.match(tech,/<option value="free" selected="">/,'Free duration is the default');
+  assert(tech.includes('По текущим планам')&&tech.includes('5 сек.'),'Computed duration is shown separately from target');
+  assert(tech.includes('Изменение формата потребует пересмотра'));
   for(const field of ['Жанр','Режиссёрский подход','Какое чувство должен вызвать фильм','Способ постановки фильма','Работа камеры','Дополнительные инструкции для сценаристов'])assert(creative.includes(field),field);
   assert(!tech.includes('general-scenario-genres'),'Creative editing must not return to the technical block');
   assert(!creative.includes('Режим хронометража'),'Runtime settings must stay in the technical block');
@@ -73,8 +76,9 @@ try{
   assert.equal((stage0.match(/aria-expanded="false"/g)||[]).length,3,'Optional sections begin collapsed');
   assert.equal((stage0.match(/aria-label="Сравнение общего сценария"/g)||[]).length,1,'There is one comparison workspace');
   assert.equal((stage0.match(/<section[^>]*aria-label="Что должен понять зритель"/g)||[]).length,1,'Meaning editor has one frame');
-  const comparisonAt=stage0.indexOf('id="general-script-comparison"'),techAt=stage0.indexOf('aria-label="Технические параметры фильма"'),creativeAt=stage0.indexOf('aria-label="Жанр, режиссёрский подход и выразительность"'),meaningAt=stage0.indexOf('aria-label="Что должен понять зритель"'),cinemaAt=stage0.indexOf('aria-label="Кинореференсы: учиться у мастеров"');
-  assert(comparisonAt>=0&&comparisonAt<techAt&&techAt<creativeAt&&creativeAt<meaningAt&&meaningAt<cinemaAt,'Comparison is followed by technical, creative, meaning and cinema controls');
+  const comparisonAt=stage0.indexOf('id="general-script-comparison"'),creativeAt=stage0.indexOf('aria-label="Жанр, режиссёрский подход и выразительность"'),meaningAt=stage0.indexOf('aria-label="Что должен понять зритель"'),cinemaAt=stage0.indexOf('aria-label="Кинореференсы: учиться у мастеров"');
+  assert(comparisonAt>=0&&comparisonAt<creativeAt&&creativeAt<meaningAt&&meaningAt<cinemaAt,'Comparison is followed by creative, meaning and cinema controls');
+  for(const removed of ['Творческое задание · технические параметры','Режим хронометража','Ориентир длительности','Порядок производства','Опорные изображения'])assert(!stage0.includes(removed),`Technical field leaked into screenplay workspace: ${removed}`);
   assert.equal((stage0.match(/>Сгенерировать новый сценарий<\/button>/g)||[]).length,1,'One main generation action');
   assert(stage0.includes('Исходник для нового сценария'),'Generation source is independent of compared panes');
   assert(!stage0.includes('Карточки вариантов'),'Legacy variant cards are removed from screenplay workspace');
@@ -107,6 +111,9 @@ try{
   assert(blankWorkspace.includes('Не используется'));
   assert.match(blankWorkspace,/<button[^>]*disabled=""[^>]*>Сгенерировать новый сценарий<\/button>/,'Empty project cannot launch a request before source text');
   assert.deepEqual(blank,blankBefore,'Opening an old project cannot create a directing state');
+  const blankSettings=render(FilmSettingsFields,{p:blank});
+  assert(blankSettings.includes('После разработки планов'));
+  assert.deepEqual(blank,blankBefore,'Opening settings does not initialize directing or save defaults');
   const only=structuredClone(p);only.items.find(i=>i.stage===0).variants.splice(1);
   assert(render(GeneralScriptComparison,{...comparisonProps,p:only}).includes('Пока сохранён один вариант'));
   const multiple=structuredClone(p),sourceItem=multiple.items.find(i=>i.stage===0);
@@ -128,6 +135,7 @@ try{
   // Studio is large and owns live queries: check its real render order and routing without mounting providers.
   const studio=await readFile('app/studio.tsx','utf8');
   assert(studio.includes('{step===0&&<GeneralScenarioWorkspace'),'Studio uses the unified screenplay workspace');
+  assert(studio.includes('<FilmSettingsFields p={p} busy={busy}/>'),'Settings dialog contains all technical parameters');
   assert(studio.includes('{[12,4].includes(step)&&<DirectingEditor'),'Later scene and shot editors remain separate');
   assert(!studio.includes('{step===0&&<CinemaReferencesPanel'),'No second screenplay cinema panel');
   assert.match(studio,/\{\[1,4\]\.includes\(step\)&&<TabsContent value="compare"/,'The old compare tab remains for other stages only');
